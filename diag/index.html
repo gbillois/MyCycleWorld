@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MyCycleWorld · Diagnostic</title>
+  <meta name="description" content="Teste ton home trainer, ta ceinture cardio et tes manettes Zwift Play directement dans le navigateur.">
+  <link rel="stylesheet" href="diag.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">🚲</span>
+      <div>
+        <h1>MyCycleWorld <span class="muted">· diagnostic</span></h1>
+        <p class="muted small">Vérifie que ton matériel parle bien au navigateur avant de passer au jeu.</p>
+      </div>
+    </div>
+    <div class="top-actions">
+      <a id="demoLink" class="btn ghost" href="?demo=1">Mode démo</a>
+      <button id="copyReport" class="btn primary">📋 Copier le rapport</button>
+    </div>
+  </header>
+
+  <div id="demoBanner" class="banner demo" hidden>
+    Mode démo : les appareils sont simulés. <a href="./">Revenir au vrai Bluetooth</a>
+  </div>
+  <div id="compatBanner" class="banner bad" hidden></div>
+
+  <main>
+    <section class="card checklist-card">
+      <h2>Bilan</h2>
+      <p class="muted small">Connecte chaque appareil, appuie sur les boutons, pédale un peu. Quand c'est fini, clique sur « Copier le rapport » et envoie le texte.</p>
+      <ul id="checklist" class="checklist"></ul>
+    </section>
+
+    <section class="card" id="trainerCard">
+      <div class="card-head">
+        <h2>🏋️ Home trainer</h2>
+        <span class="pill" id="trainerStatus">non connecté</span>
+      </div>
+      <div class="row wrap">
+        <button class="btn primary" id="trainerConnect">Connecter le home trainer</button>
+        <button class="btn ghost" id="trainerReconnect" hidden>Reconnecter</button>
+        <label class="check small"><input type="checkbox" id="trainerAll"> afficher tous les appareils</label>
+      </div>
+      <p class="small muted" id="trainerInfo"></p>
+      <div class="metrics">
+        <div class="metric"><span class="value" id="mPower">--</span><span class="unit">W</span><span class="label">Puissance <em id="srcPower"></em></span></div>
+        <div class="metric"><span class="value" id="mCadence">--</span><span class="unit">rpm</span><span class="label">Cadence <em id="srcCadence"></em></span></div>
+        <div class="metric"><span class="value" id="mSpeed">--</span><span class="unit">km/h</span><span class="label">Vitesse trainer</span></div>
+        <div class="metric"><span class="value" id="mHrTrainer">--</span><span class="unit">bpm</span><span class="label">Cardio (via trainer)</span></div>
+      </div>
+      <canvas id="powerChart" class="chart" height="70" aria-label="Courbe de puissance des 60 dernières secondes"></canvas>
+
+      <div class="sub">
+        <h3>Résistance : terrain + vitesses virtuelles</h3>
+        <div class="grade-grid">
+          <div>
+            <label for="terrain" class="small">Pente du terrain : <strong id="terrainVal">0 %</strong></label>
+            <input type="range" id="terrain" min="-10" max="20" step="0.5" value="0">
+            <div class="row wrap tight" id="gradePresets">
+              <button class="btn chip" data-grade="-5">Descente −5 %</button>
+              <button class="btn chip" data-grade="0">Plat</button>
+              <button class="btn chip" data-grade="3">Faux plat 3 %</button>
+              <button class="btn chip" data-grade="8">Montée 8 %</button>
+              <button class="btn chip" data-grade="15">Mur 15 %</button>
+            </div>
+            <label for="difficulty" class="small">Difficulté du trainer : <strong id="difficultyVal">100 %</strong></label>
+            <input type="range" id="difficulty" min="0" max="100" step="5" value="100">
+            <label for="gearStep" class="small">Effet d'une vitesse</label>
+            <select id="gearStep">
+              <option value="0.5">0,5 % de pente par vitesse</option>
+              <option value="1" selected>1 % de pente par vitesse</option>
+              <option value="1.5">1,5 % de pente par vitesse</option>
+              <option value="2">2 % de pente par vitesse</option>
+            </select>
+          </div>
+          <div class="gearbox">
+            <span class="small muted">Vitesse virtuelle</span>
+            <div class="gear-row">
+              <button class="btn round" id="gearDown" aria-label="Vitesse moins">−</button>
+              <span class="gear" id="gearVal">12</span>
+              <button class="btn round" id="gearUp" aria-label="Vitesse plus">+</button>
+            </div>
+            <div class="gear-bar" id="gearBar"></div>
+            <span class="small muted">touches <kbd>-</kbd> / <kbd>=</kbd> ou boutons latéraux Zwift Play</span>
+            <div class="sent">Pente envoyée au trainer : <strong id="sentGrade">--</strong></div>
+            <div class="small muted" id="cpResult"></div>
+          </div>
+        </div>
+        <div class="row wrap">
+          <button class="btn warn" id="bananaTest">🍌 Test peau de banane (+10 % pendant 3 s)</button>
+          <span class="spacer"></span>
+          <label class="small" for="ergWatts">ERG</label>
+          <input type="number" id="ergWatts" value="150" min="0" max="1500" step="10" class="num"> W
+          <button class="btn ghost" id="ergOn">Activer ERG</button>
+          <button class="btn ghost" id="ergOff" hidden>Revenir en mode pente</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" id="hrCard">
+      <div class="card-head">
+        <h2>❤️ Ceinture cardio</h2>
+        <span class="pill" id="hrStatus">non connectée</span>
+      </div>
+      <div class="row wrap">
+        <button class="btn primary" id="hrConnect">Connecter la ceinture</button>
+        <button class="btn ghost" id="hrReconnect" hidden>Reconnecter</button>
+      </div>
+      <p class="small muted" id="hrInfo">Pense à humidifier les électrodes. Si elle n'apparaît pas, elle est peut-être déjà connectée à une autre appli.</p>
+      <div class="metrics one">
+        <div class="metric"><span class="value heart" id="mHr">--</span><span class="unit">bpm</span><span class="label" id="hrContact"></span></div>
+      </div>
+    </section>
+
+    <section class="card" id="zwiftCard">
+      <div class="card-head">
+        <h2>🎮 Manettes Zwift Play</h2>
+        <span class="pill" id="zwiftStatus">0 / 2</span>
+      </div>
+      <p class="small muted">Chaque manette est un appareil séparé : clique deux fois (gauche puis droite). Appuie sur un bouton pour la réveiller. Zwift et Zwift Companion doivent être fermés.</p>
+      <div class="row wrap">
+        <button class="btn primary" id="zwiftConnect">Connecter une manette</button>
+        <label class="check small"><input type="checkbox" id="zwiftAll"> afficher tous les appareils</label>
+      </div>
+      <div id="controllers" class="controllers"></div>
+      <div class="pads">
+        <div class="pad" id="padL">
+          <span class="pad-title">Gauche</span>
+          <div class="dpad">
+            <span class="btn-led" data-b="L_UP">▲</span>
+            <span class="btn-led" data-b="L_LEFT">◀</span>
+            <span class="btn-led" data-b="L_RIGHT">▶</span>
+            <span class="btn-led" data-b="L_DOWN">▼</span>
+          </div>
+          <div class="extras">
+            <span class="btn-led wide" data-b="L_SHIFT">latéral</span>
+            <span class="btn-led wide" data-b="L_ON">power</span>
+            <span class="btn-led wide" data-b="L_PADDLE">levier</span>
+          </div>
+          <div class="analog"><div class="analog-fill" id="analogL"></div></div>
+          <span class="small muted" id="analogLVal">levier : 0</span>
+        </div>
+        <div class="pad" id="padR">
+          <span class="pad-title">Droite</span>
+          <div class="dpad">
+            <span class="btn-led y" data-b="R_Y">Y</span>
+            <span class="btn-led z" data-b="R_Z">Z</span>
+            <span class="btn-led a" data-b="R_A">A</span>
+            <span class="btn-led b" data-b="R_B">B</span>
+          </div>
+          <div class="extras">
+            <span class="btn-led wide" data-b="R_SHIFT">latéral</span>
+            <span class="btn-led wide" data-b="R_ON">power</span>
+            <span class="btn-led wide" data-b="R_PADDLE">levier</span>
+          </div>
+          <div class="analog"><div class="analog-fill" id="analogR"></div></div>
+          <span class="small muted" id="analogRVal">levier : 0</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" id="keysCard">
+      <div class="card-head">
+        <h2>⌨️ Manettes → clavier</h2>
+        <button class="btn ghost small-btn" id="keymapReset">Par défaut</button>
+      </div>
+      <p class="small muted">Chaque bouton envoie une touche clavier, le jeu écoutera donc simplement le clavier. Teste ci-dessous : dirige le point avec ◀ ▶, il avance selon tes watts.</p>
+      <canvas id="miniRoad" class="road" height="120" aria-label="Mini route de test"></canvas>
+      <div class="lastkeys" id="lastKeys"><span class="muted small">Dernières touches reçues…</span></div>
+      <details>
+        <summary>Modifier l'association boutons → touches</summary>
+        <table class="keymap" id="keymapTable"></table>
+      </details>
+    </section>
+
+    <section class="card log-card">
+      <div class="card-head">
+        <h2>📜 Journal</h2>
+        <div class="row tight">
+          <label class="check small"><input type="checkbox" id="showDebug"> détails techniques</label>
+          <button class="btn ghost small-btn" id="downloadLog">Télécharger</button>
+          <button class="btn ghost small-btn" id="clearLogView">Vider l'affichage</button>
+        </div>
+      </div>
+      <pre id="log" class="log" aria-live="polite"></pre>
+    </section>
+  </main>
+
+  <footer class="muted small">
+    Fonctionne dans Chrome ou Edge (Windows, macOS, Android). Pas sur iPhone/iPad ni Firefox.
+    Protocole Zwift Play documenté par la communauté open source (voir README).
+  </footer>
+
+  <div id="toast" class="toast" hidden></div>
+  <script type="module" src="diag.js"></script>
+</body>
+</html>
