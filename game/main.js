@@ -9,6 +9,7 @@ import { VirtualGears } from '../src/core/gears.js';
 import { msToKmh } from '../src/core/physics.js';
 import { bluetoothAdvice } from '../src/core/platform.js';
 import { keepScreenOn } from '../src/core/wakelock.js';
+import { TouchControls, wantsTouch } from './touch.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -37,6 +38,11 @@ scene.add(sun);
 const track = new Track();
 const scenery = buildScenery(scene, track);
 const hud = new Hud(track);
+
+// Écran tactile : boutons à l'écran (ils envoient les mêmes touches que le clavier).
+const TOUCH = wantsTouch(params);
+const touch = TOUCH ? new TouchControls($('hud')) : null;
+if (TOUCH) document.body.classList.add('touch');
 
 function resize() {
   renderer.setSize(window.innerWidth, window.innerHeight, false);
@@ -159,6 +165,7 @@ function startRace() {
 function pause() {
   if (state !== 'race') return;
   state = 'paused';
+  touch?.releaseAll();
   keys.clear();
   show('pause');
 }
@@ -177,6 +184,7 @@ function showEnd() {
   }
   if (state !== 'race') return;
   state = 'end';
+  touch?.releaseAll();
   const rows = race.ranking().map((r) => ({ r, ...race.estimatedTime(r) }));
   rows.sort((a, b) => (a.estimated === b.estimated ? a.time - b.time : a.estimated ? 1 : -1));
   const best = rows[0].time;
@@ -224,7 +232,9 @@ function refreshDevices() {
   }
   $('modeHint').textContent = t.connected
     ? 'Le home trainer fournit la puissance. Pédale pour avancer !'
-    : 'Sans home trainer : maintiens la flèche ↑ pour pédaler (250 W simulés).';
+    : TOUCH
+      ? 'Sans home trainer : maintiens le bouton « Pédaler » à l’écran (250 W simulés).'
+      : 'Sans home trainer : maintiens la flèche ↑ pour pédaler (250 W simulés).';
 }
 devices.addEventListener('change', refreshDevices);
 
@@ -256,7 +266,7 @@ if (DEMO) {
   $('demoLink').href = './';
   $('diagLink').href = '../diag/?demo=1';
 } else if (!devices.bluetoothAvailable) {
-  $('btWarning').textContent = `${bluetoothAdvice()} Tu peux quand même jouer au clavier.`;
+  $('btWarning').textContent = `${bluetoothAdvice()} Tu peux quand même jouer ${TOUCH ? 'avec les boutons à l’écran' : 'au clavier'}.`;
   $('btWarning').hidden = false;
 }
 
@@ -411,6 +421,8 @@ function frame(nowMs) {
 
   if (state !== 'home') {
     const p = race.player;
+    touch?.setPedalVisible(!devices.trainerActive);
+    touch?.setItemReady(!!p.item);
     hud.update(
       {
         power: p.power,
@@ -432,6 +444,7 @@ function frame(nowMs) {
         draft: p.draft,
         offRoad: p.offRoad,
         keyboard: !devices.trainerActive,
+        touch: TOUCH,
       },
       race,
       nowMs,

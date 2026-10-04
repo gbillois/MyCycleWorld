@@ -269,3 +269,72 @@ kbd {
   .banner { font-size: 24px; }
   .banner.big { font-size: 64px; }
 }
+
+/* ---------- Commandes tactiles (mobile / tablette) ---------- */
+body.touch #scene { touch-action: none; }
+.tc-layer {
+  inset: 0;
+  pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.tc {
+  pointer-events: auto;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+  font: inherit;
+  font-weight: 800;
+  color: #fff;
+  background: rgba(16, 20, 28, 0.55);
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  transition: transform 0.06s, background 0.06s;
+}
+.tc.on { background: var(--accent); border-color: #fff; transform: scale(0.94); }
+.tc-left, .tc-right { position: absolute; bottom: calc(16px + env(safe-area-inset-bottom)); display: flex; gap: 14px; align-items: flex-end; }
+.tc-left { left: calc(16px + env(safe-area-inset-left)); }
+.tc-right { right: calc(16px + env(safe-area-inset-right)); flex-direction: column; align-items: flex-end; gap: 10px; }
+.tc-gears, .tc-actions { display: flex; gap: 10px; align-items: flex-end; }
+.tc.steer { width: 78px; height: 78px; font-size: 30px; }
+.tc.pedal { width: 100px; height: 100px; font-size: 15px; background: rgba(255, 90, 31, 0.55); }
+.tc.item { width: 70px; height: 70px; font-size: 13px; }
+.has-item .tc.item { border-color: #ffd23f; box-shadow: 0 0 16px rgba(255, 210, 63, 0.6); }
+.tc.gear { width: 52px; height: 52px; font-size: 26px; border-radius: 14px; }
+.tc.pause {
+  position: absolute;
+  top: calc(126px + env(safe-area-inset-top));
+  left: calc(14px + env(safe-area-inset-left));
+  width: 46px;
+  height: 46px;
+  font-size: 14px;
+  border-radius: 12px;
+}
+.no-pedal .tc.pedal { display: none; }
+
+/* Le tableau de bord se range au-dessus (portrait) ou entre (paysage) les boutons. */
+body.touch .hud-hint { display: none; }
+@media (orientation: portrait) {
+  body.touch .hud-dock { bottom: calc(200px + env(safe-area-inset-bottom)); }
+}
+@media (orientation: landscape) {
+  body.touch .hud-dock { left: 200px; right: 210px; bottom: calc(10px + env(safe-area-inset-bottom)); }
+  body.touch .hud-bottom { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
+  body.touch .m { padding: 2px 6px; }
+  body.touch .m b { font-size: 20px; }
+  body.touch .m.main b { font-size: 24px; }
+  body.touch .m span { font-size: 10px; letter-spacing: 0; }
+}
+@media (orientation: landscape) and (max-height: 500px) {
+  .tc.steer { width: 66px; height: 66px; }
+  .tc.pedal { width: 84px; height: 84px; }
+  .tc.item { width: 60px; height: 60px; }
+  .tc.gear { width: 46px; height: 46px; }
+  body.touch .minimap { width: 90px; height: 90px; }
+  body.touch .hud-dock { left: 170px; right: 190px; }
+  body.touch .m span, body.touch .m small, body.touch .m .gearbar { display: none; }
+}

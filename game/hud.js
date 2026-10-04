@@ -125,9 +125,9 @@ export class Hud {
       e.hEffects.innerHTML = html;
       this.lastBadges = html;
     }
-    e.hHint.textContent = d.keyboard
-      ? d.power < 5 && d.time > 0 ? 'Maintiens ↑ pour pédaler' : 'Mode clavier : ↑ pédaler · ← → se déplacer'
-      : '';
+    if (!d.keyboard) e.hHint.textContent = '';
+    else if (d.touch) e.hHint.textContent = d.power < 5 && d.time > 0 ? 'Maintiens « Pédaler » pour avancer' : '';
+    else e.hHint.textContent = d.power < 5 && d.time > 0 ? 'Maintiens ↑ pour pédaler' : 'Mode clavier : ↑ pédaler · ← → se déplacer';
   }
 
   flash(text, ms = 1500, cls = '') {
