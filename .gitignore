@@ -1,3 +1,4 @@
+<<<<<<< Updated upstream
 # macOS
 .DS_Store
 
@@ -30,3 +31,10 @@ Carthage/Build/
 AuthKey_*.p8
 .env
 .env.*
+=======
+.DS_Store
+ios/.build/
+ios/build/
+**/xcuserdata/
+*.xcuserstate
+>>>>>>> Stashed changes

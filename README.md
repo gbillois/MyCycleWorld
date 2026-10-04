@@ -34,3 +34,7 @@ Le protocole des manettes Zwift n'est pas documenté officiellement. Les informa
 [SwiftControl / BikeControl](https://github.com/jonasbark/swiftcontrol) (Jonas Bark),
 [zwiftplay](https://github.com/ajchellew/zwiftplay) (ajchellew) et le blog de Makinolo.
 Le code de ce dépôt est une implémentation originale (aucun code copié). Pour FTMS et l'approche des vitesses virtuelles : [qdomyos-zwift](https://github.com/cagnulein/qdomyos-zwift) et [Auuki](https://github.com/dvmarinoff/Auuki) comme références.
+
+## Application native iPhone / iPad
+
+Le port SwiftUI + CoreBluetooth se trouve dans [`ios/`](ios/README.md). Ouvrir `ios/MyCycleWorld.xcodeproj` dans Xcode. Le cockpit inclut un mode démo et le guide de livraison TestFlight est dans le README iOS.
