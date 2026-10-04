@@ -1,0 +1,32 @@
+# macOS
+.DS_Store
+
+# Node
+node_modules/
+
+# Xcode (compilation et réglages personnels)
+build/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+*.xccheckout
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Dépendances iOS régénérées par le CI
+Pods/
+.build/
+Carthage/Build/
+
+# Secrets : ne JAMAIS les committer (le dépôt est public)
+*.p12
+*.cer
+*.mobileprovision
+*.provisionprofile
+*.p8
+AuthKey_*.p8
+.env
+.env.*
