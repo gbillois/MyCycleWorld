@@ -319,7 +319,23 @@ body.touch #scene { touch-action: none; }
 /* Le tableau de bord se range au-dessus (portrait) ou entre (paysage) les boutons. */
 body.touch .hud-hint { display: none; }
 @media (orientation: portrait) {
-  body.touch .hud-dock { bottom: calc(200px + env(safe-area-inset-bottom)); }
+  /* Bandeau compact sous les cadres du haut : la route et les coureurs restent visibles. */
+  body.touch .hud-dock { left: 8px; right: 8px; top: calc(132px + env(safe-area-inset-top)); bottom: auto; }
+  body.touch .tc.pause { top: calc(192px + env(safe-area-inset-top)); }
+  body.touch .hud-bottom {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    width: 100%;
+    gap: 0;
+    padding: 4px 2px;
+    border-radius: 12px;
+  }
+  body.touch .m { display: flex; flex-direction: column; align-items: center; padding: 0 1px; text-align: center; }
+  body.touch .m b { font-size: 17px; line-height: 1.15; }
+  body.touch .m.main b { font-size: 19px; }
+  body.touch .m i { font-size: 9px; line-height: 1; }
+  body.touch .m span { font-size: 7.5px; letter-spacing: 0; line-height: 1.1; text-transform: uppercase; }
+  body.touch .m small, body.touch .m .gearbar { display: none; }
 }
 @media (orientation: landscape) {
   body.touch .hud-dock { left: 200px; right: 210px; bottom: calc(10px + env(safe-area-inset-bottom)); }
@@ -337,4 +353,19 @@ body.touch .hud-hint { display: none; }
   body.touch .minimap { width: 90px; height: 90px; }
   body.touch .hud-dock { left: 170px; right: 190px; }
   body.touch .m span, body.touch .m small, body.touch .m .gearbar { display: none; }
+}
+
+/* Petits écrans (iPhone SE, mini) : boutons un peu plus petits pour ne pas se chevaucher. */
+@media (max-width: 400px) {
+  .tc-left { gap: 10px; left: calc(10px + env(safe-area-inset-left)); }
+  .tc-right { right: calc(10px + env(safe-area-inset-right)); }
+  .tc-actions { gap: 8px; }
+  .tc.steer { width: 62px; height: 62px; font-size: 26px; }
+  .tc.pedal { width: 80px; height: 80px; font-size: 14px; }
+  .tc.item { width: 56px; height: 56px; font-size: 12px; }
+  .tc.gear { width: 46px; height: 46px; font-size: 22px; }
+}
+/* Décompte et messages au centre de la route, sous le bandeau (portrait tactile). */
+@media (orientation: portrait) {
+  body.touch .banner { top: 46%; }
 }
