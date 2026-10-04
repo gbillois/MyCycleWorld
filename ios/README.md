@@ -67,6 +67,10 @@ Pour tester ce soir, privilégier ton propre compte comme testeur interne. Le tr
 
 Sources Apple : [envoi des builds](https://developer.apple.com/help/app-store-connect/manage-builds/upload-builds/), [testeurs internes](https://developer.apple.com/help/app-store-connect/test-a-beta-version/add-internal-testers/), [TestFlight](https://developer.apple.com/help/app-store-connect/test-a-beta-version/testflight-overview/).
 
+### Livraison automatique
+
+Pour que chaque `push` sur `main` qui touche `ios/` parte tout seul sur TestFlight, voir [`XCODE_CLOUD.md`](XCODE_CLOUD.md) (réglage unique dans Xcode, dont le numéro de build à fixer avant le premier build cloud).
+
 ### Recette sur appareil réel
 
 - Refuser puis autoriser le Bluetooth dans Réglages ; vérifier le message affiché et relancer la recherche.
