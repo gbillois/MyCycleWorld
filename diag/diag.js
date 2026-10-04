@@ -170,7 +170,7 @@ trainer.addEventListener('connected', () => {
   const ctrl = trainer.canControl
     ? trainer.features?.targets?.includes('simulation (pente)') ? 'pilotable (pente + ERG)' : 'pilotable (simulation non annoncée, on essaie quand même)'
     : 'lecture seule';
-  $('trainerInfo').textContent = `${parts.join(' · ')} — ${ctrl}`;
+  $('trainerInfo').textContent = `${parts.join(' · ')} · ${ctrl}`;
   setCheck('trainer', 'ok', parts.join(' · '));
   if (!trainer.canControl) setCheck('control', 'bad', 'Pas de FTMS Control Point : résistance non pilotable');
   else applyGrade(true);
@@ -489,7 +489,7 @@ function showKey(e) {
 
 function renderKeymap() {
   const options = Object.entries(KEYS)
-    .map(([code, k]) => `<option value="${code}">${k.label}${ACTIONS[code] ? ' — ' + ACTIONS[code] : ''}</option>`)
+    .map(([code, k]) => `<option value="${code}">${k.label}${ACTIONS[code] ? ' : ' + ACTIONS[code] : ''}</option>`)
     .join('');
   $('keymapTable').innerHTML = Object.entries(BUTTONS)
     .map(([b, label]) => `<tr><td>${label}</td><td><select data-b="${b}">${options}</select></td></tr>`)
