@@ -7,13 +7,7 @@ import { realRequestDevice } from '../src/ble/gatt.js';
 import { createMockRequestDevice } from '../src/ble/mock.js';
 import { KeyEmitter, loadKeymap } from '../src/core/keymap.js';
 
-export function explainError(e) {
-  if (e?.name === 'NotFoundError' && /cancel/i.test(e.message)) return 'Sélection annulée.';
-  if (e?.name === 'NotFoundError') return `Aucun appareil choisi (${e.message}).`;
-  if (e?.name === 'SecurityError') return 'Bluetooth bloqué par le navigateur (page non sécurisée ou permission refusée).';
-  if (e?.name === 'NetworkError') return "Connexion impossible : l'appareil est peut-être déjà utilisé par une autre appli (Zwift ?).";
-  return e?.message || String(e);
-}
+export { explainError } from '../src/ble/errors.js';
 
 export class Devices extends EventTarget {
   constructor({ demo = false } = {}) {

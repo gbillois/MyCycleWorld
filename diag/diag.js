@@ -6,6 +6,9 @@ import { createMockRequestDevice } from '../src/ble/mock.js';
 import { onLog, formatEntry, logText, info, warn, error } from '../src/ble/log.js';
 import { VirtualGears } from '../src/core/gears.js';
 import { KeyEmitter, KEYS, ACTIONS, DEFAULT_KEYMAP, loadKeymap, saveKeymap } from '../src/core/keymap.js';
+import { explainError } from '../src/ble/errors.js';
+import { currentPlatform, bluetoothAdvice, BLUEFY_URL } from '../src/core/platform.js';
+import { keepScreenOn } from '../src/core/wakelock.js';
 
 const $ = (id) => document.getElementById(id);
 const DEMO = new URLSearchParams(location.search).has('demo');
@@ -62,14 +65,6 @@ function pill(el, text, cls = '') {
   el.className = `pill ${cls}`;
 }
 
-function explainError(e) {
-  if (e?.name === 'NotFoundError' && /cancel/i.test(e.message)) return 'Sélection annulée.';
-  if (e?.name === 'NotFoundError') return `Aucun appareil choisi (${e.message}).`;
-  if (e?.name === 'SecurityError') return 'Bluetooth bloqué par le navigateur (page non sécurisée ou permission refusée).';
-  if (e?.name === 'NetworkError') return `Connexion impossible : l'appareil est peut-être déjà connecté à une autre appli (Zwift ?). ${e.message}`;
-  return e?.message || String(e);
-}
-
 // ---------- Journal ----------
 
 const logEl = $('log');
@@ -116,17 +111,26 @@ async function checkBrowser() {
     return;
   }
   const s = await bluetoothSupport();
+  const p = currentPlatform();
   info('diag', `Navigateur : ${navigator.userAgent}`);
+  info('diag', `Plateforme : ${p.ios ? 'iPad/iPhone' : p.windows ? 'Windows' : p.android ? 'Android' : 'autre'} · navigateur : ${p.browser}`);
   info('diag', `Web Bluetooth : ${s.api ? 'oui' : 'non'} · contexte sécurisé : ${s.secure ? 'oui' : 'non'} · adaptateur : ${s.available === null ? '?' : s.available ? 'présent' : 'absent'}`);
   let msg = '';
   if (!s.secure) msg = 'La page doit être ouverte en https (ou sur localhost) pour accéder au Bluetooth.';
-  else if (!s.api) msg = 'Ce navigateur ne gère pas Web Bluetooth. Ouvre la page dans Chrome ou Edge (pas Firefox, pas Safari, pas iPhone).';
-  else if (s.available === false) msg = 'Aucun adaptateur Bluetooth détecté ou Bluetooth désactivé sur cet ordinateur.';
+  else if (!s.api) msg = bluetoothAdvice(p);
+  else if (s.available === false) msg = p.ios ? 'Bluetooth désactivé : Réglages → Bluetooth.' : 'Aucun adaptateur Bluetooth détecté ou Bluetooth désactivé sur cet ordinateur.';
   if (msg) {
     $('compatBanner').textContent = msg;
+    if (p.ios && !s.api) {
+      $('compatBanner').append(' ');
+      const a = document.createElement('a');
+      a.href = BLUEFY_URL;
+      a.textContent = 'Installer Bluefy (gratuit)';
+      $('compatBanner').append(a);
+    }
     $('compatBanner').hidden = false;
     setCheck('browser', 'bad', msg);
-  } else setCheck('browser', 'ok', s.available === null ? 'adaptateur non vérifiable' : '');
+  } else setCheck('browser', 'ok', [p.browser, s.available === null ? 'adaptateur non vérifiable' : ''].filter(Boolean).join(' · '));
 }
 
 // ---------- Home trainer ----------
@@ -595,11 +599,42 @@ $('copyReport').addEventListener('click', async () => {
   try {
     await navigator.clipboard.writeText(text);
     toast('Rapport copié ! Colle-le dans un message.');
+    return;
   } catch {
-    $('downloadLog').click();
-    toast('Copie impossible : le rapport a été téléchargé en fichier.');
+    /* presse-papiers refusé : on essaie autre chose */
+  }
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: 'Rapport MyCycleWorld', text });
+      return;
+    } catch (e) {
+      if (e?.name === 'AbortError') return;
+    }
+  }
+  showReportBox(text);
+});
+
+// Dernier recours : le rapport dans une zone de texte, à sélectionner et copier à la main.
+function showReportBox(text) {
+  $('reportText').value = text;
+  $('reportBox').hidden = false;
+  $('reportText').focus();
+  $('reportText').select();
+}
+$('reportClose').addEventListener('click', () => ($('reportBox').hidden = true));
+$('reportSelect').addEventListener('click', () => {
+  $('reportText').focus();
+  $('reportText').setSelectionRange(0, $('reportText').value.length);
+  try {
+    document.execCommand('copy');
+    toast('Rapport copié !');
+  } catch {
+    toast('Sélectionné : fais « Copier » avec le menu.');
   }
 });
+
+// Écran toujours allumé dès qu'on commence à connecter du matériel (tablette sur le vélo).
+for (const id of ['trainerConnect', 'hrConnect', 'zwiftConnect']) $(id).addEventListener('click', keepScreenOn);
 
 window.addEventListener('error', (e) => error('page', `${e.message} (${e.filename?.split('/').pop()}:${e.lineno})`));
 window.addEventListener('unhandledrejection', (e) => warn('page', `Promesse rejetée : ${e.reason?.message || e.reason}`));

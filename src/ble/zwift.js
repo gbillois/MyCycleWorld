@@ -22,7 +22,6 @@ import {
 } from './gatt.js';
 import { info, warn, debug } from './log.js';
 
-const ZWIFT_COMPANY_ID = 0x094a;
 const CHAR_ASYNC = '00000002-19ca-4651-86e5-fa29dcdd09d1';
 const CHAR_SYNC_RX = '00000003-19ca-4651-86e5-fa29dcdd09d1';
 const CHAR_SYNC_TX = '00000004-19ca-4651-86e5-fa29dcdd09d1';
@@ -168,7 +167,8 @@ export class ZwiftController extends EventTarget {
     const options = acceptAll
       ? { acceptAllDevices: true, optionalServices }
       : {
-          filters: [{ namePrefix: 'Zwift' }, { manufacturerData: [{ companyIdentifier: ZWIFT_COMPANY_ID }] }],
+          // Filtre par nom seulement : le filtre manufacturerData (0x094A) n'est pas compris par Bluefy sur iPad.
+          filters: [{ namePrefix: 'Zwift' }],
           optionalServices,
         };
     info('zwift', 'Ouverture du sélecteur Bluetooth (manette Zwift)...');
@@ -224,7 +224,7 @@ export class ZwiftController extends EventTarget {
     const c = this.syncRx;
     return this.queue.run(() => {
       debug(this.src, `→ ${hex(data)}`);
-      if (c.properties.writeWithoutResponse && c.writeValueWithoutResponse) return c.writeValueWithoutResponse(data);
+      if (c.properties?.writeWithoutResponse && c.writeValueWithoutResponse) return c.writeValueWithoutResponse(data);
       if (c.writeValueWithResponse) return c.writeValueWithResponse(data);
       return c.writeValue(data);
     });

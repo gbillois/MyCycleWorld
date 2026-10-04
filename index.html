@@ -51,30 +51,41 @@
     summary { cursor: pointer; font-weight: 600; }
     details p, details ul { margin-top: 8px; }
     footer { color: var(--muted); font-size: 0.85rem; text-align: center; margin-top: 28px; }
+    .switch { display: inline-flex; background: var(--chip); border: 1px solid var(--border); border-radius: 12px; padding: 4px; gap: 4px; margin-top: 14px; flex-wrap: wrap; }
+    .switch button { font: inherit; font-weight: 600; border: 0; background: transparent; color: var(--muted); padding: 8px 14px; border-radius: 9px; cursor: pointer; }
+    .switch button[aria-pressed="true"] { background: var(--card); color: var(--text); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15); }
+    body[data-platform="pc"] .only-ipad, body[data-platform="ipad"] .only-pc { display: none !important; }
+    .url-box { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+    .url-box code { font-size: 1rem; padding: 6px 10px; }
+    button.btn { font: inherit; font-weight: 600; cursor: pointer; }
   </style>
 </head>
-<body>
+<body data-platform="pc">
   <div class="wrap">
     <header>
       <h1>🚲 MyCycleWorld</h1>
-      <p>Le jeu de course façon kart sur ton vrai vélo. Avant de jouer, on vérifie que ton matériel parle bien au navigateur. Compte 10 minutes.</p>
+      <p>Le jeu de course façon kart sur ton vrai vélo. Avant de jouer, on vérifie que ton matériel parle bien à l'appareil. Compte 10 minutes.</p>
+      <div class="switch" role="group" aria-label="Choisis ton appareil">
+        <button type="button" data-set="pc" aria-pressed="true">💻 PC Windows</button>
+        <button type="button" data-set="ipad" aria-pressed="false">📱 iPad</button>
+      </div>
     </header>
 
     <section class="card">
-      <h2><span class="num">1</span> Vérification automatique de ton PC</h2>
-      <p>Cette page teste ton ordinateur en direct :</p>
+      <h2><span class="num">1</span> Vérification automatique <span class="only-pc">de ton PC</span><span class="only-ipad">de ta tablette</span></h2>
+      <p>Cette page teste ton appareil en direct :</p>
       <ul class="checks" id="checks">
         <li id="cBrowser"><span class="dot">…</span><span>Navigateur</span></li>
         <li id="cApi"><span class="dot">…</span><span>Web Bluetooth</span></li>
-        <li id="cAdapter"><span class="dot">…</span><span>Bluetooth du PC</span></li>
+        <li id="cAdapter"><span class="dot">…</span><span>Bluetooth de l'appareil</span></li>
         <li id="cSecure"><span class="dot">…</span><span>Connexion sécurisée (https)</span></li>
       </ul>
       <p id="verdict"></p>
     </section>
 
-    <section class="card">
+    <section class="card only-pc">
       <h2><span class="num">2</span> Préparer Windows 11 et Chrome</h2>
-      <p><strong>Chrome (ou Edge) à jour</strong> est obligatoire. Firefox, Opera GX, Brave et l'iPhone ne marchent pas.</p>
+      <p><strong>Chrome (ou Edge) à jour</strong> est obligatoire. Firefox, Opera GX et Brave ne marchent pas.</p>
       <p><strong>Web Bluetooth est déjà activé par défaut</strong> dans Chrome sur Windows 11 : il n'y a aucune option cachée à activer. Il faut juste que :</p>
       <ol>
         <li><strong>Le Bluetooth de Windows soit allumé</strong> : touche <kbd>Windows</kbd> → <em>Paramètres</em> → <em>Bluetooth et appareils</em> → interrupteur <em>Bluetooth</em> sur <strong>Activé</strong>.</li>
@@ -84,44 +95,66 @@
       <div class="tip">💡 PC fixe sans Bluetooth ? Il faut une petite clé USB Bluetooth (4.0 ou plus récente). Une clé ANT+ ne fonctionne pas avec le navigateur.</div>
     </section>
 
+    <section class="card only-ipad">
+      <h2><span class="num">2</span> Préparer l'iPad avec Bluefy</h2>
+      <p>Apple bloque le Bluetooth dans Safari (et dans Chrome sur iPad). La solution : <strong>Bluefy</strong>, un navigateur <strong>gratuit</strong> de l'App Store qui l'autorise.</p>
+      <ol>
+        <li><strong>Installe Bluefy</strong> depuis l'App Store :
+          <div class="cta"><a class="btn primary" id="bluefyLink" href="https://apps.apple.com/app/bluefy-web-ble-browser/id1492822055">⬇ Installer Bluefy (gratuit)</a></div>
+        </li>
+        <li><strong>Copie l'adresse du site</strong>, puis ouvre Bluefy et colle-la dans sa barre d'adresse :
+          <div class="url-box"><code id="siteUrl">gbillois.github.io/MyCycleWorld</code><button type="button" class="btn" id="copyUrl">📋 Copier l'adresse</button></div>
+          Ajoute-la en favori dans Bluefy pour la retrouver.</li>
+        <li>Quand Bluefy demande l'accès au Bluetooth, touche <strong>Autoriser</strong>. Si tu as refusé : <em>Réglages</em> de l'iPad → <em>Bluefy</em> → active <em>Bluetooth</em>.</li>
+        <li><strong>Bluetooth de l'iPad allumé</strong> : <em>Réglages</em> → <em>Bluetooth</em> → activé.</li>
+        <li><strong>Garde Bluefy au premier plan</strong> pendant que tu roules : si tu changes d'appli, l'iPad coupe la connexion. La page essaie de garder l'écran allumé ; sinon règle <em>Réglages</em> → <em>Luminosité et affichage</em> → <em>Verrouillage automatique</em> → <em>Jamais</em> le temps de la séance.</li>
+      </ol>
+      <div class="alert">⚠️ <strong>N'appaire pas</strong> le home trainer, la ceinture ou les manettes dans <em>Réglages</em> → <em>Bluetooth</em>. Bluefy s'y connecte directement. S'ils y apparaissent sous « Mes appareils » et que ça coince, touche ⓘ → <em>Oublier cet appareil</em>.</div>
+      <div class="tip">💡 Une tablette Android ? Pas besoin de Bluefy : Chrome suffit, suis les étapes « PC Windows ».</div>
+    </section>
+
     <section class="card">
       <h2><span class="num">3</span> Préparer le matériel</h2>
       <ol>
-        <li><strong>Ferme Zwift, Zwift Companion</strong> et toute appli de vélo (TrainerRoad, Wahoo, Rouvy, MyWhoosh...) sur le PC <strong>et sur le téléphone</strong>. Un appareil Bluetooth ne parle souvent qu'à une seule appli à la fois. Au besoin, coupe le Bluetooth du téléphone.</li>
+        <li><strong>Ferme Zwift, Zwift Companion</strong> et toute appli de vélo (TrainerRoad, Wahoo, Rouvy, MyWhoosh...) sur <span class="only-pc">le PC</span><span class="only-ipad">la tablette</span> <strong>et sur le téléphone</strong>. Un appareil Bluetooth ne parle souvent qu'à une seule appli à la fois. Au besoin, coupe le Bluetooth du téléphone.</li>
         <li><strong>Home trainer</strong> : branché, et donne quelques coups de pédale pour le réveiller.</li>
         <li><strong>Ceinture cardio</strong> : humidifie les électrodes et mets-la (elle ne s'allume qu'au contact de la peau).</li>
         <li><strong>Manettes Zwift Play</strong> : appuie sur un bouton de chacune pour les réveiller (la LED clignote).</li>
-        <li>Rapproche le PC du vélo (moins de 3 à 4 mètres, idéalement).</li>
+        <li class="only-pc">Rapproche le PC du vélo (moins de 3 à 4 mètres, idéalement).</li>
       </ol>
     </section>
 
     <section class="card">
       <h2><span class="num">4</span> Lancer le diagnostic</h2>
-      <p>Ouvre la page de diagnostic, puis dans l'ordre :</p>
+      <p>Ouvre la page de diagnostic<span class="only-ipad"> (dans Bluefy !)</span>, puis dans l'ordre :</p>
       <ol>
-        <li><strong>« Connecter le home trainer »</strong> : une fenêtre Chrome s'ouvre en haut de l'écran avec la liste des appareils. Choisis ton trainer puis clique <em>Associer</em>. Pédale : les watts et la cadence doivent bouger.</li>
-        <li>Toujours dans le bloc trainer : clique sur <strong>« Montée 8 % »</strong> puis <strong>« Mur 15 % »</strong>. Tu dois sentir la résistance augmenter. Essaie les vitesses <kbd>−</kbd> / <kbd>+</kbd>, puis le bouton <strong>🍌 Test peau de banane</strong>.</li>
+        <li><strong>« Connecter le home trainer »</strong> : une fenêtre s'ouvre avec la liste des appareils<span class="only-pc"> (en haut de l'écran dans Chrome)</span>. Choisis ton trainer puis valide<span class="only-pc"> avec <em>Associer</em></span>. Pédale : les watts et la cadence doivent bouger.</li>
+        <li>Toujours dans le bloc trainer : touche <strong>« Montée 8 % »</strong> puis <strong>« Mur 15 % »</strong>. Tu dois sentir la résistance augmenter. Essaie les vitesses <kbd>−</kbd> / <kbd>+</kbd>, puis le bouton <strong>🍌 Test peau de banane</strong>.</li>
         <li><strong>« Connecter la ceinture »</strong> : choisis-la dans la liste, les battements s'affichent.</li>
         <li><strong>« Connecter une manette »</strong> : choisis une <em>Zwift Play</em>. <strong>Recommence une 2e fois</strong> pour l'autre manette (chaque côté est un appareil séparé). Appuie sur tous les boutons, tire les leviers : les ronds s'allument à l'écran. Essaie <em>Vibrer</em>.</li>
         <li>Les boutons latéraux des manettes doivent changer la vitesse virtuelle, et ◀ ▶ doivent diriger le petit point sur la mini route.</li>
-        <li>Clique sur <strong>« 📋 Copier le rapport »</strong> en haut à droite et <strong>colle le texte dans un message</strong> à ton frère. Même si tout est vert, le rapport est utile !</li>
+        <li>Touche <strong>« 📋 Copier le rapport »</strong> en haut et <strong>colle le texte dans un message</strong> à ton frère. <span class="only-ipad">Si la copie est bloquée, une fenêtre s'ouvre avec le texte : « Tout sélectionner », puis « Copier ». </span>Même si tout est vert, le rapport est utile !</li>
       </ol>
       <div class="cta">
         <a class="btn primary" href="diag/">▶ Ouvrir le diagnostic</a>
         <a class="btn" href="diag/?demo=1">Voir en mode démo (sans vélo)</a>
       </div>
-
-      <div class="tip">💡 Une liste vide dans la fenêtre Chrome ? Coche « afficher tous les appareils » sous le bouton, puis réessaie. Le rapport dira ce que l'appareil propose.</div>
+      <div class="tip">💡 Une liste vide dans la fenêtre de choix ? Coche « afficher tous les appareils » sous le bouton, puis réessaie. Le rapport dira ce que l'appareil propose.</div>
     </section>
 
     <section class="card">
       <h2><span class="num">5</span> Si ça coince</h2>
       <details>
         <summary>La fenêtre de choix Bluetooth ne s'ouvre pas, ou dit que le Bluetooth est indisponible</summary>
-        <ul>
+        <ul class="only-pc">
           <li>Vérifie l'étape 2 (Bluetooth Windows activé, autorisation dans Chrome).</li>
           <li>Ferme complètement Chrome (toutes les fenêtres) puis rouvre-le.</li>
           <li>Mets Chrome à jour : <code class="copy">chrome://settings/help</code>.</li>
+        </ul>
+        <ul class="only-ipad">
+          <li>Vérifie que la page est bien ouverte <strong>dans Bluefy</strong>, pas dans Safari.</li>
+          <li><em>Réglages</em> → <em>Bluefy</em> → <em>Bluetooth</em> doit être activé, et le Bluetooth de l'iPad allumé.</li>
+          <li>Ferme Bluefy (balaye-le vers le haut dans le sélecteur d'applis) puis rouvre-le.</li>
         </ul>
       </details>
       <details>
@@ -135,9 +168,10 @@
       <details>
         <summary>« Connexion impossible » ou déconnexion juste après</summary>
         <ul>
-          <li>Réessaie une ou deux fois, Windows rate parfois la première connexion.</li>
-          <li>Si l'appareil est appairé dans les paramètres Windows, supprime-le de Windows (voir l'encadré de l'étape 2).</li>
-          <li>Éteins/rallume le Bluetooth de Windows.</li>
+          <li>Réessaie une ou deux fois, la première connexion rate parfois.</li>
+          <li>Si l'appareil est appairé dans les réglages Bluetooth du système, supprime-le (voir l'encadré de l'étape 2).</li>
+          <li>Éteins/rallume le Bluetooth<span class="only-pc"> de Windows</span><span class="only-ipad"> de l'iPad</span>.</li>
+          <li class="only-ipad">Bluefy est-il resté au premier plan ? Changer d'appli coupe la connexion.</li>
         </ul>
       </details>
       <details>
@@ -171,79 +205,109 @@
         <a class="btn primary" href="game/">🏁 Jouer au prototype</a>
         <a class="btn" href="game/?demo=1">Jouer en mode démo</a>
       </div>
-      <div class="tip">💡 Sans vélo, maintiens la flèche ↑ du clavier pour pédaler.</div>
+      <div class="tip only-pc">💡 Sans vélo, maintiens la flèche ↑ du clavier pour pédaler.</div>
+      <div class="tip only-ipad">💡 Sur iPad, le jeu se pilote avec les manettes Zwift Play (pas de clavier).</div>
     </section>
 
     <footer>
-      Fonctionne aussi sur Mac et Android avec Chrome. Pas sur iPhone/iPad (Apple bloque Web Bluetooth).<br>
-      Aucune donnée n'est envoyée sur Internet : tout reste dans ton navigateur.
+      Fonctionne sur PC, Mac et Android avec Chrome ou Edge, et sur iPad avec l'appli gratuite Bluefy.<br>
+      Aucune donnée n'est envoyée sur Internet : tout reste dans ton appareil.
     </footer>
   </div>
 
-  <script>
-    (async () => {
-      const set = (id, state, title, detail) => {
-        const li = document.getElementById(id);
-        li.className = state;
-        li.querySelector('.dot').textContent = { ok: '✓', warn: '!', bad: '✕' }[state];
-        li.lastElementChild.innerHTML = `${title}${detail ? `<small>${detail}</small>` : ''}`;
-      };
-      const ua = navigator.userAgent;
-      const brands = (navigator.userAgentData?.brands || []).map((b) => b.brand);
-      const isEdge = /Edg\//.test(ua);
-      const isChrome = brands.includes('Google Chrome') || (/Chrome\//.test(ua) && !isEdge && !/OPR\//.test(ua));
-      const isIOS = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-      const major = Number((ua.match(/(?:Chrome|Edg)\/(\d+)/) || [])[1] || 0);
-      let allGood = true;
+  <script type="module">
+    import { currentPlatform, BLUEFY_URL } from './src/core/platform.js';
 
-      if (isIOS) {
-        set('cBrowser', 'bad', 'iPhone / iPad détecté', 'Apple bloque Web Bluetooth : utilise un PC Windows, un Mac ou un Android avec Chrome.');
-        allGood = false;
-      } else if (isChrome || isEdge) {
-        const name = isEdge ? 'Microsoft Edge' : 'Google Chrome';
-        if (major && major < 120) {
-          set('cBrowser', 'warn', `${name} ${major}`, 'Version ancienne : mets à jour via chrome://settings/help');
-        } else set('cBrowser', 'ok', `${name}${major ? ' ' + major : ''}`);
-      } else {
-        set('cBrowser', 'bad', 'Navigateur non compatible', 'Ouvre cette page dans Google Chrome ou Microsoft Edge.');
+    const p = currentPlatform();
+    const $ = (id) => document.getElementById(id);
+
+    // Sélecteur PC / iPad, choisi automatiquement.
+    const setPlatform = (name) => {
+      document.body.dataset.platform = name;
+      document.querySelectorAll('.switch button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.set === name)));
+    };
+    setPlatform(p.ios ? 'ipad' : 'pc');
+    document.querySelectorAll('.switch button').forEach((b) => b.addEventListener('click', () => setPlatform(b.dataset.set)));
+
+    const set = (id, state, title, detail) => {
+      const li = $(id);
+      li.className = state;
+      li.querySelector('.dot').textContent = { ok: '✓', warn: '!', bad: '✕' }[state];
+      li.lastElementChild.innerHTML = `${title}${detail ? `<small>${detail}</small>` : ''}`;
+    };
+    let allGood = true;
+
+    if (p.ios) {
+      if (p.hasBluetooth) set('cBrowser', 'ok', 'Bluefy sur iPad');
+      else {
+        set('cBrowser', 'bad', 'Safari sur iPad', `Apple y bloque le Bluetooth : <a href="${BLUEFY_URL}">installe Bluefy (gratuit)</a> et ouvre cette page dedans (étape 2).`);
         allGood = false;
       }
+    } else if (p.browser === 'Chrome' || p.browser === 'Edge') {
+      const name = p.browser === 'Edge' ? 'Microsoft Edge' : 'Google Chrome';
+      if (p.major && p.major < 120) set('cBrowser', 'warn', `${name} ${p.major}`, 'Version ancienne : mets à jour via chrome://settings/help');
+      else set('cBrowser', 'ok', `${name}${p.major ? ' ' + p.major : ''}`);
+    } else {
+      set('cBrowser', 'bad', 'Navigateur non compatible', 'Ouvre cette page dans Google Chrome ou Microsoft Edge.');
+      allGood = false;
+    }
 
-      if (!window.isSecureContext) {
-        set('cSecure', 'bad', 'Page non sécurisée', 'Il faut ouvrir la page en https://');
-        allGood = false;
-      } else set('cSecure', 'ok', 'Connexion sécurisée');
+    if (!window.isSecureContext) {
+      set('cSecure', 'bad', 'Page non sécurisée', 'Il faut ouvrir la page en https://');
+      allGood = false;
+    } else set('cSecure', 'ok', 'Connexion sécurisée');
 
-      if (!navigator.bluetooth) {
-        set('cApi', 'bad', 'Web Bluetooth indisponible', isChrome || isEdge
-          ? 'Inhabituel dans Chrome : vérifie que tu n\'es pas dans une version d\'entreprise verrouillée, ou mets Chrome à jour.'
+    if (!navigator.bluetooth) {
+      set('cApi', 'bad', 'Web Bluetooth indisponible', p.ios
+        ? 'Normal dans Safari : il faut Bluefy.'
+        : p.browser === 'Chrome' || p.browser === 'Edge'
+          ? 'Inhabituel dans Chrome : mets Chrome à jour, ou vérifie que ce n\'est pas une version d\'entreprise verrouillée.'
           : 'Ce navigateur ne le gère pas.');
-        set('cAdapter', 'warn', 'Bluetooth du PC', 'Impossible à vérifier sans Web Bluetooth.');
+      set('cAdapter', 'warn', 'Bluetooth de l\'appareil', 'Impossible à vérifier sans Web Bluetooth.');
+      allGood = false;
+    } else {
+      set('cApi', 'ok', 'Web Bluetooth disponible');
+      let available = null;
+      try { available = navigator.bluetooth.getAvailability ? await navigator.bluetooth.getAvailability() : null; } catch { available = null; }
+      if (available === true) set('cAdapter', 'ok', 'Bluetooth détecté et allumé');
+      else if (available === false) {
+        set('cAdapter', 'bad', 'Bluetooth éteint ou absent', p.ios
+          ? 'Allume-le : Réglages → Bluetooth, et autorise Bluefy : Réglages → Bluefy → Bluetooth.'
+          : 'Allume-le : Paramètres Windows → Bluetooth et appareils → Bluetooth Activé. PC fixe : il faut peut-être une clé USB Bluetooth.');
         allGood = false;
-      } else {
-        set('cApi', 'ok', 'Web Bluetooth disponible');
-        let available = null;
-        try { available = await navigator.bluetooth.getAvailability(); } catch { available = null; }
-        if (available === true) set('cAdapter', 'ok', 'Bluetooth du PC détecté et allumé');
-        else if (available === false) {
-          set('cAdapter', 'bad', 'Bluetooth éteint ou absent', 'Allume-le : Paramètres Windows → Bluetooth et appareils → Bluetooth Activé. PC fixe : il faut peut-être une clé USB Bluetooth.');
-          allGood = false;
-        } else set('cAdapter', 'warn', 'Bluetooth du PC', 'Impossible à vérifier automatiquement : la fenêtre de connexion le dira.');
-      }
+      } else set('cAdapter', 'warn', 'Bluetooth de l\'appareil', 'Impossible à vérifier automatiquement : la fenêtre de connexion le dira.');
+    }
 
-      document.getElementById('verdict').textContent = allGood
-        ? '✅ Ton PC est prêt. Passe aux étapes suivantes.'
+    $('verdict').textContent = allGood
+      ? '✅ Ton appareil est prêt. Passe aux étapes suivantes.'
+      : p.ios && !p.hasBluetooth
+        ? '❌ Tu es dans Safari : suis l\'étape 2 pour ouvrir cette page dans Bluefy.'
         : '❌ Corrige les points en rouge avant de continuer (voir étape 2).';
 
-      document.querySelectorAll('.copy').forEach((el) => el.addEventListener('click', async () => {
-        try {
-          await navigator.clipboard.writeText(el.textContent);
-          const old = el.textContent;
-          el.textContent = 'copié ✓ (colle-le dans la barre d\'adresse)';
-          setTimeout(() => (el.textContent = old), 1800);
-        } catch { /* copie manuelle */ }
-      }));
-    })();
+    // Adresse du site à coller dans Bluefy.
+    const siteUrl = location.origin + location.pathname.replace(/index\.html$/, '');
+    $('siteUrl').textContent = siteUrl.replace(/^https?:\/\//, '');
+    $('copyUrl').addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(siteUrl);
+        $('copyUrl').textContent = '✓ Copiée, colle-la dans Bluefy';
+      } catch {
+        const r = document.createRange();
+        r.selectNodeContents($('siteUrl'));
+        getSelection().removeAllRanges();
+        getSelection().addRange(r);
+        $('copyUrl').textContent = 'Sélectionnée : fais « Copier »';
+      }
+    });
+
+    document.querySelectorAll('.copy').forEach((el) => el.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(el.textContent);
+        const old = el.textContent;
+        el.textContent = 'copié ✓ (colle-le dans la barre d\'adresse)';
+        setTimeout(() => (el.textContent = old), 1800);
+      } catch { /* copie manuelle */ }
+    }));
   </script>
 </body>
 </html>

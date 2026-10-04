@@ -7,6 +7,8 @@ import { Devices, explainError } from './devices.js';
 import { Hud, formatTime, ordinal } from './hud.js';
 import { VirtualGears } from '../src/core/gears.js';
 import { msToKmh } from '../src/core/physics.js';
+import { bluetoothAdvice } from '../src/core/platform.js';
+import { keepScreenOn } from '../src/core/wakelock.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -144,6 +146,7 @@ function goHome() {
 }
 
 function startRace() {
+  keepScreenOn();
   clearTimeout(endTimer);
   document.activeElement?.blur?.();
   setupRace();
@@ -253,6 +256,7 @@ if (DEMO) {
   $('demoLink').href = './';
   $('diagLink').href = '../diag/?demo=1';
 } else if (!devices.bluetoothAvailable) {
+  $('btWarning').textContent = `${bluetoothAdvice()} Tu peux quand même jouer au clavier.`;
   $('btWarning').hidden = false;
 }
 

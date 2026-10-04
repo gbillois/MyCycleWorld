@@ -53,7 +53,14 @@ export async function connectGatt(device, src, attempts = 3) {
 
 // Liste tous les services/caractéristiques accessibles dans le journal. Renvoie les services.
 export async function dumpGatt(server, src) {
-  const services = await server.getPrimaryServices();
+  let services;
+  try {
+    services = await server.getPrimaryServices();
+  } catch (e) {
+    // Certains navigateurs (Bluefy sur iPad) ne savent pas lister tous les services : ce n'est pas bloquant.
+    warn(src, `Inventaire des services impossible (${e.message}), on continue.`);
+    return [];
+  }
   info(src, `${services.length} service(s) accessibles :`);
   for (const s of services) {
     let chars = [];
@@ -138,7 +145,7 @@ export class GattQueue {
 
 export async function writeChar(char, bytes) {
   const data = Uint8Array.from(bytes);
-  if (char.properties.write && char.writeValueWithResponse) return char.writeValueWithResponse(data);
-  if (char.properties.writeWithoutResponse && char.writeValueWithoutResponse) return char.writeValueWithoutResponse(data);
+  if (char.properties?.write && char.writeValueWithResponse) return char.writeValueWithResponse(data);
+  if (char.properties?.writeWithoutResponse && char.writeValueWithoutResponse) return char.writeValueWithoutResponse(data);
   return char.writeValue(data);
 }

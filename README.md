@@ -1,10 +1,10 @@
 # MyCycleWorld
 
-Un jeu de course façon kart sur un vrai vélo : home trainer connecté, ceinture cardio et manettes Zwift Play, directement dans le navigateur (Web Bluetooth, Chrome ou Edge).
+Un jeu de course façon kart sur un vrai vélo : home trainer connecté, ceinture cardio et manettes Zwift Play, directement dans le navigateur (Web Bluetooth : Chrome ou Edge sur PC/Mac/Android, l'appli gratuite [Bluefy](https://apps.apple.com/app/bluefy-web-ble-browser/id1492822055) sur iPad).
 
 **Site : https://gbillois.github.io/MyCycleWorld/**
 
-- `index.html` : guide pas à pas pour tout connecter (avec vérification automatique du PC)
+- `index.html` : guide pas à pas pour tout connecter, version PC Windows ou iPad (avec vérification automatique de l'appareil)
 - `diag/` : page de diagnostic du matériel (`?demo=1` pour des appareils simulés)
 - `src/ble/` : modules Bluetooth réutilisables
   - `trainer.js` : home trainer FTMS (puissance, cadence, vitesse, pente, ERG) avec repli sur Cycling Power

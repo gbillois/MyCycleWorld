@@ -191,10 +191,21 @@
   </main>
 
   <footer class="muted small">
-    Fonctionne dans Chrome ou Edge (Windows, macOS, Android). Pas sur iPhone/iPad ni Firefox.
+    Fonctionne dans Chrome ou Edge (Windows, macOS, Android) et sur iPad avec l'appli gratuite Bluefy. Pas dans Safari ni Firefox.
     Protocole Zwift Play documenté par la communauté open source (voir README).
   </footer>
 
+  <div id="reportBox" class="modal" hidden>
+    <div class="modal-card">
+      <h2>Rapport de diagnostic</h2>
+      <p class="small muted">La copie automatique est bloquée par ce navigateur. Touche « Tout sélectionner », puis « Copier », et colle le texte dans un message.</p>
+      <textarea id="reportText" readonly></textarea>
+      <div class="row wrap">
+        <button class="btn primary" id="reportSelect">Tout sélectionner</button>
+        <button class="btn ghost" id="reportClose">Fermer</button>
+      </div>
+    </div>
+  </div>
   <div id="toast" class="toast" hidden></div>
   <script type="module" src="diag.js"></script>
 </body>
