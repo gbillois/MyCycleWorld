@@ -3,25 +3,231 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MyCycleWorld</title>
+  <title>MyCycleWorld · Guide</title>
+  <meta name="description" content="Comment connecter ton home trainer, ta ceinture cardio et tes manettes Zwift Play à MyCycleWorld.">
   <style>
-    :root { --bg: #f4f5f7; --card: #fff; --text: #16181d; --muted: #646b78; --accent: #ff5a1f; --border: #e1e4ea; }
-    @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #0e1014; --card: #171a21; --text: #e8eaef; --muted: #949bab; --border: #2a2f3a; } }
-    :root[data-theme="dark"] { --bg: #0e1014; --card: #171a21; --text: #e8eaef; --muted: #949bab; --border: #2a2f3a; }
-    body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, sans-serif; display: grid; place-items: center; min-height: 100vh; padding: 16px; box-sizing: border-box; }
-    .card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 24px; max-width: 520px; width: 100%; }
-    h1 { margin: 0 0 4px; } p { color: var(--muted); }
-    a.btn { display: block; text-decoration: none; padding: 12px 16px; border-radius: 12px; margin-top: 10px; border: 1px solid var(--border); color: var(--text); }
-    a.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
-    a.btn small { display: block; opacity: 0.8; font-weight: 400; }
+    :root {
+      --bg: #f4f5f7; --card: #ffffff; --text: #16181d; --muted: #5d6472; --border: #e1e4ea;
+      --accent: #ff5a1f; --ok: #18a058; --warn: #b98500; --bad: #d93a3a; --chip: #eef0f4;
+      --tip-bg: #eaf4ff; --tip-text: #0f3d6e; --alert-bg: #fff3cd; --alert-text: #5c4400;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --bg: #0e1014; --card: #171a21; --text: #e8eaef; --muted: #9aa1b0; --border: #2a2f3a; --chip: #222733;
+        --tip-bg: #10243a; --tip-text: #b9dbff; --alert-bg: #3a2f0c; --alert-text: #ffe39a;
+      }
+    }
+    :root[data-theme="dark"] {
+      --bg: #0e1014; --card: #171a21; --text: #e8eaef; --muted: #9aa1b0; --border: #2a2f3a; --chip: #222733;
+      --tip-bg: #10243a; --tip-text: #b9dbff; --alert-bg: #3a2f0c; --alert-text: #ffe39a;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .wrap { max-width: 820px; margin: 0 auto; padding: 24px 16px 48px; }
+    header h1 { font-size: 1.8rem; margin: 0; }
+    header p { color: var(--muted); margin: 6px 0 0; }
+    h2 { font-size: 1.2rem; margin: 0 0 10px; display: flex; gap: 10px; align-items: center; }
+    .num { flex: none; width: 30px; height: 30px; border-radius: 50%; background: var(--accent); color: #fff; display: grid; place-items: center; font-size: 0.95rem; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 18px; margin-top: 16px; }
+    .card p { margin: 6px 0; }
+    ol, ul { padding-left: 22px; margin: 6px 0; }
+    li { margin: 4px 0; }
+    code, kbd { overflow-wrap: anywhere; font: 0.9em ui-monospace, "Cascadia Mono", Consolas, monospace; background: var(--chip); border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px; }
+    .copy { cursor: pointer; }
+    .muted { color: var(--muted); }
+    .tip { background: var(--tip-bg); color: var(--tip-text); border-radius: 10px; padding: 10px 14px; margin: 10px 0 0; font-size: 0.95rem; }
+    .alert { background: var(--alert-bg); color: var(--alert-text); border-radius: 10px; padding: 10px 14px; margin: 10px 0 0; font-size: 0.95rem; }
+    .cta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+    .btn { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; padding: 12px 18px; border-radius: 12px; border: 1px solid var(--border); color: var(--text); background: var(--chip); font-weight: 600; }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-size: 1.05rem; }
+    .checks { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 8px; }
+    .checks li { display: flex; gap: 10px; align-items: flex-start; margin: 0; }
+    .dot { flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-size: 0.8rem; font-weight: 700; background: var(--muted); margin-top: 1px; }
+    .ok .dot { background: var(--ok); } .warn .dot { background: var(--warn); } .bad .dot { background: var(--bad); }
+    .checks small { display: block; color: var(--muted); }
+    #verdict { font-weight: 600; margin-top: 12px; }
+    details { border-top: 1px solid var(--border); padding: 10px 0; }
+    details:first-of-type { border-top: 0; }
+    summary { cursor: pointer; font-weight: 600; }
+    details p, details ul { margin-top: 8px; }
+    footer { color: var(--muted); font-size: 0.85rem; text-align: center; margin-top: 28px; }
   </style>
 </head>
 <body>
-  <div class="card">
-    <h1>🚲 MyCycleWorld</h1>
-    <p>Un jeu de course façon kart, sur ton vrai vélo : home trainer, cardio et manettes Zwift Play.</p>
-    <a class="btn primary" href="diag/">Diagnostic du matériel<small>Vérifie trainer, cardio et manettes</small></a>
-    <a class="btn" href="diag/?demo=1">Diagnostic en mode démo<small>Appareils simulés, sans vélo</small></a>
+  <div class="wrap">
+    <header>
+      <h1>🚲 MyCycleWorld</h1>
+      <p>Le jeu de course façon kart sur ton vrai vélo. Avant de jouer, on vérifie que ton matériel parle bien au navigateur. Compte 10 minutes.</p>
+    </header>
+
+    <section class="card">
+      <h2><span class="num">1</span> Vérification automatique de ton PC</h2>
+      <p>Cette page teste ton ordinateur en direct :</p>
+      <ul class="checks" id="checks">
+        <li id="cBrowser"><span class="dot">…</span><span>Navigateur</span></li>
+        <li id="cApi"><span class="dot">…</span><span>Web Bluetooth</span></li>
+        <li id="cAdapter"><span class="dot">…</span><span>Bluetooth du PC</span></li>
+        <li id="cSecure"><span class="dot">…</span><span>Connexion sécurisée (https)</span></li>
+      </ul>
+      <p id="verdict"></p>
+    </section>
+
+    <section class="card">
+      <h2><span class="num">2</span> Préparer Windows 11 et Chrome</h2>
+      <p><strong>Chrome (ou Edge) à jour</strong> est obligatoire. Firefox, Opera GX, Brave et l'iPhone ne marchent pas.</p>
+      <p><strong>Web Bluetooth est déjà activé par défaut</strong> dans Chrome sur Windows 11 : il n'y a aucune option cachée à activer. Il faut juste que :</p>
+      <ol>
+        <li><strong>Le Bluetooth de Windows soit allumé</strong> : touche <kbd>Windows</kbd> → <em>Paramètres</em> → <em>Bluetooth et appareils</em> → interrupteur <em>Bluetooth</em> sur <strong>Activé</strong>.</li>
+        <li><strong>Chrome ait le droit de demander le Bluetooth</strong> : colle <code class="copy" title="Cliquer pour copier">chrome://settings/content/bluetoothDevices</code> dans la barre d'adresse et vérifie que <em>« Les sites peuvent demander à se connecter à des appareils Bluetooth »</em> est coché. Vérifie aussi que ce site n'est pas dans la liste « Non autorisés ».</li>
+      </ol>
+      <div class="alert">⚠️ <strong>N'appaire pas</strong> le home trainer, la ceinture ou les manettes dans les paramètres Bluetooth de Windows. Le navigateur s'y connecte directement. S'ils sont déjà appairés dans Windows et que ça coince, supprime-les de la liste Windows (<em>Bluetooth et appareils</em> → <em>Appareils</em> → ⋯ → <em>Supprimer</em>).</div>
+      <div class="tip">💡 PC fixe sans Bluetooth ? Il faut une petite clé USB Bluetooth (4.0 ou plus récente). Une clé ANT+ ne fonctionne pas avec le navigateur.</div>
+    </section>
+
+    <section class="card">
+      <h2><span class="num">3</span> Préparer le matériel</h2>
+      <ol>
+        <li><strong>Ferme Zwift, Zwift Companion</strong> et toute appli de vélo (TrainerRoad, Wahoo, Rouvy, MyWhoosh...) sur le PC <strong>et sur le téléphone</strong>. Un appareil Bluetooth ne parle souvent qu'à une seule appli à la fois. Au besoin, coupe le Bluetooth du téléphone.</li>
+        <li><strong>Home trainer</strong> : branché, et donne quelques coups de pédale pour le réveiller.</li>
+        <li><strong>Ceinture cardio</strong> : humidifie les électrodes et mets-la (elle ne s'allume qu'au contact de la peau).</li>
+        <li><strong>Manettes Zwift Play</strong> : appuie sur un bouton de chacune pour les réveiller (la LED clignote).</li>
+        <li>Rapproche le PC du vélo (moins de 3 à 4 mètres, idéalement).</li>
+      </ol>
+    </section>
+
+    <section class="card">
+      <h2><span class="num">4</span> Lancer le diagnostic</h2>
+      <p>Ouvre la page de diagnostic, puis dans l'ordre :</p>
+      <ol>
+        <li><strong>« Connecter le home trainer »</strong> : une fenêtre Chrome s'ouvre en haut de l'écran avec la liste des appareils. Choisis ton trainer puis clique <em>Associer</em>. Pédale : les watts et la cadence doivent bouger.</li>
+        <li>Toujours dans le bloc trainer : clique sur <strong>« Montée 8 % »</strong> puis <strong>« Mur 15 % »</strong>. Tu dois sentir la résistance augmenter. Essaie les vitesses <kbd>−</kbd> / <kbd>+</kbd>, puis le bouton <strong>🍌 Test peau de banane</strong>.</li>
+        <li><strong>« Connecter la ceinture »</strong> : choisis-la dans la liste, les battements s'affichent.</li>
+        <li><strong>« Connecter une manette »</strong> : choisis une <em>Zwift Play</em>. <strong>Recommence une 2e fois</strong> pour l'autre manette (chaque côté est un appareil séparé). Appuie sur tous les boutons, tire les leviers : les ronds s'allument à l'écran. Essaie <em>Vibrer</em>.</li>
+        <li>Les boutons latéraux des manettes doivent changer la vitesse virtuelle, et ◀ ▶ doivent diriger le petit point sur la mini route.</li>
+        <li>Clique sur <strong>« 📋 Copier le rapport »</strong> en haut à droite et <strong>colle le texte dans un message</strong> à ton frère. Même si tout est vert, le rapport est utile !</li>
+      </ol>
+      <div class="cta">
+        <a class="btn primary" href="diag/">▶ Ouvrir le diagnostic</a>
+        <a class="btn" href="diag/?demo=1">Voir en mode démo (sans vélo)</a>
+      </div>
+      <div class="tip">💡 Une liste vide dans la fenêtre Chrome ? Coche « afficher tous les appareils » sous le bouton, puis réessaie. Le rapport dira ce que l'appareil propose.</div>
+    </section>
+
+    <section class="card">
+      <h2><span class="num">5</span> Si ça coince</h2>
+      <details>
+        <summary>La fenêtre de choix Bluetooth ne s'ouvre pas, ou dit que le Bluetooth est indisponible</summary>
+        <ul>
+          <li>Vérifie l'étape 2 (Bluetooth Windows activé, autorisation dans Chrome).</li>
+          <li>Ferme complètement Chrome (toutes les fenêtres) puis rouvre-le.</li>
+          <li>Mets Chrome à jour : <code class="copy">chrome://settings/help</code>.</li>
+        </ul>
+      </details>
+      <details>
+        <summary>Mon appareil n'apparaît pas dans la liste</summary>
+        <ul>
+          <li>Il est sans doute encore connecté à une autre appli (Zwift, Companion, téléphone). Ferme-la et attends 10 secondes.</li>
+          <li>Réveille-le (pédaler, appuyer sur un bouton, mettre la ceinture).</li>
+          <li>Coche « afficher tous les appareils ».</li>
+        </ul>
+      </details>
+      <details>
+        <summary>« Connexion impossible » ou déconnexion juste après</summary>
+        <ul>
+          <li>Réessaie une ou deux fois, Windows rate parfois la première connexion.</li>
+          <li>Si l'appareil est appairé dans les paramètres Windows, supprime-le de Windows (voir l'encadré de l'étape 2).</li>
+          <li>Éteins/rallume le Bluetooth de Windows.</li>
+        </ul>
+      </details>
+      <details>
+        <summary>Le trainer est connecté mais la résistance ne change pas</summary>
+        <ul>
+          <li>Regarde le bilan : « Le trainer accepte les changements de pente » doit être vert.</li>
+          <li>Pédale à au moins 60 tr/min : beaucoup de trainers ne freinent pas à l'arrêt.</li>
+          <li>Ferme toute autre appli qui pourrait garder le contrôle du trainer.</li>
+          <li>Envoie le rapport : il indique si ton modèle accepte la simulation de pente.</li>
+        </ul>
+      </details>
+      <details>
+        <summary>La manette Zwift Play est connectée mais les boutons ne font rien</summary>
+        <ul>
+          <li>Vérifie que Zwift et Zwift Companion sont bien fermés <strong>sur le téléphone aussi</strong>.</li>
+          <li>Appuie sur un bouton : la page indique alors si c'est la manette gauche ou droite.</li>
+          <li>Coche « détails techniques » dans le journal, appuie sur quelques boutons, puis envoie le rapport. C'est exactement ce qui permet de corriger.</li>
+        </ul>
+      </details>
+    </section>
+
+    <footer>
+      Fonctionne aussi sur Mac et Android avec Chrome. Pas sur iPhone/iPad (Apple bloque Web Bluetooth).<br>
+      Aucune donnée n'est envoyée sur Internet : tout reste dans ton navigateur.
+    </footer>
   </div>
+
+  <script>
+    (async () => {
+      const set = (id, state, title, detail) => {
+        const li = document.getElementById(id);
+        li.className = state;
+        li.querySelector('.dot').textContent = { ok: '✓', warn: '!', bad: '✕' }[state];
+        li.lastElementChild.innerHTML = `${title}${detail ? `<small>${detail}</small>` : ''}`;
+      };
+      const ua = navigator.userAgent;
+      const brands = (navigator.userAgentData?.brands || []).map((b) => b.brand);
+      const isEdge = /Edg\//.test(ua);
+      const isChrome = brands.includes('Google Chrome') || (/Chrome\//.test(ua) && !isEdge && !/OPR\//.test(ua));
+      const isIOS = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      const major = Number((ua.match(/(?:Chrome|Edg)\/(\d+)/) || [])[1] || 0);
+      let allGood = true;
+
+      if (isIOS) {
+        set('cBrowser', 'bad', 'iPhone / iPad détecté', 'Apple bloque Web Bluetooth : utilise un PC Windows, un Mac ou un Android avec Chrome.');
+        allGood = false;
+      } else if (isChrome || isEdge) {
+        const name = isEdge ? 'Microsoft Edge' : 'Google Chrome';
+        if (major && major < 120) {
+          set('cBrowser', 'warn', `${name} ${major}`, 'Version ancienne : mets à jour via chrome://settings/help');
+        } else set('cBrowser', 'ok', `${name}${major ? ' ' + major : ''}`);
+      } else {
+        set('cBrowser', 'bad', 'Navigateur non compatible', 'Ouvre cette page dans Google Chrome ou Microsoft Edge.');
+        allGood = false;
+      }
+
+      if (!window.isSecureContext) {
+        set('cSecure', 'bad', 'Page non sécurisée', 'Il faut ouvrir la page en https://');
+        allGood = false;
+      } else set('cSecure', 'ok', 'Connexion sécurisée');
+
+      if (!navigator.bluetooth) {
+        set('cApi', 'bad', 'Web Bluetooth indisponible', isChrome || isEdge
+          ? 'Inhabituel dans Chrome : vérifie que tu n\'es pas dans une version d\'entreprise verrouillée, ou mets Chrome à jour.'
+          : 'Ce navigateur ne le gère pas.');
+        set('cAdapter', 'warn', 'Bluetooth du PC', 'Impossible à vérifier sans Web Bluetooth.');
+        allGood = false;
+      } else {
+        set('cApi', 'ok', 'Web Bluetooth disponible');
+        let available = null;
+        try { available = await navigator.bluetooth.getAvailability(); } catch { available = null; }
+        if (available === true) set('cAdapter', 'ok', 'Bluetooth du PC détecté et allumé');
+        else if (available === false) {
+          set('cAdapter', 'bad', 'Bluetooth éteint ou absent', 'Allume-le : Paramètres Windows → Bluetooth et appareils → Bluetooth Activé. PC fixe : il faut peut-être une clé USB Bluetooth.');
+          allGood = false;
+        } else set('cAdapter', 'warn', 'Bluetooth du PC', 'Impossible à vérifier automatiquement : la fenêtre de connexion le dira.');
+      }
+
+      document.getElementById('verdict').textContent = allGood
+        ? '✅ Ton PC est prêt. Passe aux étapes suivantes.'
+        : '❌ Corrige les points en rouge avant de continuer (voir étape 2).';
+
+      document.querySelectorAll('.copy').forEach((el) => el.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(el.textContent);
+          const old = el.textContent;
+          el.textContent = 'copié ✓ (colle-le dans la barre d\'adresse)';
+          setTimeout(() => (el.textContent = old), 1800);
+        } catch { /* copie manuelle */ }
+      }));
+    })();
+  </script>
 </body>
 </html>
