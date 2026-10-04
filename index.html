@@ -284,8 +284,8 @@
         ? '❌ Tu es dans Safari : suis l\'étape 2 pour ouvrir cette page dans Bluefy.'
         : '❌ Corrige les points en rouge avant de continuer (voir étape 2).';
 
-    // Adresse du site à coller dans Bluefy.
-    const siteUrl = location.origin + location.pathname.replace(/index\.html$/, '');
+    // Adresse publique du site, à coller dans Bluefy (fixe : identique même en test local).
+    const siteUrl = 'https://gbillois.github.io/MyCycleWorld/';
     $('siteUrl').textContent = siteUrl.replace(/^https?:\/\//, '');
     $('copyUrl').addEventListener('click', async () => {
       try {
