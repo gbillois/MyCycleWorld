@@ -199,6 +199,8 @@ main {
 .metric em { font-style: normal; opacity: 0.8; }
 
 .chart, .road { width: 100%; display: block; border-radius: 10px; background: var(--chip); }
+.chart { height: 70px; }
+.road { height: 120px; }
 
 .grade-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 16px; margin-bottom: 12px; }
 .grade-grid label { display: block; margin-top: 8px; }
