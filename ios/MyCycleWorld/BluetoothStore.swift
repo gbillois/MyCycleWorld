@@ -9,13 +9,10 @@ private enum UUIDs {
     static let rx = CBUUID(string: "00000003-19CA-4651-86E5-FA29DCDD09D1")
     static let tx = CBUUID(string: "00000004-19CA-4651-86E5-FA29DCDD09D1")
     static let services = [ftms, cps, hr, zwift, zwift2, CBUUID(string: "180F"), CBUUID(string: "180A")]
+    static let trainerServices = [ftms, cps, hr, CBUUID(string: "180F"), CBUUID(string: "180A")]
+    static let controlPoint = CBUUID(string: "2AD9")
 }
 
-enum DeviceRole: String, CaseIterable, Identifiable {
-    case trainer = "Home trainer", heart = "Ceinture cardio", controller = "Manette Zwift"
-    var id: String { rawValue }
-    var icon: String { self == .trainer ? "bicycle" : self == .heart ? "heart.fill" : "gamecontroller.fill" }
-}
 struct DeviceRow: Identifiable {
     var id: UUID
     var name: String
@@ -37,7 +34,11 @@ private final class Connection {
     let peripheral: CBPeripheral
     var name: String
     var rssi: Int
+    /// Rôle choisi à la connexion ; `suggested` vient de l'annonce et du profil matériel.
     var role: DeviceRole?
+    var suggested: DeviceRole?
+    var advertised: [String] = []
+    var manufacturer: [UInt8] = []
     var state = "Disponible"
     var battery: Int?
     var chars: [CBUUID: CBCharacteristic] = [:]
@@ -58,6 +59,9 @@ private final class Connection {
 }
 
 final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeripheralDelegate {
+    private static let profileKey = "mycycleworld.hw"
+    static let pilotIdle = "Tester le pilotage"
+
     @Published private(set) var bluetoothState = "Bluetooth non démarré"
     @Published private(set) var poweredOn = false
     @Published private(set) var scanning = false
@@ -69,15 +73,28 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
     @Published private(set) var demo = false
     @Published private(set) var controlReady = false
     @Published private(set) var controlled = false
+    /// La machine a refusé la prise de contrôle (ou n'a pas répondu) : lecture seule jusqu'à la reconnexion.
+    @Published private(set) var readOnly = false
     @Published private(set) var simulationSupported = false
     @Published private(set) var ergSupported = false
     @Published private(set) var resistanceSupported = false
     @Published private(set) var powerRange = 0.0...1000.0
     @Published private(set) var resistanceRange = 0.0...100.0
+    /// Plage publiée par la machine (nil si elle ne la donne pas : le jeu suppose alors 0 à 20, comme le web).
+    @Published private(set) var resistanceLevels: LevelRange?
     @Published private(set) var gears = VirtualGears()
     @Published private(set) var controlStatus = "Connecte un home trainer pour commencer."
     @Published private(set) var lastAction = "Aucun bouton reçu"
     @Published private(set) var mode = "Simulation"
+    /// Profil matériel (Zwift, Technogym, BLE standard) : filtre de la liste et textes de l'onglet Appareils.
+    @Published private(set) var profile: HardwareProfile
+    /// Type de la machine connectée, d'après sa caractéristique de données.
+    @Published private(set) var machineKind: MachineKind?
+    @Published private(set) var trainerServices: [String] = []
+    @Published private(set) var trainerPackets = 0
+    @Published private(set) var trainerLastPacket: Date?
+    @Published private(set) var pilotStatus = BluetoothStore.pilotIdle
+    @Published private(set) var pilotRunning = false
     @Published var terrain = 0.0
     @Published var targetWatts = 150.0
     @Published var targetResistance = 10.0
@@ -90,36 +107,62 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
     private var scanTimer: Timer?
     private var tickTimer: Timer?
     private var commandTimer: Timer?
+    private var pilotTimer: Timer?
     private var queue = ControlQueue()
-    private var crank = CrankCadence()
-    private var ftmsPower = false, ftmsCadence = false
-    private var lastPower: Date?, lastCadence: Date?, lastSpeed: Date?, lastHeart: Date?
+    private var feed = TrainerFeed()
+    private var heart: Int?, lastHeart: Date?
+    private var gradeResistance = GradeResistance()
+    private var encoder = ResistanceEncoder()
+    private var lastSent: [UInt8]?
+    private var lastResistanceLevel: Double?
+    private var pilotResults: [UInt8] = []
+    private var dataSampler = PacketSampler(first: 5, every: 200)
     private var demoTick = 0
+    private var demoDistance = 0.0
     private var requestScan = false
     private var supportedPowerStep = 1.0, supportedResistanceStep = 0.1
     var activeConnectionCount: Int { devices.filter(\.connected).count }
-    var report: String { (["MyCycleWorld iOS 1.0 (1)", "Mode : \(demo ? "DÉMO" : "Bluetooth réel")", bluetoothState] + logs).joined(separator: "\n") }
+    var trainerRow: DeviceRow? { devices.first { $0.role == .trainer && $0.connected } }
+    /// Comment la pente du jeu est appliquée (simulation, résistance, ou rien en lecture seule).
+    var gradeControl: GradeControl {
+        readOnly ? .none : GradeControl.choose(kind: machineKind, simulation: simulationSupported, resistance: resistanceSupported)
+    }
+    var canTestPilot: Bool { demo || (trainerID != nil && controlReady && gradeControl != .none) }
+    var report: String {
+        (["MyCycleWorld iOS 1.0 (1)", "Mode : \(demo ? "DÉMO" : "Bluetooth réel")", "Profil : \(profile.label)",
+          "Machine : \(machineKind?.label ?? "aucune")", bluetoothState] + logs).joined(separator: "\n")
+    }
 
     override init() {
+        profile = HardwareProfile(rawValue: UserDefaults.standard.string(forKey: BluetoothStore.profileKey) ?? "") ?? .zwift
         super.init()
         tickTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.tick() }
         if ProcessInfo.processInfo.arguments.contains("--demo") { setDemo(true) }
     }
     func log(_ message: String) {
         logs.append("\(Date().formatted(date: .omitted, time: .standard))  \(message)")
-        if logs.count > 500 { logs.removeFirst(logs.count - 500) }
+        if logs.count > 2000 { logs.removeFirst(logs.count - 2000) }
     }
     func clearLog() { logs.removeAll() }
+    func setProfile(_ value: HardwareProfile) {
+        guard value != profile else { return }
+        profile = value
+        UserDefaults.standard.set(value.rawValue, forKey: BluetoothStore.profileKey)
+        for c in connections.values { c.suggested = value.role(name: c.name, services: c.advertised, manufacturer: c.manufacturer) }
+        if demo { machineKind = value == .technogym ? .rower : .bike; demoDistance = 0 }
+        log("Profil matériel : \(value.label)")
+        refresh()
+    }
     func scan() {
         guard !demo else { return }
         requestScan = true
         if central == nil { central = CBCentralManager(delegate: self, queue: .main); return }
         guard poweredOn else { return }
         requestScan = false
-        // Foreground broad scan also discovers Zwift manufacturer-only advertisements.
+        // Foreground broad scan also discovers Zwift manufacturer-only and Technogym name-only advertisements.
         central?.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
         scanning = true
-        log("Recherche Bluetooth (30 s). Réveille les appareils et ferme les autres applis de vélo.")
+        log("Recherche Bluetooth (30 s), profil \(profile.label). Réveille les appareils et ferme les autres applis de vélo.")
         scanTimer?.invalidate()
         scanTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: false) { [weak self] _ in self?.stopScan() }
     }
@@ -138,23 +181,20 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         if !poweredOn && !demo {
             scanning = false
             for c in connections.values { c.connectionTimer?.invalidate(); c.cancelWrites(); c.state = "Déconnecté"; c.chars = [:]; c.buttons = [] }
-            resetTrainer(); heartID = nil; metrics = BikeReading(); refresh()
+            resetTrainer(); heartID = nil; heart = nil; heartContact = nil; metrics = BikeReading(); refresh()
         }
         log(bluetoothState)
     }
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String: Any], rssi RSSI: NSNumber) {
         let name = advertisementData[CBAdvertisementDataLocalNameKey] as? String ?? peripheral.name ?? "Appareil sans nom"
-        let advertised = advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID] ?? []
+        let advertised = (advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID] ?? []).map { $0.uuidString.uppercased() }
         let manufacturer = Array(advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data ?? Data())
-        let zwift = name.localizedCaseInsensitiveContains("zwift") || (manufacturer.count >= 2 && manufacturer[0] == 0x4a && manufacturer[1] == 9)
         let c = connections[peripheral.identifier] ?? Connection(peripheral, name: name, rssi: RSSI.intValue)
         c.rssi = RSSI.intValue; c.name = name
+        if !advertised.isEmpty { c.advertised = advertised }
+        if !manufacturer.isEmpty { c.manufacturer = manufacturer }
         c.model = ZwiftModel.fromManufacturerData(manufacturer) ?? c.model
-        if c.role == nil {
-            if zwift || advertised.contains(UUIDs.zwift) || advertised.contains(UUIDs.zwift2) { c.role = .controller }
-            else if advertised.contains(UUIDs.ftms) || advertised.contains(UUIDs.cps) { c.role = .trainer }
-            else if advertised.contains(UUIDs.hr) { c.role = .heart }
-        }
+        c.suggested = profile.role(name: name, services: c.advertised, manufacturer: c.manufacturer) ?? c.suggested
         connections[peripheral.identifier] = c
         refresh()
     }
@@ -165,7 +205,7 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         c.cancelWrites(); c.seenUnknownTypes = []; c.deviceModel = nil; c.firmware = nil
         c.role = role; c.state = "Connexion…"; c.chars = [:]; c.buttons = []; c.handshakeSent = false; c.handshake = false
         if role == .trainer { resetTrainer(); trainerID = id }
-        if role == .heart { heartID = id; heartContact = nil; metrics.heartRate = nil }
+        if role == .heart { heartID = id; heartContact = nil; heart = nil; updateMetrics() }
         c.peripheral.delegate = self
         central?.connect(c.peripheral)
         c.connectionTimer?.invalidate()
@@ -173,19 +213,20 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
             guard let self, c.peripheral.state == .connecting else { return }
             self.log("Connexion expirée : \(c.name)"); self.disconnect(id)
         }
-        log("Connexion à \(c.name) — \(role.rawValue)"); refresh()
+        log("Connexion à \(c.name) : \(profile.label(for: role))"); refresh()
     }
     func disconnect(_ id: UUID) {
         guard let c = connections[id] else { return }
         c.connectionTimer?.invalidate(); c.cancelWrites(); c.buttons = []; c.state = "Déconnexion…"
         if trainerID == id { resetTrainer() }
-        if heartID == id { heartID = nil; metrics.heartRate = nil; heartContact = nil }
+        if heartID == id { heartID = nil; heart = nil; heartContact = nil; updateMetrics() }
         central?.cancelPeripheralConnection(c.peripheral); refresh()
     }
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         guard let c = connections[peripheral.identifier] else { return }
         c.connectionTimer?.invalidate(); c.state = "Découverte des services…"
-        peripheral.discoverServices(UUIDs.services); refresh()
+        // Machine : tous les services, pour le test de connexion (CoreBluetooth n'a pas besoin de liste).
+        peripheral.discoverServices(c.role == .trainer ? nil : UUIDs.services); refresh()
     }
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) { disconnected(peripheral, error) }
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) { disconnected(peripheral, error) }
@@ -193,29 +234,38 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         guard let c = connections[peripheral.identifier] else { return }
         c.connectionTimer?.invalidate(); c.cancelWrites(); c.state = "Déconnecté"; c.chars = [:]; c.buttons = []; c.handshakeSent = false; c.handshake = false
         if trainerID == peripheral.identifier { resetTrainer() }
-        if heartID == peripheral.identifier { heartID = nil; metrics.heartRate = nil; heartContact = nil }
+        if heartID == peripheral.identifier { heartID = nil; heart = nil; heartContact = nil; updateMetrics() }
         log("\(c.name) déconnecté\(error.map { ": " + $0.localizedDescription } ?? ""). Reconnexion manuelle disponible."); refresh()
     }
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         guard let c = connections[peripheral.identifier] else { return }
         if let error { fail(c, error.localizedDescription); return }
         let services = peripheral.services ?? []
+        if c.role == .trainer && peripheral.identifier == trainerID {
+            trainerServices = services.map { GATTText.plainName($0.uuid.uuidString) }
+            log("Services : \(services.map { GATTText.name($0.uuid.uuidString) }.joined(separator: ", "))")
+            let ftms = services.contains { $0.uuid == UUIDs.ftms }, cps = services.contains { $0.uuid == UUIDs.cps }
+            log("FTMS : \(ftms ? "oui" : "non") · Cycling Power : \(cps ? "oui" : "non") · Cardio intégré : \(services.contains { $0.uuid == UUIDs.hr } ? "oui" : "non")")
+        }
         let required = c.role == .trainer ? [UUIDs.ftms, UUIDs.cps] : c.role == .heart ? [UUIDs.hr] : [UUIDs.zwift2, UUIDs.zwift]
         guard services.contains(where: { required.contains($0.uuid) }) else {
             if c.role == .controller {
-                c.state = "Service Zwift absent — compatibilité du firmware à vérifier"
+                c.state = "Service Zwift absent : compatibilité du firmware à vérifier"
                 log("\(c.name) : \(c.state). Certains modèles récents nécessitent une activation spécifique non implémentée ici.")
                 // Retain the connection long enough to read model/firmware even when the custom service is hidden.
                 for service in services where [CBUUID(string: "180A"), CBUUID(string: "180F")].contains(service.uuid) {
                     peripheral.discoverCharacteristics(nil, for: service)
                 }
                 refresh()
+            } else if c.role == .trainer {
+                fail(c, "ni FTMS ni Cycling Power : machine non standard (protocole propriétaire ?). Lance l’inspecteur BLE (Appareils > Inspecteur BLE) et partage son journal.")
             } else { fail(c, "Service attendu absent pour ce type d’appareil.") }
             return
         }
         let preferredZwift = services.contains(where: { $0.uuid == UUIDs.zwift2 }) ? UUIDs.zwift2 : UUIDs.zwift
         for service in services {
             if [UUIDs.zwift, UUIDs.zwift2].contains(service.uuid) && (c.role != .controller || service.uuid != preferredZwift) { continue }
+            if c.role == .trainer && !UUIDs.trainerServices.contains(service.uuid) { continue }
             peripheral.discoverCharacteristics(nil, for: service)
         }
         c.state = "Connecté"; refresh()
@@ -226,7 +276,7 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         for char in service.characteristics ?? [] {
             c.chars[char.uuid] = char
             let id = char.uuid.uuidString.uppercased()
-            let notify = c.role == .trainer ? ["2AD2", "2A63", "2ADA", "2AD9", "2A37"] : c.role == .heart ? ["2A37"] : [UUIDs.async.uuidString, UUIDs.tx.uuidString]
+            let notify = c.role == .trainer ? ["2AD2", "2AD1", "2ACE", "2A63", "2ADA", "2AD9", "2A37"] : c.role == .heart ? ["2A37"] : [UUIDs.async.uuidString, UUIDs.tx.uuidString]
             if notify.contains(id), char.properties.contains(.notify) || char.properties.contains(.indicate) { peripheral.setNotifyValue(true, for: char) }
             if ["2ACC", "2AD6", "2AD8", "2A19", "2A24", "2A26", "2A29"].contains(id), char.properties.contains(.read) { peripheral.readValue(for: char) }
         }
@@ -235,17 +285,31 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
             c.state = "Caractéristiques Zwift incomplètes"; log("\(c.name) : \(c.state)")
         }
         tryHandshake(c)
-        if c.role == .trainer, service.uuid == UUIDs.ftms, c.chars[CBUUID(string: "2AD9")] == nil { controlStatus = "Trainer connecté en lecture seule." }
+        if c.role == .trainer && peripheral.identifier == trainerID {
+            let kind = MachineKind.detect(characteristics: Set(c.chars.keys.map { $0.uuidString.uppercased() }))
+            if kind != machineKind {
+                machineKind = kind
+                if let kind { log("Type de machine : \(kind.label)\(kind == .power ? " (Cycling Power)" : " (FTMS)")") }
+                if kind == .treadmill { log("Tapis de course FTMS : non utilisable dans le jeu (pas de puissance).") }
+            }
+            if service.uuid == UUIDs.ftms, c.chars[UUIDs.controlPoint] == nil {
+                controlStatus = "Machine connectée en lecture seule (pas de Control Point FTMS)."
+                log(controlStatus)
+            }
+        }
         refresh()
     }
     func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
         guard let c = connections[peripheral.identifier] else { return }
         if let error {
-            log("Abonnement \(characteristic.uuid) : \(error.localizedDescription)")
+            log("Abonnement \(GATTText.name(characteristic.uuid.uuidString)) : \(error.localizedDescription)")
             if c.role == .controller { c.state = "Échec d’abonnement Zwift"; refresh() }
             return
         }
-        if peripheral.identifier == trainerID && characteristic.uuid == CBUUID(string: "2AD9") {
+        if peripheral.identifier == trainerID && c.role == .trainer {
+            log("Abonné : \(GATTText.name(characteristic.uuid.uuidString))")
+        }
+        if peripheral.identifier == trainerID && characteristic.uuid == UUIDs.controlPoint {
             controlReady = characteristic.isNotifying && characteristic.properties.contains(.write)
             controlStatus = controlReady ? "Prêt. Prends le contrôle pour piloter la résistance." : "Contrôle FTMS indisponible."
         }
@@ -259,7 +323,7 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         c.connectionTimer?.invalidate()
         c.connectionTimer = Timer.scheduledTimer(withTimeInterval: 4, repeats: false) { [weak self] _ in
             guard self?.connections[c.peripheral.identifier] === c, !c.handshake, c.peripheral.state == .connected else { return }
-            c.state = "RideOn sans réponse — essaie un bouton"
+            c.state = "RideOn sans réponse : essaie un bouton"
             self?.log("\(c.name) : RideOn sans réponse. Firmware à vérifier sur matériel."); self?.refresh()
         }
         refresh()
@@ -304,7 +368,7 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
     }
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         guard !demo, let c = connections[peripheral.identifier] else { return }
-        if let error { log("Lecture \(characteristic.uuid) : \(error.localizedDescription)"); return }
+        if let error { log("Lecture \(GATTText.name(characteristic.uuid.uuidString)) : \(error.localizedDescription)"); return }
         let b = Array(characteristic.value ?? Data()), id = characteristic.uuid.uuidString.uppercased(), now = Date()
         do {
             if characteristic.uuid == UUIDs.async || characteristic.uuid == UUIDs.tx { try receiveZwift(b, c); return }
@@ -313,39 +377,49 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
                 let value = String(bytes: b, encoding: .utf8)?.trimmingCharacters(in: .controlCharacters)
                 if id == "2A24" { c.deviceModel = value }
                 if id == "2A26" { c.firmware = value }
-                log("\(c.name) \(id) : \(value ?? "—")"); refresh(); return
+                log("\(c.name) \(GATTText.plainName(id)) : \(value ?? "-")"); refresh(); return
             }
             if id == "2A37", peripheral.identifier == heartID || (peripheral.identifier == trainerID && heartID == nil) {
-                let h = try BLEProtocol.heartRate(b); metrics.heartRate = h.bpm; heartContact = h.contact; lastHeart = now; return
+                let h = try BLEProtocol.heartRate(b); heart = h.bpm; heartContact = h.contact; lastHeart = now; updateMetrics(); return
             }
             guard peripheral.identifier == trainerID else { return }
             switch id {
-            case "2AD2":
-                let d = try BLEProtocol.indoorBike(b)
-                if let v = d.power { metrics.power = v; ftmsPower = true; lastPower = now }
-                if let v = d.cadence { metrics.cadence = v; ftmsCadence = true; lastCadence = now }
-                if let v = d.speed { metrics.speed = v; lastSpeed = now }
-                if let v = d.resistance { metrics.resistance = v }
-                if let v = d.heartRate, heartID == nil { metrics.heartRate = v; lastHeart = now }
-            case "2A63":
-                let d = try BLEProtocol.cyclingPower(b)
-                if !ftmsPower { metrics.power = d.power; lastPower = now }
-                if !ftmsCadence, let revs = d.revs, let time = d.time {
-                    metrics.cadence = crank.update(revs: revs, time: time, now: now.timeIntervalSinceReferenceDate); lastCadence = now
+            case "2AD2", "2AD1", "2ACE":
+                if dataSampler.sample() { log("\(GATTText.plainName(id)) : \(GATTText.hex(b))") }
+                let kind: MachineKind
+                let d: BikeReading
+                switch id {
+                case "2AD1": kind = .rower; d = try BLEProtocol.rower(b)
+                case "2ACE": kind = .cross; d = try BLEProtocol.crossTrainer(b)
+                default: kind = .bike; d = try BLEProtocol.indoorBike(b)
                 }
+                for change in feed.ftms(d, kind: kind, now: now.timeIntervalSinceReferenceDate) { log(change) }
+                packetReceived(now)
+            case "2A63":
+                if dataSampler.sample() { log("Cycling Power : \(GATTText.hex(b))") }
+                let d = try BLEProtocol.cyclingPower(b)
+                for change in feed.cyclingPower(power: d.power, revs: d.revs, time: d.time, now: now.timeIntervalSinceReferenceDate) { log(change) }
+                packetReceived(now)
             case "2ACC":
                 guard b.count >= 8 else { throw PacketError.truncated }
                 let flags = UInt32(b[4]) | UInt32(b[5]) << 8 | UInt32(b[6]) << 16 | UInt32(b[7]) << 24
                 simulationSupported = flags & (1 << 13) != 0; ergSupported = flags & 8 != 0; resistanceSupported = flags & 4 != 0
-                log("Fonctions : pente \(simulationSupported), ERG \(ergSupported), résistance \(resistanceSupported)")
+                log("Consignes FTMS : pente \(simulationSupported ? "oui" : "non"), ERG \(ergSupported ? "oui" : "non"), résistance \(resistanceSupported ? "oui" : "non")")
             case "2AD6", "2AD8":
-                var r = ByteReader(b); let lo = try r.i16(), hi = try r.i16(), step = try r.u16()
-                guard lo <= hi else { throw PacketError.invalid }
-                if id == "2AD8" { powerRange = Double(lo)...Double(hi); supportedPowerStep = Double(max(1, step)); targetWatts = min(powerRange.upperBound, max(powerRange.lowerBound, targetWatts)) }
-                else { resistanceRange = Double(lo) / 10...Double(hi) / 10; supportedResistanceStep = Double(max(1, step)) / 10; targetResistance = min(resistanceRange.upperBound, max(resistanceRange.lowerBound, targetResistance)) }
+                if id == "2AD8" {
+                    var r = ByteReader(b); let lo = try r.i16(), hi = try r.i16(), step = try r.u16()
+                    guard lo <= hi else { throw PacketError.invalid }
+                    powerRange = Double(lo)...Double(hi); supportedPowerStep = Double(max(1, step)); targetWatts = min(powerRange.upperBound, max(powerRange.lowerBound, targetWatts))
+                } else {
+                    let range = try BLEProtocol.resistanceRange(b)
+                    resistanceLevels = range
+                    resistanceRange = range.min...range.max; supportedResistanceStep = max(0.1, range.step)
+                    targetResistance = min(resistanceRange.upperBound, max(resistanceRange.lowerBound, targetResistance))
+                    log("Plage de résistance : \(MachineText.number(range.min)) à \(MachineText.number(range.max)) (pas \(MachineText.number(range.step)))")
+                }
             case "2AD9": queue.response(b); finishCommand()
             case "2ADA":
-                log("Statut trainer : \(b.map { String(format: "%02x", $0) }.joined(separator: " "))")
+                log("Statut machine : \(GATTText.hex(b))")
                 if b.first == 0xff || b.first == 1 || b.first == 3 || b.first == 2 {
                     controlled = false
                     if let pending = queue.pending, pending.first != 8 {
@@ -359,13 +433,24 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
                 }
             default: break
             }
-        } catch { log("Paquet \(id) ignoré : tronqué ou invalide (\(b.count) octets).") }
+        } catch { log("Paquet \(GATTText.name(id)) ignoré : tronqué ou invalide (\(b.count) octets : \(GATTText.hex(b))).") }
+    }
+    private func packetReceived(_ now: Date) {
+        trainerPackets = feed.packets
+        trainerLastPacket = now
+        updateMetrics()
+    }
+    /// Mesures affichées : celles de la machine, avec le cardio de la ceinture quand elle est connectée.
+    private func updateMetrics() {
+        var m = feed.data
+        if heartID != nil { m.heartRate = heart } else if let heart { m.heartRate = heart }
+        metrics = m
     }
     private func receiveZwift(_ b: [UInt8], _ c: Connection) throws {
         if b.starts(with: ZwiftProtocol.rideOn) {
             guard b.count >= 8 else { log("\(c.name) : réponse RideOn tronquée."); return }
             c.handshake = true; c.connectionTimer?.invalidate()
-            c.state = "RideOn reçu — appuie sur un bouton pour vérifier"
+            c.state = "RideOn reçu : appuie sur un bouton pour vérifier"
             log("\(c.name) : RideOn reçu, version \(b[6]).\(b[7]). Le décodage des boutons reste à confirmer.")
             refresh(); return
         }
@@ -400,13 +485,29 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
     }
     func takeControl() {
         if demo { controlled = true; controlStatus = "Contrôle simulé actif"; return }
-        guard controlReady, !controlled, queue.pending == nil else { return }
+        guard controlReady, !readOnly, !controlled, queue.pending == nil else { return }
         enqueue([0]); enqueue([7])
     }
     func applySimulation() {
         guard controlled, simulationSupported else { return }
         if demo { mode = "Simulation" }
         enqueue(BLEProtocol.simulation(grade: gears.grade(terrain)))
+    }
+    /// Pente du jeu (avant vitesses virtuelles) : simulation pour un vélo, niveau de résistance pour
+    /// un elliptique ou un rameur (même calcul que setResistanceForGrade côté web).
+    func applyGameGrade(_ grade: Double) {
+        terrain = grade
+        switch gradeControl {
+        case .simulation: applySimulation()
+        case .resistance: applyGradeResistance()
+        case .none: break
+        }
+    }
+    private func applyGradeResistance() {
+        guard controlled, resistanceSupported,
+              let level = gradeResistance.next(grade: gears.grade(terrain), range: resistanceLevels) else { return }
+        if demo { mode = "Résistance"; targetResistance = level }
+        sendResistance(level)
     }
     func applyERG() {
         guard controlled, ergSupported else { return }
@@ -418,12 +519,23 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         guard controlled, resistanceSupported else { return }
         if demo { mode = "Résistance" }
         let value = quantize(targetResistance, range: resistanceRange, step: supportedResistanceStep)
-        targetResistance = value; enqueue(BLEProtocol.resistance(value))
+        targetResistance = value; sendResistance(value)
+    }
+    private func sendResistance(_ level: Double) {
+        lastResistanceLevel = level
+        enqueue(encoder.encode(level))
     }
     private func quantize(_ value: Double, range: ClosedRange<Double>, step: Double) -> Double {
         min(range.upperBound, max(range.lowerBound, range.lowerBound + ((value - range.lowerBound) / step).rounded() * step))
     }
-    func shift(_ delta: Int) { gears.shift(delta); if mode == "Simulation" { applySimulation() } }
+    func shift(_ delta: Int) {
+        gears.shift(delta)
+        switch gradeControl {
+        case .simulation: if mode == "Simulation" { applySimulation() }
+        case .resistance: applyGradeResistance()
+        case .none: break
+        }
+    }
     func stopTrainer() {
         if demo { controlled = false; controlStatus = "Simulation arrêtée"; return }
         guard controlled else { return }
@@ -435,13 +547,29 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
     }
     private func pump() {
         guard let id = trainerID, let c = connections[id], c.peripheral.state == .connected,
-              let cp = c.chars[CBUUID(string: "2AD9")], cp.isNotifying, let bytes = queue.next() else { return }
+              let cp = c.chars[UUIDs.controlPoint], cp.isNotifying, let bytes = queue.next() else { return }
         controlStatus = "Commande en cours…"
-        log("FTMS → \(bytes.map { String(format: "%02x", $0) }.joined(separator: " "))")
+        lastSent = bytes
+        log("FTMS → \(GATTText.hex(bytes))")
         c.peripheral.writeValue(Data(bytes), for: cp, type: .withResponse)
         commandTimer?.invalidate()
         commandTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: false) { [weak self] _ in
             guard let self else { return }
+            if let op = self.queue.pending?.first, op == 0 || op == 7 {
+                // Certaines machines (Technogym notamment) ignorent la demande de contrôle : on reste en lecture seule.
+                // Une réponse tardive ne peut pas valider une autre commande : les réponses sont associées à l'opcode.
+                if op == 0 {
+                    self.queue.clear()
+                    self.controlled = false; self.readOnly = true
+                    self.controlStatus = "Pas de réponse à la demande de contrôle : lecture seule, la résistance ne sera pas pilotée."
+                } else {
+                    self.queue.abandon()
+                    self.controlStatus = "Démarrage sans réponse : pilotage quand même actif."
+                }
+                self.log(self.controlStatus)
+                self.pump()
+                return
+            }
             self.log("Délai FTMS dépassé. Déconnexion pour éviter une réponse tardive attribuée à une autre commande.")
             self.disconnect(id)
             self.controlStatus = "Trainer sans réponse. Reconnecte-le."
@@ -449,70 +577,164 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
     }
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
         if let error {
-            log("Écriture \(characteristic.uuid) : \(error.localizedDescription)")
-            if (characteristic.uuid == CBUUID(string: "2AD9") && peripheral.identifier == trainerID) || characteristic.uuid == UUIDs.rx { disconnect(peripheral.identifier) }
+            log("Écriture \(GATTText.name(characteristic.uuid.uuidString)) : \(error.localizedDescription)")
+            if (characteristic.uuid == UUIDs.controlPoint && peripheral.identifier == trainerID) || characteristic.uuid == UUIDs.rx { disconnect(peripheral.identifier) }
             return
         }
         if characteristic.uuid == UUIDs.rx, let c = connections[peripheral.identifier] {
             c.writeTimer?.invalidate(); c.writes.didWrite(); pumpZwift(c)
         }
-        if characteristic.uuid == CBUUID(string: "2AD9"), peripheral.identifier == trainerID { queue.didWrite(); finishCommand() }
+        if characteristic.uuid == UUIDs.controlPoint, peripheral.identifier == trainerID { queue.didWrite(); finishCommand() }
     }
     private func finishCommand() {
         guard let response = queue.completed() else { return }
         commandTimer?.invalidate()
+        if response.result != 1, response.opcode == 4, let sent = lastSent, encoder.refused(sent, result: response.result), let level = lastResistanceLevel {
+            // Niveau sur un octet refusé : certaines machines attendent la forme sur deux octets.
+            log("Niveau de résistance sur 1 octet refusé : nouvel essai sur 2 octets.")
+            queue.enqueue(encoder.encode(level)); pump(); return
+        }
+        if pilotRunning && [0x04, 0x11].contains(response.opcode) { pilotResults.append(response.result) }
+        let names: [UInt8: String] = [2: "opération non prise en charge", 3: "paramètre invalide", 4: "échec de la machine", 5: "contrôle refusé"]
         if response.result == 1 {
-            if response.opcode == 0 { controlled = true }
+            if response.opcode == 0 { controlled = true; gradeResistance.reset() }
             if response.opcode == 0x11 { mode = "Simulation" }
             if response.opcode == 5 { mode = "ERG" }
             if response.opcode == 4 { mode = "Résistance" }
             if response.opcode == 8 { controlled = false; queue.clear() }
-            controlStatus = response.opcode == 8 ? "Trainer arrêté" : "Commande confirmée par le trainer"
+            controlStatus = response.opcode == 8 ? "Trainer arrêté" : "Commande confirmée par la machine"
+        } else if response.opcode == 0 {
+            // Request Control refusé (fréquent sur Technogym) : on continue en lecture seule.
+            controlled = false; readOnly = true; queue.clear()
+            controlStatus = "Contrôle refusé (\(names[response.result] ?? "code \(response.result)")) : lecture seule, la résistance ne sera pas pilotée."
+        } else if response.opcode == 7 {
+            // Start refusé : le jeu web l'ignore aussi, le pilotage reste possible.
+            controlStatus = "Démarrage refusé (\(names[response.result] ?? "code \(response.result)")) : pilotage quand même actif."
         } else {
-            let names: [UInt8: String] = [2: "Opération non prise en charge", 3: "Paramètre invalide", 4: "Échec du trainer", 5: "Contrôle refusé"]
-            controlStatus = names[response.result] ?? "Erreur FTMS \(response.result)"
-            if response.opcode == 0 || response.opcode == 7 || response.result == 5 { controlled = false }
+            let titles: [UInt8: String] = [2: "Opération non prise en charge", 3: "Paramètre invalide", 4: "Échec du trainer", 5: "Contrôle refusé"]
+            controlStatus = titles[response.result] ?? "Erreur FTMS \(response.result)"
+            if response.result == 5 { controlled = false }
             queue.clear()
         }
         log(controlStatus); pump()
     }
+
+    // MARK: Test du pilotage
+
+    /// Un peu plus dur pendant 5 s, puis retour : pente 6 % puis 0 pour un vélo, résistance 70 % puis 30 % sinon.
+    func testPilot() {
+        guard !pilotRunning else { return }
+        pilotRunning = true
+        pilotResults = []
+        if demo {
+            pilotStatus = "Plus dur pendant 5 s…"
+            pilotTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: false) { [weak self] _ in self?.finishPilot("Pilotage OK ✓ (démo)") }
+            return
+        }
+        guard canTestPilot else { finishPilot("Échec : pilotage impossible (\(readOnly ? "lecture seule" : "aucune consigne prise en charge"))"); return }
+        pilotStatus = "Prise de contrôle…"
+        log("Test du pilotage : début")
+        if !controlled { takeControl() }
+        waitForControl(until: Date().addingTimeInterval(7))
+    }
+    private func waitForControl(until deadline: Date) {
+        pilotTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: false) { [weak self] _ in
+            guard let self, self.pilotRunning else { return }
+            if self.controlled { self.pilotHard() }
+            else if self.readOnly || self.trainerID == nil || Date() > deadline { self.finishPilot("Échec : \(self.controlStatus)") }
+            else { self.waitForControl(until: deadline) }
+        }
+    }
+    private func pilotCommand(hard: Bool) -> Bool {
+        switch gradeControl {
+        case .simulation: enqueue(BLEProtocol.simulation(grade: hard ? 6 : 0)); return true
+        case .resistance: sendResistance((resistanceLevels ?? .fallback).level(at: hard ? 0.7 : 0.3)); return true
+        case .none: return false
+        }
+    }
+    private func pilotHard() {
+        guard pilotCommand(hard: true) else { finishPilot("Échec : la machine n’accepte ni pente ni résistance"); return }
+        pilotStatus = "Plus dur pendant 5 s…"
+        pilotTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: false) { [weak self] _ in
+            guard let self, self.pilotRunning else { return }
+            _ = self.pilotCommand(hard: false)
+            self.pilotStatus = "Retour à la normale…"
+            self.pilotTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: false) { [weak self] _ in
+                guard let self, self.pilotRunning else { return }
+                if self.pilotResults.isEmpty { self.finishPilot("Échec : pas de réponse de la machine") }
+                else if self.pilotResults.allSatisfy({ $0 == 1 }) { self.finishPilot("Pilotage OK ✓") }
+                else { self.finishPilot("Échec : \(self.controlStatus)") }
+            }
+        }
+    }
+    private func finishPilot(_ text: String) {
+        pilotStatus = text
+        log("Test du pilotage : \(text)")
+        // Le jeu renverra sa consigne : on oublie le dernier niveau envoyé.
+        gradeResistance.reset()
+        pilotTimer?.invalidate()
+        pilotTimer = Timer.scheduledTimer(withTimeInterval: 2.5, repeats: false) { [weak self] _ in
+            self?.pilotRunning = false
+            self?.pilotStatus = BluetoothStore.pilotIdle
+        }
+    }
+
     private func fail(_ c: Connection, _ message: String) { log("\(c.name) : \(message)"); disconnect(c.peripheral.identifier) }
     private func resetTrainer() {
-        trainerID = nil; queue.clear(); commandTimer?.invalidate(); controlled = false; controlReady = false
+        trainerID = nil; queue.clear(); commandTimer?.invalidate(); controlled = false; controlReady = false; readOnly = false
         simulationSupported = false; ergSupported = false; resistanceSupported = false
-        metrics.power = nil; metrics.cadence = nil; metrics.speed = nil; metrics.resistance = nil
-        if heartID == nil { metrics.heartRate = nil }
-        ftmsPower = false; ftmsCadence = false; crank = CrankCadence(); history = []
-        powerRange = 0...1000; resistanceRange = 0...100; supportedPowerStep = 1; supportedResistanceStep = 0.1
+        feed = TrainerFeed(); dataSampler = PacketSampler(first: 5, every: 200)
+        machineKind = nil; trainerServices = []; trainerPackets = 0; trainerLastPacket = nil
+        gradeResistance.reset(); encoder = ResistanceEncoder(); lastSent = nil; lastResistanceLevel = nil
+        if pilotRunning { pilotTimer?.invalidate(); pilotRunning = false; pilotStatus = BluetoothStore.pilotIdle }
+        if heartID == nil { heart = nil; heartContact = nil }
+        updateMetrics(); history = []
+        powerRange = 0...1000; resistanceRange = 0...100; resistanceLevels = nil; supportedPowerStep = 1; supportedResistanceStep = 0.1
         controlStatus = "Connecte un home trainer pour commencer."
     }
     private func refresh() {
         devices = connections.values.map { c in
             DeviceRow(id: c.peripheral.identifier, name: c.name, rssi: c.rssi, state: c.state,
                       connected: c.peripheral.state == .connected, busy: c.peripheral.state == .connecting || c.peripheral.state == .disconnecting,
-                      battery: c.battery, role: c.role, buttons: c.buttons.sorted().joined(separator: " · "),
+                      battery: c.battery, role: c.role ?? c.suggested, buttons: c.buttons.sorted().joined(separator: " · "),
                       details: [c.model?.rawValue, c.deviceModel, c.firmware.map { "Firmware " + $0 }, c.model?.compatibilityNote].compactMap { $0 }.joined(separator: " · "))
         }.sorted { ($0.connected ? 0 : 1, $0.role == nil ? 1 : 0, $0.name, $0.id.uuidString) < ($1.connected ? 0 : 1, $1.role == nil ? 1 : 0, $1.name, $1.id.uuidString) }
     }
     func setDemo(_ enabled: Bool) {
         stopScan()
         for c in connections.values { c.connectionTimer?.invalidate(); c.cancelWrites(); if c.peripheral.state != .disconnected { central?.cancelPeripheralConnection(c.peripheral) } }
-        connections.removeAll(); devices = []; resetTrainer(); heartID = nil; metrics = BikeReading(); heartContact = nil
-        demo = enabled; gears = VirtualGears(); terrain = 0; mode = "Simulation"; demoTick = 0
-        if enabled { controlReady = true; simulationSupported = true; ergSupported = true; resistanceSupported = true; controlStatus = "Démo prête · aucun appareil réel connecté"; tick() }
-        log(enabled ? "Mode démo activé — mesures simulées" : "Mode Bluetooth réel activé")
+        connections.removeAll(); devices = []; resetTrainer(); heartID = nil; heart = nil; metrics = BikeReading(); heartContact = nil
+        demo = enabled; gears = VirtualGears(); terrain = 0; mode = "Simulation"; demoTick = 0; demoDistance = 0
+        if enabled {
+            controlReady = true; simulationSupported = true; ergSupported = true; resistanceSupported = true
+            // Démo Technogym : un rameur simulé (comme le jeu web en démo).
+            machineKind = profile == .technogym ? .rower : .bike
+            trainerServices = ["Fitness Machine (FTMS)", "Device Information"]
+            controlStatus = "Démo prête · aucun appareil réel connecté"; tick()
+        }
+        log(enabled ? "Mode démo activé : mesures simulées" : "Mode Bluetooth réel activé")
     }
     private func tick() {
         if demo {
             demoTick += 1
             let wave = sin(Double(demoTick) / 7)
-            metrics = BikeReading(speed: 28 + wave * 3, cadence: 85 + wave * 7, power: Int((mode == "ERG" && controlled ? targetWatts : 180) + wave * 25), heartRate: Int(125 + wave * 8))
+            if machineKind == .rower {
+                let watts = Int(180 + wave * 25)
+                let pace = 500 * pow(2.8 / Double(watts), 1.0 / 3)
+                demoDistance += 500 / pace
+                let rate = ((26 + wave * 2) * 2).rounded() / 2
+                metrics = BikeReading(cadence: rate, power: watts, heartRate: Int(128 + wave * 8), strokeRate: rate,
+                                      strokeCount: demoTick * 26 / 60, distance: Int(demoDistance), pace: Int(pace.rounded()))
+            } else {
+                metrics = BikeReading(speed: 28 + wave * 3, cadence: 85 + wave * 7, power: Int((mode == "ERG" && controlled ? targetWatts : 180) + wave * 25), heartRate: Int(125 + wave * 8))
+            }
+            trainerPackets = demoTick
+            trainerLastPacket = Date()
         } else {
             let now = Date()
-            if let lastPower, now.timeIntervalSince(lastPower) > 5 { metrics.power = nil; ftmsPower = false }
-            if let lastCadence, now.timeIntervalSince(lastCadence) > 5 { metrics.cadence = nil; ftmsCadence = false }
-            if let lastSpeed, now.timeIntervalSince(lastSpeed) > 5 { metrics.speed = nil }
-            if let lastHeart, now.timeIntervalSince(lastHeart) > 5 { metrics.heartRate = nil; heartContact = nil }
+            var changed = feed.expire(now: now.timeIntervalSinceReferenceDate)
+            if let lastHeart, now.timeIntervalSince(lastHeart) > 5, heart != nil { heart = nil; heartContact = nil; changed = true }
+            if changed { updateMetrics() }
         }
         if let power = metrics.power { history.append(PowerSample(date: Date(), watts: power)) }
         if history.count > 120 { history.removeFirst(history.count - 120) }

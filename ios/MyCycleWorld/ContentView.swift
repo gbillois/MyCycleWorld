@@ -37,7 +37,8 @@ private struct DashboardView: View {
                     }
                     LazyVGrid(columns: columns, spacing: 12) {
                         MetricCard(title: "Puissance", value: store.metrics.power.map(String.init) ?? "—", unit: "W", icon: "bolt.fill", color: .mint)
-                        MetricCard(title: "Cadence", value: store.metrics.cadence.map { String(format: "%.0f", $0) } ?? "—", unit: "tr/min", icon: "arrow.triangle.2.circlepath", color: .cyan)
+                        MetricCard(title: store.machineKind == .rower ? "Cadence de coups" : "Cadence", value: store.metrics.cadence.map { String(format: "%.0f", $0) } ?? "—",
+                                   unit: store.machineKind == .rower ? "coups/min" : "tr/min", icon: "arrow.triangle.2.circlepath", color: .cyan)
                         MetricCard(title: "Vitesse", value: store.metrics.speed.map { String(format: "%.1f", $0) } ?? "—", unit: "km/h", icon: "speedometer", color: .blue)
                         MetricCard(title: "Cardio", value: store.metrics.heartRate.map(String.init) ?? "—", unit: "bpm", icon: "heart.fill", color: .pink)
                     }
@@ -131,8 +132,14 @@ private struct DevicesView: View {
         NavigationStack {
             List {
                 Section {
+                    Picker("Matériel", selection: Binding(get: { store.profile }, set: { store.setProfile($0) })) {
+                        ForEach(HardwareProfile.allCases) { profile in Text(profile.label).tag(profile) }
+                    }
+                    .pickerStyle(.segmented)
+                } header: { Text("Matériel") } footer: { Text(store.profile.hint) }
+                Section {
                     Toggle("Mode démo", isOn: Binding(get: { store.demo }, set: { store.setDemo($0) }))
-                } footer: { Text("La démo déconnecte les appareils réels et affiche des mesures simulées.") }
+                } footer: { Text(store.profile == .technogym ? "La démo déconnecte les appareils réels et simule un rameur." : "La démo déconnecte les appareils réels et affiche des mesures simulées.") }
                 if !store.demo {
                     Section {
                         Label(store.bluetoothState, systemImage: "antenna.radiowaves.left.and.right")
@@ -140,9 +147,11 @@ private struct DevicesView: View {
                             HStack { Text(store.scanning ? "Arrêter la recherche" : "Rechercher les appareils"); Spacer(); if store.scanning { ProgressView() } }
                         }
                         Toggle("Afficher aussi les appareils non reconnus", isOn: $showAll)
-                    } footer: { Text("Réveille le trainer, porte la ceinture et appuie sur les manettes. Ferme Zwift et les autres applis connectées. Choisis chaque manette séparément.") }
+                    } footer: { Text("\(store.profile.scanHint) Réveille la machine, porte la ceinture et ferme les autres applis connectées.") }
                     Section("Appareils à proximité") {
-                        let visible = store.devices.filter { showAll || $0.role != nil }
+                        let visible = store.devices.filter { device in
+                            device.connected || device.busy || showAll || (device.role.map { store.profile.shows($0) } ?? false)
+                        }
                         if visible.isEmpty { Text("Aucun appareil détecté. Lance une recherche.").foregroundStyle(.secondary) }
                         ForEach(visible) { device in
                             VStack(alignment: .leading, spacing: 8) {
@@ -157,16 +166,17 @@ private struct DevicesView: View {
                                     }.buttonStyle(.bordered)
                                 } else {
                                     Menu("Connecter comme…") {
-                                        ForEach(DeviceRole.allCases) { role in Button(role.rawValue) { store.connect(device.id, role: role) } }
+                                        ForEach(DeviceRole.allCases) { role in Button(store.profile.label(for: role)) { store.connect(device.id, role: role) } }
                                     }.buttonStyle(.bordered)
                                 }
                             }.padding(.vertical, 6)
                         }
                     }
                 } else {
-                    Section { Label("Trainer, cadence et cardio simulés", systemImage: "play.circle.fill").foregroundStyle(.orange)
+                    Section { Label(store.machineKind == .rower ? "Rameur, cadence de coups et cardio simulés" : "Trainer, cadence et cardio simulés", systemImage: "play.circle.fill").foregroundStyle(.orange)
                         Text("Les boutons + / − du cockpit permettent de tester les vitesses virtuelles.") }
                 }
+                ConnectionTestSection()
                 Section("Confidentialité") {
                     Text("Les mesures et le journal restent en mémoire sur cet appareil. Aucun compte, serveur, suivi publicitaire ni HealthKit. Le partage du diagnostic est manuel.").font(.callout)
                 }
@@ -180,7 +190,7 @@ private struct LogView: View {
         NavigationStack {
             List {
                 Section {
-                    Text("FTMS · Cycling Power · Heart Rate · Zwift Play / Click / Ride").font(.callout)
+                    Text("FTMS (vélo, elliptique, rameur) · Cycling Power · Heart Rate · Zwift Play / Click / Ride").font(.callout)
                     Text("Le protocole Zwift est repris du dépôt web et dépend du firmware. En cas de problème, partage ce journal avec le modèle et la version du firmware.").font(.caption).foregroundStyle(.secondary)
                 }
                 Section("Journal · \(store.logs.count) événements") {

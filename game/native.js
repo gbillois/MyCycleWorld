@@ -2,20 +2,32 @@
 // le jeu ne parle pas à Web Bluetooth. Il reçoit un état (mesures, appareils connectés, vitesse virtuelle)
 // et envoie des ordres (pente, vitesses, vibration). Même interface que Devices (voir devices.js).
 //
-// Protocole (version 1)
+// Protocole (version 1, révision 1)
 //   jeu -> appli : window.webkit.messageHandlers.mcw.postMessage({ type, ... })
-//       ready                 le jeu est chargé, l'appli peut envoyer l'état
-//       grade   { value }     pente du terrain en %, AVANT vitesses virtuelles (l'appli les applique)
+//       ready   { protocol, minor }  le jeu est chargé, l'appli peut envoyer l'état
+//       grade   { value }     pente du terrain en %, AVANT vitesses virtuelles (l'appli les applique ;
+//                             sur un elliptique ou un rameur, elle la convertit en niveau de résistance)
 //       shift   { delta }     vitesse virtuelle +1 / -1
 //       takeControl           prendre le contrôle du trainer (début de course)
 //       vibrate               faire vibrer les manettes Zwift
 //   appli -> jeu : window.mcwNative.state({...}) et window.mcwNative.button(nom, appuyé)
+//       état v1 : v, demo, trainer { connected, controllable, controlled, controlReady, name, status },
+//                 hr { connected, name }, controllers [noms], power, cadence, speed, heartRate, gear
+//       révision 1 (champs facultatifs, absents quand inconnus) : minor, hardware (zwift | technogym | ble),
+//                 machineKind (bike | cross | rower | treadmill | power), strokeRate (coups/min), strokeCount,
+//                 distance (m), pace (s/500 m), stepRate (pas/min), resistance
 import { KeyEmitter, loadKeymap } from '../src/core/keymap.js';
 
 const PROTOCOL = 1;
+const MINOR = 1;
+
+const MACHINE_KINDS = new Set(['bike', 'cross', 'rower', 'treadmill', 'power']);
+const HARDWARE_IDS = new Set(['zwift', 'technogym', 'ble']);
 
 // Les boutons latéraux changent déjà les vitesses côté appli : on ne les retransmet pas en touches clavier.
 const NATIVE_SHIFT_BUTTONS = new Set(['L_SHIFT', 'L_SHIFT2', 'R_SHIFT', 'R_SHIFT2']);
+
+const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
 export function isNativeApp(win = window) {
   return typeof win.webkit?.messageHandlers?.mcw?.postMessage === 'function';
@@ -31,15 +43,24 @@ export class NativeDevices extends EventTarget {
     this.gears = null;
     this.snapshot = {};
     this.controllers = [];
-    // Mêmes formes que les objets de Devices, pour que l'écran d'accueil du jeu n'ait rien à savoir.
-    this.trainer = { connected: false, canControl: false, controlled: false, name: 'Home trainer', device: null, data: { power: null, cadence: null } };
+    this.hardware = null; // profil matériel choisi dans l'appli (zwift | technogym | ble), null si inconnu
+    // Mêmes formes que les objets de Devices (et Trainer), pour que l'écran d'accueil du jeu n'ait rien à savoir.
+    this.trainer = {
+      connected: false,
+      canControl: false,
+      controlled: false,
+      name: 'Home trainer',
+      device: null,
+      kind: null,
+      data: { power: null, cadence: null, speed: null, heartRate: null, resistance: null, strokeRate: null, strokeCount: null, distance: null, pace: null, stepRate: null },
+    };
     this.hr = { connected: false, name: 'Ceinture cardio', bpm: null, device: null };
 
     win.mcwNative = {
       state: (s) => this.onState(s),
       button: (name, down) => this.onButton(name, down),
     };
-    this.post({ type: 'ready', protocol: PROTOCOL });
+    this.post({ type: 'ready', protocol: PROTOCOL, minor: MINOR });
   }
 
   // Le jeu garde son objet VirtualGears pour l'affichage ; l'appli fait foi pour la vitesse choisie.
@@ -68,8 +89,11 @@ export class NativeDevices extends EventTarget {
       name: demo ? 'Démo' : t.name || 'Home trainer',
     });
     if (this.trainer.connected) this.trainer.device = true;
-    this.trainer.data.power = s.power ?? null;
-    this.trainer.data.cadence = s.cadence ?? null;
+    // Appli d'avant la révision 1 : pas de type de machine, c'est un vélo.
+    this.trainer.kind = this.trainer.connected ? (MACHINE_KINDS.has(s.machineKind) ? s.machineKind : 'bike') : null;
+    const d = this.trainer.data;
+    for (const key of Object.keys(d)) d[key] = num(s[key]);
+    if (HARDWARE_IDS.has(s.hardware)) this.hardware = s.hardware;
     Object.assign(this.hr, { connected: demo || !!h.connected, name: demo ? 'Démo' : h.name || 'Ceinture cardio' });
     if (this.hr.connected) this.hr.device = true;
     this.hr.bpm = this.hr.connected ? s.heartRate || null : null;
@@ -86,23 +110,25 @@ export class NativeDevices extends EventTarget {
     else this.keyEmitter.buttonUp(name);
   }
 
+  // Un tapis de course ne fournit pas de puissance : le jeu reste alors au clavier, comme sur le web.
   get trainerActive() {
-    return this.trainer.connected;
+    return this.trainer.connected && this.trainer.kind !== 'treadmill';
   }
 
-  // L'appli iOS ne gère que des home trainers (vélos) pour l'instant.
+  // Type de la machine connectée : bike | cross | rower | treadmill | power (null si aucune).
   get machineKind() {
-    return this.trainer.connected ? 'bike' : null;
+    return this.trainer.connected ? this.trainer.kind : null;
   }
 
+  // Le profil matériel se choisit dans l'onglet « Appareils » de l'appli (voir this.hardware).
   setHardware() {}
 
   get power() {
-    return this.snapshot.power ?? 0;
+    return this.trainer.data.power ?? 0;
   }
 
   get cadence() {
-    return this.snapshot.cadence ?? 0;
+    return this.trainer.data.cadence ?? 0;
   }
 
   get heartRate() {
@@ -113,7 +139,8 @@ export class NativeDevices extends EventTarget {
     return this.controllers.map((name) => ({ name, side: null, handshake: true }));
   }
 
-  // felt = pente ressentie (vitesses comprises), terrain = pente avant vitesses : l'appli applique les siennes.
+  // felt = pente ressentie (vitesses comprises), terrain = pente avant vitesses : l'appli applique les siennes
+  // (et la convertit en niveau de résistance sur un elliptique ou un rameur).
   sendGrade(felt, terrain) {
     const value = Number.isFinite(terrain) ? terrain : felt;
     if (Number.isFinite(value)) this.post({ type: 'grade', value });
@@ -132,7 +159,7 @@ export class NativeDevices extends EventTarget {
   }
 
   async connectTrainer() {
-    throw new Error('Connecte le home trainer dans l’onglet « Appareils » de l’appli.');
+    throw new Error('Connecte ta machine dans l’onglet « Appareils » de l’appli.');
   }
 
   async connectHeartRate() {

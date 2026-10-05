@@ -9,7 +9,7 @@
 <key>CFBundleShortVersionString</key><string>$(MARKETING_VERSION)</string>
 <key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
 <key>LSRequiresIPhoneOS</key><true/>
-<key>NSBluetoothAlwaysUsageDescription</key><string>MyCycleWorld utilise le Bluetooth pour lire votre home trainer, votre ceinture cardio et vos manettes, et piloter la résistance du vélo.</string>
+<key>NSBluetoothAlwaysUsageDescription</key><string>MyCycleWorld utilise le Bluetooth pour lire votre home trainer, votre ceinture cardio et vos manettes, et piloter la résistance du vélo, de l’elliptique ou du rameur.</string>
 <key>ITSAppUsesNonExemptEncryption</key><false/>
 <key>UILaunchScreen</key><dict/>
 <key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string><string>UIInterfaceOrientationLandscapeLeft</string><string>UIInterfaceOrientationLandscapeRight</string></array>

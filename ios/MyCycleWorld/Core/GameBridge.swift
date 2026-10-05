@@ -1,7 +1,8 @@
 import Foundation
 
 // Pont entre l'appli et le jeu web (WebView). Cette partie ne dépend que de Foundation : elle est testée
-// avec `swift test`. Le côté JavaScript est dans game/native.js (protocole version 1).
+// avec `swift test`. Le côté JavaScript est dans game/native.js (protocole version 1, révision 1 :
+// champs facultatifs en plus pour les elliptiques et rameurs, ignorés par un jeu plus ancien).
 
 /// Appui ou relâchement d'un bouton de manette Zwift, à transmettre au jeu.
 struct ButtonEvent: Equatable {
@@ -64,6 +65,8 @@ struct GameState: Encodable, Equatable {
     }
 
     var v = 1
+    /// Révision du protocole 1 : 1 = champs machine ci-dessous (facultatifs, absents quand inconnus).
+    var minor = 1
     var demo: Bool
     var trainer: Trainer
     var hr: Heart
@@ -73,6 +76,17 @@ struct GameState: Encodable, Equatable {
     var speed: Double?
     var heartRate: Int?
     var gear: Int
+    /// Profil matériel choisi dans l'appli : zwift | technogym | ble.
+    var hardware: String?
+    /// Type de machine : bike | cross | rower | treadmill | power.
+    var machineKind: String?
+    /// Rameur : coups/min, nombre de coups, allure en s/500 m. Elliptique : pas/min.
+    var strokeRate: Double?
+    var strokeCount: Int?
+    var distance: Int?
+    var pace: Int?
+    var stepRate: Int?
+    var resistance: Double?
 
     /// JSON de l'état, ou nil si une valeur n'est pas encodable (par exemple un NaN).
     func json() -> String? {

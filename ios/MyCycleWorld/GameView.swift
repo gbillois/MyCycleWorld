@@ -28,9 +28,8 @@ struct GameView: View {
         .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = store.demo || store.activeConnectionCount > 0
-            // En quittant le jeu, le trainer repasse à plat.
-            store.terrain = 0
-            store.applySimulation()
+            // En quittant le jeu, le trainer repasse à plat (résistance « plat » pour un elliptique ou un rameur).
+            store.applyGameGrade(0)
         }
     }
 }
@@ -134,18 +133,29 @@ final class GameBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         let rows = store.devices
         let trainer = rows.first { $0.role == .trainer && $0.connected }
         let belt = rows.first { $0.role == .heart && $0.connected }
-        return GameState(
+        let m = store.metrics
+        var state = GameState(
             demo: store.demo,
-            trainer: GameState.Trainer(connected: trainer != nil, controllable: store.simulationSupported,
-                                       controlled: store.controlled, controlReady: store.controlReady,
+            trainer: GameState.Trainer(connected: trainer != nil, controllable: store.gradeControl != .none,
+                                       controlled: store.controlled, controlReady: store.controlReady && !store.readOnly,
                                        name: trainer?.name, status: store.controlStatus),
             hr: GameState.Heart(connected: belt != nil, name: belt?.name),
             controllers: rows.filter { $0.role == .controller && $0.connected }.map { $0.name },
-            power: store.metrics.power,
-            cadence: store.metrics.cadence,
-            speed: store.metrics.speed,
-            heartRate: store.metrics.heartRate,
+            power: m.power,
+            cadence: m.cadence,
+            speed: m.speed,
+            heartRate: m.heartRate,
             gear: store.gears.gear)
+        // Protocole 1, révision 1 : machine (elliptique, rameur) et profil matériel.
+        state.hardware = store.profile.rawValue
+        state.machineKind = (trainer != nil || store.demo) ? store.machineKind?.rawValue : nil
+        state.strokeRate = m.strokeRate
+        state.strokeCount = m.strokeCount
+        state.distance = m.distance
+        state.pace = m.pace
+        state.stepRate = m.stepRate
+        state.resistance = m.resistance
+        return state
     }
 
     private func push(force: Bool = false) {
@@ -178,9 +188,9 @@ final class GameBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
             lastSent = nil
             push(force: true)
         case .grade(let grade):
-            // Pente du terrain avant vitesses virtuelles : l'appli applique les siennes.
-            store.terrain = grade
-            store.applySimulation()
+            // Pente du terrain avant vitesses virtuelles : l'appli applique les siennes. Elliptique ou rameur :
+            // la pente devient un niveau de résistance.
+            store.applyGameGrade(grade)
         case .shift(let delta):
             store.shift(delta)
         case .takeControl:

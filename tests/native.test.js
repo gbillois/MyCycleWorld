@@ -50,7 +50,7 @@ test('détection de la WebView de l’appli', () => {
 
 test('au démarrage, le jeu annonce qu’il est prêt', () => {
   const { posted, win } = setup();
-  assert.deepEqual(posted, [{ type: 'ready', protocol: 1 }]);
+  assert.deepEqual(posted, [{ type: 'ready', protocol: 1, minor: 1 }]);
   assert.equal(typeof win.mcwNative.state, 'function');
   assert.equal(typeof win.mcwNative.button, 'function');
 });
@@ -70,6 +70,75 @@ test('l’état de l’appli alimente les mesures et les appareils', () => {
   assert.equal(devices.hr.bpm, 142);
   assert.equal(devices.connectedControllers.length, 2);
   assert.equal(devices.connectedControllers[0].handshake, true);
+  // Appli d'avant la révision 1 : pas de type de machine, c'est un vélo.
+  assert.equal(devices.machineKind, 'bike');
+  assert.equal(devices.trainer.kind, 'bike');
+  assert.equal(devices.trainer.data.strokeRate, null);
+  assert.equal(devices.hardware, null);
+});
+
+test('révision 1 : rameur, cadence de coups, allure, distance et profil matériel', () => {
+  const { devices, win } = setup();
+  win.mcwNative.state({
+    ...STATE,
+    minor: 1,
+    hardware: 'technogym',
+    machineKind: 'rower',
+    power: 203,
+    cadence: 26,
+    speed: undefined,
+    strokeRate: 26.5,
+    strokeCount: 120,
+    distance: 300,
+    pace: 120,
+    resistance: 8,
+  });
+  assert.equal(devices.machineKind, 'rower');
+  assert.equal(devices.trainer.kind, 'rower');
+  assert.equal(devices.trainerActive, true);
+  assert.equal(devices.hardware, 'technogym');
+  assert.equal(devices.power, 203);
+  const d = devices.trainer.data;
+  assert.equal(d.strokeRate, 26.5);
+  assert.equal(d.strokeCount, 120);
+  assert.equal(d.distance, 300);
+  assert.equal(d.pace, 120);
+  assert.equal(d.resistance, 8);
+  assert.equal(d.stepRate, null);
+  assert.equal(d.speed, null);
+});
+
+test('révision 1 : elliptique (pas/min) ; valeurs invalides ignorées', () => {
+  const { devices, win } = setup();
+  win.mcwNative.state({ ...STATE, machineKind: 'cross', cadence: 70, stepRate: 140, resistance: 8.5, hardware: 'nimporte', strokeRate: 'x', pace: NaN });
+  assert.equal(devices.machineKind, 'cross');
+  assert.equal(devices.cadence, 70);
+  assert.equal(devices.trainer.data.stepRate, 140);
+  assert.equal(devices.trainer.data.resistance, 8.5);
+  assert.equal(devices.trainer.data.strokeRate, null);
+  assert.equal(devices.trainer.data.pace, null);
+  assert.equal(devices.hardware, null, 'profil inconnu ignoré');
+  win.mcwNative.state({ ...STATE, machineKind: 'fusée' });
+  assert.equal(devices.machineKind, 'bike', 'type inconnu : vélo par défaut');
+});
+
+test('révision 1 : tapis de course sans puissance, machine déconnectée', () => {
+  const { devices, win } = setup();
+  win.mcwNative.state({ ...STATE, machineKind: 'treadmill', power: undefined });
+  assert.equal(devices.machineKind, 'treadmill');
+  assert.equal(devices.trainerActive, false, 'pas de puissance : le jeu reste au clavier');
+  win.mcwNative.state({ ...STATE, trainer: { connected: false }, machineKind: 'rower' });
+  assert.equal(devices.machineKind, null);
+  assert.equal(devices.trainer.kind, null);
+  assert.equal(devices.trainerActive, false);
+});
+
+test('démo de l’appli en profil Technogym : rameur simulé', () => {
+  const { devices, win } = setup();
+  win.mcwNative.state({ v: 1, minor: 1, demo: true, trainer: { connected: false }, hr: { connected: false }, controllers: [], machineKind: 'rower', strokeRate: 26, power: 180, gear: 12 });
+  assert.equal(devices.machineKind, 'rower');
+  assert.equal(devices.trainer.data.strokeRate, 26);
+  assert.equal(devices.trainerActive, true);
 });
 
 test('sans trainer ni mesures : mode clavier, valeurs à zéro', () => {
