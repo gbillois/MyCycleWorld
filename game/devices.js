@@ -6,6 +6,7 @@ import { ZwiftController } from '../src/ble/zwift.js';
 import { realRequestDevice } from '../src/ble/gatt.js';
 import { createMockRequestDevice } from '../src/ble/mock.js';
 import { KeyEmitter, loadKeymap } from '../src/core/keymap.js';
+import { hardwareById } from '../src/core/hardware.js';
 
 export { explainError } from '../src/ble/errors.js';
 
@@ -20,6 +21,7 @@ export class Devices extends EventTarget {
     this.controllers = [];
     this.keyEmitter = new KeyEmitter(loadKeymap());
     this.lastTrainerData = 0;
+    this.hardware = hardwareById('zwift');
 
     this.trainer.addEventListener('data', () => {
       this.lastTrainerData = performance.now();
@@ -40,7 +42,16 @@ export class Devices extends EventTarget {
 
   // Le trainer fournit-il la puissance ? Sinon le jeu passe en mode clavier.
   get trainerActive() {
-    return this.trainer.connected;
+    return this.trainer.connected && this.trainer.data.power !== null;
+  }
+
+  // Type de la machine connectée : bike | cross | rower | treadmill | power (null si aucune).
+  get machineKind() {
+    return this.trainer.connected ? this.trainer.kind : null;
+  }
+
+  setHardware(id) {
+    this.hardware = hardwareById(id);
   }
 
   get power() {
@@ -60,9 +71,17 @@ export class Devices extends EventTarget {
     return this.controllers.filter((c) => c.connected);
   }
 
-  async connectTrainer() {
+  // acceptAll : montre tous les appareils Bluetooth (machine au nom ou aux services inattendus).
+  // demoKind : en mode démo, machine simulée voulue (rower, cross, bike).
+  async connectTrainer({ acceptAll = false, demoKind } = {}) {
     this.changed('trainer');
-    await this.trainer.connect();
+    if (this.trainer.connected) this.trainer.disconnect();
+    const filters = this.hardware.filters;
+    if (this.demo && demoKind) {
+      const base = this.requestDevice;
+      this.trainer.requestDevice = (opts) => base({ ...opts, demoKind });
+    } else this.trainer.requestDevice = this.requestDevice;
+    await this.trainer.connect({ acceptAll, filters });
   }
 
   async connectHeartRate() {

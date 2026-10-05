@@ -19,6 +19,9 @@ const SRC = 'trainer';
 
 const CHAR = {
   FTMS_FEATURE: 0x2acc,
+  TREADMILL_DATA: 0x2acd,
+  CROSS_TRAINER_DATA: 0x2ace,
+  ROWER_DATA: 0x2ad1,
   INDOOR_BIKE_DATA: 0x2ad2,
   TRAINING_STATUS: 0x2ad3,
   RESISTANCE_RANGE: 0x2ad6,
@@ -108,6 +111,71 @@ export function parseIndoorBikeData(b) {
   return out;
 }
 
+// Rameur (FTMS Rower Data 0x2AD1). Cadence de coups en coups/min (résolution 0.5), allure en s/500 m.
+export function parseRowerData(b) {
+  const v = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const flags = v.getUint16(0, true);
+  let o = 2;
+  const out = { flags };
+  const has = (bit) => flags & (1 << bit);
+  if (!has(0)) {
+    out.strokeRate = v.getUint8(o) / 2;
+    out.strokeCount = v.getUint16(o + 1, true);
+    o += 3;
+  }
+  if (has(1)) { out.avgStrokeRate = v.getUint8(o) / 2; o += 1; }
+  if (has(2)) { out.distance = v.getUint16(o, true) + (v.getUint8(o + 2) << 16); o += 3; }
+  if (has(3)) { out.pace = v.getUint16(o, true); o += 2; }
+  if (has(4)) { out.avgPace = v.getUint16(o, true); o += 2; }
+  if (has(5)) { out.power = v.getInt16(o, true); o += 2; }
+  if (has(6)) { out.avgPower = v.getInt16(o, true); o += 2; }
+  if (has(7)) { out.resistance = v.getInt16(o, true); o += 2; }
+  if (has(8)) { out.energy = v.getUint16(o, true); o += 5; }
+  if (has(9)) { out.heartRate = v.getUint8(o); o += 1; }
+  if (has(10)) { o += 1; }
+  if (has(11)) { out.elapsed = v.getUint16(o, true); o += 2; }
+  if (has(12)) { out.remaining = v.getUint16(o, true); o += 2; }
+  return out;
+}
+
+// Vélo elliptique (FTMS Cross Trainer Data 0x2ACE) : les drapeaux tiennent sur 3 octets.
+export function parseCrossTrainerData(b) {
+  const v = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const flags = v.getUint16(0, true) | (v.getUint8(2) << 16);
+  let o = 3;
+  const out = { flags };
+  const has = (bit) => flags & (1 << bit);
+  if (!has(0)) { out.speed = v.getUint16(o, true) / 100; o += 2; }
+  if (has(1)) { out.avgSpeed = v.getUint16(o, true) / 100; o += 2; }
+  if (has(2)) { out.distance = v.getUint16(o, true) + (v.getUint8(o + 2) << 16); o += 3; }
+  if (has(3)) {
+    out.stepRate = v.getUint16(o, true);
+    out.avgStepRate = v.getUint16(o + 2, true);
+    o += 4;
+  }
+  if (has(4)) { out.strideCount = v.getUint16(o, true) / 10; o += 2; }
+  if (has(5)) { o += 4; }
+  if (has(6)) { out.inclination = v.getInt16(o, true) / 10; o += 4; }
+  if (has(7)) { out.resistance = v.getInt16(o, true) / 10; o += 2; }
+  if (has(8)) { out.power = v.getInt16(o, true); o += 2; }
+  if (has(9)) { out.avgPower = v.getInt16(o, true); o += 2; }
+  if (has(10)) { out.energy = v.getUint16(o, true); o += 5; }
+  if (has(11)) { out.heartRate = v.getUint8(o); o += 1; }
+  if (has(12)) { o += 1; }
+  if (has(13)) { out.elapsed = v.getUint16(o, true); o += 2; }
+  if (has(14)) { out.remaining = v.getUint16(o, true); o += 2; }
+  out.backward = !!has(15);
+  return out;
+}
+
+// Puissance estimée d'un rameur à partir de l'allure (formule Concept2 : W = 2.8 / (s/m)³).
+export function rowerPowerFromPace(pace500) {
+  if (!pace500 || pace500 <= 0) return 0;
+  return 2.8 / Math.pow(pace500 / 500, 3);
+}
+
+export const MACHINE_LABELS = { bike: 'Vélo', cross: 'Vélo elliptique', rower: 'Rameur', treadmill: 'Tapis de course', power: 'Capteur de puissance' };
+
 export function parseCyclingPower(b) {
   const v = new DataView(b.buffer, b.byteOffset, b.byteLength);
   const flags = v.getUint16(0, true);
@@ -168,7 +236,11 @@ export class Trainer extends EventTarget {
     super();
     this.requestDevice = requestDevice;
     this.queue = new GattQueue();
-    this.data = { power: null, cadence: null, speed: null, heartRate: null, resistance: null };
+    this.data = { power: null, cadence: null, speed: null, heartRate: null, resistance: null, strokeRate: null, strokeCount: null, distance: null, pace: null, stepRate: null };
+    this.kind = null; // bike | cross | rower | treadmill | power
+    this.packets = 0;
+    this.lastPacketAt = 0;
+    this.serviceList = [];
     this.sources = {};
     this.features = null;
     this.ranges = {};
@@ -192,11 +264,16 @@ export class Trainer extends EventTarget {
     this.dispatchEvent(new CustomEvent(type, { detail }));
   }
 
-  async connect({ acceptAll = false } = {}) {
+  get kindLabel() {
+    return MACHINE_LABELS[this.kind] || 'Machine';
+  }
+
+  // filters : filtres Web Bluetooth du profil matériel choisi (Zwift, Technogym, BLE standard).
+  async connect({ acceptAll = false, filters = null } = {}) {
     const options = acceptAll
       ? { acceptAllDevices: true, optionalServices: ALL_OPTIONAL_SERVICES }
       : {
-          filters: [{ services: [SERVICES.FTMS] }, { services: [SERVICES.CPS] }],
+          filters: filters || [{ services: [SERVICES.FTMS] }, { services: [SERVICES.CPS] }],
           optionalServices: ALL_OPTIONAL_SERVICES,
         };
     info(SRC, 'Ouverture du sélecteur Bluetooth (home trainer)...');
@@ -207,16 +284,20 @@ export class Trainer extends EventTarget {
   }
 
   async setup() {
+    this.kind = null;
+    this.packets = 0;
+    for (const k of Object.keys(this.data)) this.data[k] = null;
+    this.sources = {};
     this.server = await connectGatt(this.device, SRC);
     this.connected = true;
-    await dumpGatt(this.server, SRC);
+    this.serviceList = (await dumpGatt(this.server, SRC)).map((sv) => sv.uuid);
     this.deviceInfo = await readDeviceInfo(this.server, SRC);
 
     const ftms = await getServiceOrNull(this.server, SERVICES.FTMS);
     const cps = await getServiceOrNull(this.server, SERVICES.CPS);
     const hrs = await getServiceOrNull(this.server, SERVICES.HR);
     info(SRC, `FTMS: ${ftms ? 'oui' : 'non'} · Cycling Power: ${cps ? 'oui' : 'non'} · Cardio intégré: ${hrs ? 'oui' : 'non'}`);
-    if (!ftms && !cps) warn(SRC, 'Ni FTMS ni Cycling Power : ce trainer ne pourra pas être lu.');
+    if (!ftms && !cps) warn(SRC, 'Ni FTMS ni Cycling Power : cette machine ne pourra pas être lue (protocole propriétaire ?). Le journal ci-dessus liste ses services.');
 
     if (ftms) await this.setupFtms(ftms);
     if (cps) await this.setupCps(cps);
@@ -253,20 +334,35 @@ export class Trainer extends EventTarget {
       }
     }
 
-    const bike = await getCharOrNull(ftms, CHAR.INDOOR_BIKE_DATA);
-    if (bike) {
+    // Type de machine selon la caractéristique de données présente.
+    const kinds = [
+      ['bike', CHAR.INDOOR_BIKE_DATA, 'Indoor Bike Data', parseIndoorBikeData],
+      ['rower', CHAR.ROWER_DATA, 'Rower Data', parseRowerData],
+      ['cross', CHAR.CROSS_TRAINER_DATA, 'Cross Trainer Data', parseCrossTrainerData],
+    ];
+    let found = false;
+    for (const [kind, uuid, label, parse] of kinds) {
+      const c = await getCharOrNull(ftms, uuid);
+      if (!c) continue;
       const sample = packetSampler(5, 200);
-      await subscribe(bike, (b) => {
-        if (sample()) debug(SRC, `Indoor Bike Data: ${hex(b)}`);
+      await subscribe(c, (b) => {
+        if (sample()) debug(SRC, `${label}: ${hex(b)}`);
         try {
-          this.onFtmsData(parseIndoorBikeData(b));
+          this.onFtmsData(parse(b), kind);
         } catch (e) {
-          warn(SRC, `Indoor Bike Data illisible (${hex(b)}): ${e.message}`);
+          warn(SRC, `${label} illisible (${hex(b)}): ${e.message}`);
         }
       });
-      info(SRC, 'Abonné aux données FTMS (Indoor Bike Data)');
-    } else {
-      warn(SRC, 'Pas de caractéristique Indoor Bike Data');
+      if (!found) this.kind = kind;
+      found = true;
+      info(SRC, `Abonné aux données FTMS (${label}) : ${MACHINE_LABELS[kind]}`);
+    }
+    if (!found) {
+      const tm = await getCharOrNull(ftms, CHAR.TREADMILL_DATA);
+      if (tm) {
+        this.kind = 'treadmill';
+        warn(SRC, 'Tapis de course FTMS : non utilisable dans le jeu (pas de puissance).');
+      } else warn(SRC, 'Aucune caractéristique de données FTMS (vélo, rameur, elliptique)');
     }
 
     const status = await getCharOrNull(ftms, CHAR.MACHINE_STATUS);
@@ -282,14 +378,22 @@ export class Trainer extends EventTarget {
       await subscribe(cp, (b) => this.onCpResponse(b));
       this.cp = cp;
       info(SRC, 'Control Point FTMS prêt, demande de contrôle...');
-      await this.command([OP.REQUEST_CONTROL]);
-      await this.command([OP.START]).catch(() => {});
+      // Certaines machines (Technogym notamment) refusent ou ignorent la demande : on reste alors en lecture seule.
+      try {
+        const r = await this.command([OP.REQUEST_CONTROL]);
+        if (!r.ok) throw new Error(RESULT_NAMES[r.result] || `code ${r.result}`);
+        await this.command([OP.START]).catch(() => {});
+      } catch (e) {
+        warn(SRC, `Contrôle refusé (${e.message}) : lecture seule, la résistance ne sera pas pilotée.`);
+        this.cp = null;
+      }
     }
   }
 
   async setupCps(cps) {
     const m = await getCharOrNull(cps, CHAR.CPS_MEASUREMENT);
     if (!m) return;
+    if (!this.kind) this.kind = 'power';
     const sample = packetSampler(5, 200);
     await subscribe(m, (b) => {
       if (sample()) debug(SRC, `Cycling Power: ${hex(b)}`);
@@ -302,9 +406,25 @@ export class Trainer extends EventTarget {
     info(SRC, 'Abonné aux données Cycling Power');
   }
 
-  onFtmsData(d) {
+  onFtmsData(d, kind = 'bike') {
+    this.packets++;
+    this.lastPacketAt = performance.now();
+    // Rameur sans puissance : estimée depuis l'allure.
+    if (d.power === undefined && kind === 'rower' && d.pace) d.power = Math.round(rowerPowerFromPace(d.pace));
     if (d.power !== undefined) this.setValue('power', d.power, 'FTMS');
     if (d.cadence !== undefined) this.setValue('cadence', d.cadence, 'FTMS');
+    // Elliptique : une révolution = deux pas ; rameur : la « cadence » est la cadence de coups.
+    if (d.stepRate !== undefined) {
+      this.setValue('stepRate', d.stepRate, 'FTMS');
+      this.setValue('cadence', d.stepRate / 2, 'FTMS');
+    }
+    if (d.strokeRate !== undefined) {
+      this.setValue('strokeRate', d.strokeRate, 'FTMS');
+      this.setValue('cadence', d.strokeRate, 'FTMS');
+    }
+    if (d.strokeCount !== undefined) this.setValue('strokeCount', d.strokeCount, 'FTMS');
+    if (d.distance !== undefined) this.setValue('distance', d.distance, 'FTMS');
+    if (d.pace !== undefined) this.setValue('pace', d.pace, 'FTMS');
     if (d.speed !== undefined) this.setValue('speed', d.speed, 'FTMS');
     if (d.heartRate !== undefined && d.heartRate > 0) this.setValue('heartRate', d.heartRate, 'FTMS');
     if (d.resistance !== undefined) this.setValue('resistance', d.resistance, 'FTMS');
@@ -312,6 +432,8 @@ export class Trainer extends EventTarget {
   }
 
   onCpsData(d) {
+    this.packets++;
+    this.lastPacketAt = performance.now();
     // FTMS est prioritaire s'il fournit déjà la valeur.
     if (this.sources.power !== 'FTMS') this.setValue('power', d.power, 'Cycling Power');
     if (d.crankRevs !== undefined && this.sources.cadence !== 'FTMS') {
@@ -398,7 +520,8 @@ export class Trainer extends EventTarget {
     const send = async () => {
       this.gradeDirty = false;
       try {
-        await this.setSimulation({});
+        if (this.kind !== 'bike' && this.kind !== null) await this.setResistanceForGrade(this.simulation.grade);
+        else await this.setSimulation({});
       } catch (e) {
         warn(SRC, `Pente non envoyée : ${e.message}`);
       }
@@ -415,6 +538,17 @@ export class Trainer extends EventTarget {
     return this.command([OP.SET_POWER, w & 0xff, (w >> 8) & 0xff]);
   }
 
+  // Machines sans mode simulation (elliptique, rameur) : la pente devient un niveau de résistance.
+  async setResistanceForGrade(grade) {
+    if (!this.features?.targets.includes('résistance')) return null;
+    const r = this.ranges.resistance || { min: 0, max: 20 };
+    const t = Math.max(0, Math.min(1, (grade + 4) / 16));
+    const level = r.min + (r.max - r.min) * (0.15 + t * 0.7);
+    if (this.lastLevel !== undefined && Math.abs(level - this.lastLevel) < (r.step || 0.5)) return null;
+    this.lastLevel = level;
+    return this.setResistanceLevel(level);
+  }
+
   async setResistanceLevel(level) {
     return this.command([OP.SET_RESISTANCE, Math.max(0, Math.min(255, Math.round(level * 10)))]);
   }
@@ -426,6 +560,7 @@ export class Trainer extends EventTarget {
   onDisconnected() {
     this.connected = false;
     this.cp = null;
+    this.data.power = null;
     warn(SRC, `"${this.name}" déconnecté`);
     this.emit('disconnected');
   }

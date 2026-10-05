@@ -16,6 +16,13 @@ import { bluetoothAdvice } from '../src/core/platform.js';
 import { keepScreenOn } from '../src/core/wakelock.js';
 import { TouchControls, wantsTouch } from './touch.js';
 import { TitleMenu } from './menu.js';
+import { RowingRace, formatSplit, splitFromSpeed } from '../src/core/rowing.js';
+import { buildRowingWorld, Boat } from './rowing-scene.js';
+import { HARDWARE_ORDER, hardwareById } from '../src/core/hardware.js';
+import { MACHINE_LABELS } from '../src/ble/trainer.js';
+import { onLog, logText, formatEntry } from '../src/ble/log.js';
+import { uuidName } from '../src/ble/bytes.js';
+import { BleInspector, parseServiceList } from '../src/ble/inspector.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -34,8 +41,30 @@ function storedCourse() {
 }
 let courseId = courseById(params.get('course') || storedCourse()).id;
 
-// Puissance simulée au clavier (sans home trainer).
+function storedPref(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+function savePref(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* stockage indisponible : réglage valable pour cette session seulement */
+  }
+}
+// Profil matériel (Zwift, Technogym, BLE standard) et direction automatique.
+const HW_KEY = 'mycycleworld.hw';
+const STEER_KEY = 'mycycleworld.steer';
+let hwId = hardwareById(params.get('hw') || storedPref(HW_KEY)).id;
+let steerPref = ['auto', 'on', 'off'].includes(storedPref(STEER_KEY)) ? storedPref(STEER_KEY) : 'auto';
+let playMachine = 'bike'; // bike | cross | row : machine choisie dans « Jouer »
+
+// Puissance simulée au clavier (sans home trainer). Au rameur : 180 W à 26 coups/min.
 const SIM = { power: 250, cadence: 90, rise: 900, fall: 140, cadenceFall: 70 };
+const SIM_ROW = { power: 180, rate: 26 };
 const TURBO_GRADE = -5;
 const BANANA_GRADE = 10;
 
@@ -157,6 +186,7 @@ resize();
 const NATIVE = isNativeApp();
 const devices = NATIVE ? new NativeDevices() : new Devices({ demo: DEMO });
 const gears = new VirtualGears();
+devices.setHardware(hwId);
 if (NATIVE) {
   devices.attachGears(gears);
   document.body.classList.add('native');
@@ -164,6 +194,8 @@ if (NATIVE) {
 const keys = new Set();
 const sim = { power: 0, cadence: 0 };
 let state = 'home'; // home | race | paused | end
+let mode = 'bike'; // bike | row
+let rowing = null; // { race, world, boats } en mode rameur
 let race = null;
 let models = new Map(); // racer -> RiderModel
 let boxMeshes = [];
@@ -182,6 +214,7 @@ const tmpFrame2 = {};
 
 // Crée une course (et ses objets 3D). Utilisé aussi pour l'aperçu de l'écran d'accueil.
 function setupRace() {
+  if (mode === 'row') return setupRowing();
   disposeTree(raceObjects); // coureurs, étiquettes et objets de la course précédente
   raceObjects.clear();
   bananaMeshes.clear();
@@ -247,15 +280,18 @@ function setupRace() {
 
 function show(id) {
   for (const s of ['loading', 'home', 'pause', 'end']) $(s).hidden = s !== id;
-  hud.show(state === 'race' || state === 'paused' || state === 'end');
+  const racing = state === 'race' || state === 'paused' || state === 'end';
+  hud.show(racing && mode === 'bike');
+  $('rowHud').hidden = !(racing && mode === 'row');
   if (id === 'home') {
     menu.close(false);
     menu.focusDefault();
   }
 }
 
-function goHome() {
+async function goHome() {
   clearTimeout(endTimer);
+  if (mode === 'row') await leaveRowing();
   state = 'home';
   setupRace();
   show('home');
@@ -290,6 +326,7 @@ function resume() {
 }
 
 function showEnd() {
+  if (mode === 'row') return showRowEnd();
   if (state === 'paused') {
     endTimer = setTimeout(showEnd, 500);
     return;
@@ -346,8 +383,6 @@ function renderCourses() {
     const info = describeCourse(id);
     return `<button type="button" class="course-card" data-course="${id}" aria-current="${id === courseId}">${info.svg}<span><span class="c-name">${info.name}</span><span class="c-tag">${info.tagline}</span><span class="c-stats">${info.stats.map((x) => `<span>${x}</span>`).join('')}${info.hot.map((x) => `<span class="hot">${x}</span>`).join('')}</span></span></button>`;
   }).join('');
-  const cur = describeCourse(courseId);
-  $('playSummary').textContent = `${cur.name} · ${plural(lapsFor(courseById(courseId)), 'tour')}`;
 }
 
 // Change de circuit sur place : écran de chargement, décor reconstruit, nouvelle course.
@@ -371,12 +406,244 @@ async function loadCourse(id) {
   renderCourses();
 }
 
+// Bassins d'aviron (miniature : couloirs et bateaux).
+const ROW_LEVELS = [
+  { distance: 500, name: 'Lac Bleu · Sprint', tagline: '500 m en ligne droite, 5 adversaires' },
+  { distance: 1000, name: 'Lac Bleu · Classique', tagline: '1 000 m, garde ton allure jusqu’au bout' },
+];
+function rowSvg(distance) {
+  const lanes = [0, 1, 2, 3, 4, 5].map((i) => `<line x1="${14 + i * 14.4}" y1="6" x2="${14 + i * 14.4}" y2="94" stroke="#fff" stroke-width="1" stroke-dasharray="2 3" opacity="0.8"/>`).join('');
+  const boats = [0, 1, 2, 3, 4].map((i) => `<rect x="${19 + i * 14.4}" y="${70 - ((i * 37) % 30) - (distance > 500 ? 0 : 10)}" width="4" height="14" rx="2" fill="${['#e0384b', '#2b6cff', '#ff5a1f', '#ffd23f', '#3ccf7a'][i]}"/>`).join('');
+  return `<svg viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" fill="#2a7fb8"/><rect width="8" height="100" fill="#5aa845"/><rect x="92" width="8" height="100" fill="#5aa845"/>${lanes}<rect x="8" y="10" width="84" height="3" fill="#ff3b2f"/>${boats}<text x="50" y="58" font-size="14" font-weight="900" text-anchor="middle" fill="#fff" opacity="0.9">${distance} m</text></svg>`;
+}
+$('rowList').innerHTML = ROW_LEVELS.map((l) => `<button type="button" class="course-card" data-row="${l.distance}">${rowSvg(l.distance)}<span><span class="c-name">${l.name}</span><span class="c-tag">${l.tagline}</span><span class="c-stats"><span>${l.distance} m</span><span>6 bateaux</span></span></span></button>`).join('');
+$('rowList').addEventListener('click', (e) => {
+  const card = e.target.closest('[data-row]');
+  if (card) startRowing(+card.dataset.row);
+});
+
+// Jouer : choix de la machine, puis du niveau.
+for (const card of document.querySelectorAll('[data-machine]')) {
+  card.addEventListener('click', () => {
+    playMachine = card.dataset.machine;
+    if (playMachine === 'row') return menu.open('rowPanel', card);
+    $('courseTitle').textContent = playMachine === 'cross' ? 'Elliptique : choisis ton circuit' : 'Vélo : choisis ton circuit';
+    $('courseNote').hidden = playMachine !== 'cross';
+    $('courseNote').textContent = 'Pas de boutons sur l’elliptique : le pilote automatique tourne pour toi, attrape les boîtes et utilise les objets.';
+    menu.open('coursePanel', card);
+  });
+}
+
 $('courseList').addEventListener('click', async (e) => {
   const card = e.target.closest('[data-course]');
   if (!card) return;
   await loadCourse(card.dataset.course);
   startRace();
 });
+
+// ---------- Mode rameur ----------
+
+// Entre dans le bassin d'aviron : le décor du circuit est libéré, celui du lac construit à la place.
+async function startRowing(distance = 500) {
+  keepScreenOn();
+  devices.prepareRace?.();
+  clearTimeout(endTimer);
+  document.activeElement?.blur?.();
+  if (mode === 'row' && rowing.distance !== distance) {
+    // Autre longueur de bassin : on reconstruit le lac.
+    for (const b of rowing.boats.values()) disposeTree(b.group);
+    raceObjects.clear();
+    rowing.boats = new Map();
+    rowing.world.dispose();
+    rowing.world = buildRowingWorld(scene, { quality: QUALITY, renderer, detailed: DETAILED, distance });
+    rowing.distance = distance;
+  }
+  if (mode !== 'row') {
+    $('loadingText').textContent = 'Chargement : bassin d’aviron…';
+    show('loading');
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    scenery.dispose();
+    disposeTree(raceObjects);
+    raceObjects.clear();
+    models = new Map();
+    boxMeshes = [];
+    mode = 'row';
+    rowing = { world: buildRowingWorld(scene, { quality: QUALITY, renderer, detailed: DETAILED, distance }), race: null, boats: new Map(), distance };
+  }
+  setupRowing();
+  state = 'race';
+  lastSentGrade = null;
+  show(null);
+  hud.flash('', 1);
+}
+
+// Revient au vélo : décor du circuit reconstruit.
+async function leaveRowing() {
+  $('loadingText').textContent = `Chargement : ${track.course.name}…`;
+  show('loading');
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  for (const b of rowing.boats.values()) disposeTree(b.group);
+  raceObjects.clear();
+  rowing.world.dispose();
+  rowing = null;
+  mode = 'bike';
+  buildWorld();
+}
+
+function setupRowing() {
+  for (const b of rowing.boats.values()) {
+    raceObjects.remove(b.group);
+    disposeTree(b.group);
+  }
+  rowing.boats = new Map();
+  const r = new RowingRace({ distance: rowing.distance });
+  rowing.race = r;
+  for (const racer of r.racers) {
+    const boat = new Boat({ color: racer.color, name: racer.isPlayer ? '' : racer.name });
+    rowing.boats.set(racer, boat);
+    raceObjects.add(boat.group);
+  }
+  // Pastilles de la barre de progression
+  $('rProgress').innerHTML = '<div class="row-finish"></div>' + r.racers.map((x, i) => `<span class="dot${x.isPlayer ? ' me' : ''}" data-i="${i}" style="background:${x.color}"></span>`).join('');
+  r.addEventListener('go', () => hud.flash('Partez !', 1100, 'good'));
+  r.addEventListener('finish', ({ detail }) => {
+    if (!detail.isPlayer) return;
+    hud.flash(`Arrivée : ${ordinal(r.positionOf(detail))} !`, 2500, 'good');
+    endTimer = setTimeout(showEnd, 2200);
+  });
+  syncRowing(0);
+  snapRowCamera();
+}
+
+function rowingInput() {
+  const trainer = devices.trainerActive;
+  const rate = devices.trainer?.data?.strokeRate;
+  return {
+    power: trainer ? devices.power : sim.power,
+    strokeRate: trainer ? rate ?? (devices.machineKind === 'rower' ? devices.cadence : 0) : sim.power > 20 ? SIM_ROW.rate * Math.min(1, sim.power / SIM_ROW.power) : 0,
+    steer: rowSteer(),
+  };
+}
+
+// Au rameur, le pilote automatique garde le bateau au milieu de son couloir.
+function rowSteer() {
+  const manual = (keys.has('ArrowRight') ? 1 : 0) - (keys.has('ArrowLeft') ? 1 : 0);
+  if (manual || !autoSteer()) return manual;
+  const p = rowing.race.player;
+  return Math.max(-1, Math.min(1, -p.lateral * 0.8));
+}
+
+function syncRowing(dt) {
+  const r = rowing.race;
+  for (const [racer, boat] of rowing.boats) {
+    // Le bateau avance par à-coups : petite poussée à chaque coup d'aviron.
+    const surge = racer.v > 0.3 ? Math.sin(racer.phase) * 0.06 : 0;
+    boat.group.position.set(racer.laneX + racer.lateral, 0, racer.s + surge);
+    boat.group.rotation.set(0, Math.max(-0.12, Math.min(0.12, (racer.isPlayer ? rowSteer() : 0) * -0.08)), Math.sin(racer.phase * 0.5) * 0.015);
+    const rowingAmount = racer.strokeRate > 1 ? 1 : Math.max(0, (boat.amount ?? 0) - dt);
+    boat.amount = rowingAmount;
+    boat.pose(racer.strokeRate > 1 ? racer.phase : Math.PI * 1.5, rowingAmount);
+    if (boat.label) boat.label.visible = camera.position.distanceTo(boat.group.position) > 6;
+  }
+  void r;
+}
+
+function snapRowCamera() {
+  rowCameraTarget(camPos, camLook);
+}
+
+function rowCameraTarget(outPos, outLook) {
+  const p = rowing.race.player;
+  const x = p.laneX + p.lateral;
+  outPos.set(x + 3.2, 3.4, p.s - 10);
+  outLook.set(x - 1.5, 0.6, p.s + 12);
+}
+
+function frameRowing(dt, nowMs) {
+  const r = rowing.race;
+  if (state === 'race' || state === 'end') {
+    r.update(dt, rowingInput());
+    if (r.time < 0) hud.countdown(String(Math.ceil(-r.time)));
+  }
+  syncRowing(state === 'paused' ? 0 : dt);
+  updateGrade();
+  rowCameraTarget(desiredPos, desiredLook);
+  camPos.lerp(desiredPos, 1 - Math.exp(-dt * 4));
+  camLook.lerp(desiredLook, 1 - Math.exp(-dt * 6));
+  camera.position.copy(camPos);
+  camera.lookAt(camLook);
+  if (Math.abs(camera.fov - 62) > 0.05) {
+    camera.fov = 62;
+    camera.updateProjectionMatrix();
+  }
+  if (sun) {
+    sun.target.position.set(r.player.laneX, 0, r.player.s);
+    sun.position.copy(sun.target.position).addScaledVector(SUN_DIR, 220);
+  }
+  rowing.world.update(dt, camera);
+  if (nowMs - (frameRowing.last || 0) > 100) {
+    frameRowing.last = nowMs;
+    updateRowHud();
+  }
+}
+
+function updateRowHud() {
+  const r = rowing.race;
+  const p = r.player;
+  const set = (id, v) => {
+    const el = $(id);
+    if (el.textContent !== v) el.textContent = v;
+  };
+  const pos = r.positionOf(p);
+  set('rPos', ordinal(pos));
+  set('rPosTotal', `/ ${r.racers.length}`);
+  set('rLeft', p.finishTime !== null ? 'Arrivé !' : `${Math.max(0, Math.ceil(r.distance - p.s))} m`);
+  set('rTime', formatTime(Math.max(0, p.finishTime ?? r.time)));
+  set('rPower', p.power > 0 || devices.trainerActive ? String(Math.round(p.power)) : '--');
+  set('rRate', p.strokeRate > 0 ? String(Math.round(p.strokeRate)) : '--');
+  set('rHr', devices.heartRate ? String(devices.heartRate) : '--');
+  set('rSplit', formatSplit(splitFromSpeed(p.v)));
+  set('rSpeed', (p.v * 3.6).toFixed(1));
+  set('rDist', String(Math.floor(Math.min(p.s, r.distance))));
+  for (const dot of $('rProgress').querySelectorAll('.dot')) {
+    const x = r.racers[+dot.dataset.i];
+    dot.style.left = `${Math.min(100, (x.s / r.distance) * 100)}%`;
+  }
+  const kind = devices.machineKind;
+  let hint = '';
+  if (!devices.trainerActive) hint = TOUCH ? 'Maintiens « Pédaler » pour ramer (180 W simulés)' : 'Maintiens ↑ pour ramer (180 W simulés) · ← → pour rester dans ton couloir';
+  else if (kind && kind !== 'rower') hint = `Machine connectée : ${MACHINE_LABELS[kind] || kind} (sa puissance fait avancer le bateau)`;
+  set('rHint', hint);
+  $('rEffects').innerHTML = p.offLane ? '<span class="badge grass">Hors couloir : les bouées freinent !</span>' : autoSteer() ? '<span class="badge auto">🧭 Pilote auto</span>' : '';
+  touch?.setPedalVisible(!devices.trainerActive);
+  touch?.setItemReady(false);
+}
+
+function showRowEnd() {
+  if (state === 'paused') {
+    endTimer = setTimeout(showEnd, 500);
+    return;
+  }
+  if (state !== 'race') return;
+  state = 'end';
+  touch?.releaseAll();
+  const r = rowing.race;
+  const rows = r.ranking().map((x) => ({ r: x, ...r.estimatedTime(x) }));
+  rows.sort((a, b) => (a.estimated === b.estimated ? a.time - b.time : a.estimated ? 1 : -1));
+  const best = rows[0].time;
+  const me = rows.findIndex((x) => x.r.isPlayer) + 1;
+  $('endTitle').textContent = me === 1 ? 'Victoire ! 🏆' : `Arrivée : ${ordinal(me)} sur ${rows.length}`;
+  $('results').innerHTML =
+    '<tr><th>#</th><th>Rameur</th><th>Temps</th><th>Allure</th></tr>' +
+    rows
+      .map((x, i) => {
+        const split = formatSplit((x.time / r.distance) * 500);
+        return `<tr class="${x.r.isPlayer ? 'me' : ''}"><td>${i + 1}</td><td><span class="dot" style="background:${x.r.color}"></span>${x.r.name}</td><td>${x.estimated ? '≈ ' : ''}${formatTime(x.time)}${i ? ` <small>+${formatTime(x.time - best)}</small>` : ''}</td><td>${split} /500 m</td></tr>`;
+      })
+      .join('');
+  $('endNote').textContent = rows.some((x) => x.estimated) ? '≈ : temps estimé, le rameur n’avait pas encore franchi la ligne.' : '';
+  show('end');
+}
 
 // ---------- Matériel ----------
 
@@ -393,7 +660,8 @@ function refreshDevices() {
   if (!busy.trainer) {
     if (t.connected) {
       const live = t.data.power !== null ? ` · ${Math.round(t.data.power)} W, ${Math.round(t.data.cadence ?? 0)} rpm` : '';
-      setStatus('trainerStatus', `${t.name}${t.canControl ? ' · pente pilotée' : ' · lecture seule'}${live}`, t.canControl ? 'ok' : 'warn');
+      const kind = t.kind && t.kind !== 'bike' ? ` (${MACHINE_LABELS[t.kind] || t.kind})` : '';
+      setStatus('trainerStatus', `${t.name}${kind}${t.canControl ? (t.kind === 'bike' ? ' · pente pilotée' : ' · résistance pilotée') : ' · lecture seule'}${live}`, t.canControl ? 'ok' : 'warn');
     } else if (t.device) setStatus('trainerStatus', 'déconnecté', 'bad');
   }
   const h = devices.hr;
@@ -412,8 +680,10 @@ function refreshDevices() {
     controllers: devices.connectedControllers.length,
     gfxLabel: DETAILED ? 'graphismes détaillés' : 'graphisme simple',
   });
+  refreshHwTest();
+  const verb = { rower: 'Rame', cross: 'Pédale sur l’elliptique' }[devices.machineKind] || 'Pédale';
   $('modeHint').textContent = t.connected
-    ? 'Le home trainer fournit la puissance. Pédale pour avancer !'
+    ? `${t.name} fournit la puissance. ${verb} pour avancer !`
     : TOUCH
       ? 'Sans home trainer : maintiens le bouton « Pédaler » à l’écran (250 W simulés).'
       : 'Sans home trainer : maintiens la flèche ↑ pour pédaler (250 W simulés).';
@@ -433,12 +703,12 @@ async function connect(kind, statusId, fn) {
   }
 }
 
-$('connectTrainer').addEventListener('click', () => connect('trainer', 'trainerStatus', () => devices.connectTrainer()));
+$('connectTrainer').addEventListener('click', () => connect('trainer', 'trainerStatus', () => devices.connectTrainer({ demoKind: demoKind() })));
 $('connectHr').addEventListener('click', () => connect('hr', 'hrStatus', () => devices.connectHeartRate()));
 $('connectZwift').addEventListener('click', () => connect('zwift', 'zwiftStatus', () => devices.connectController()));
 $('resume').addEventListener('click', resume);
 $('quit').addEventListener('click', goHome);
-$('replay').addEventListener('click', startRace);
+$('replay').addEventListener('click', () => (mode === 'row' ? startRowing(rowing.distance) : startRace()));
 $('backHome').addEventListener('click', goHome);
 
 if (NATIVE) {
@@ -451,6 +721,182 @@ if (NATIVE) {
 } else if (!devices.bluetoothAvailable) {
   $('btWarning').textContent = `${bluetoothAdvice()} Tu peux quand même jouer ${TOUCH ? 'avec les boutons à l’écran' : 'au clavier'}.`;
   $('btWarning').hidden = false;
+}
+
+// ---------- Profil matériel et test de connexion ----------
+
+// Chaque page de connexion (Zwift, Technogym, Bluetooth standard) a ses boutons, sa console et son test.
+const CONNECT_TITLES = { zwift: 'Connecter Zwift', technogym: 'Connecter Technogym', ble: 'Bluetooth standard' };
+function applyHardware() {
+  const hw = hardwareById(hwId);
+  devices.setHardware(hwId);
+  $('connectTitle').textContent = CONNECT_TITLES[hwId];
+  if (!NATIVE) $('connectTrainer').textContent = hw.connectLabel;
+  $('hwHint').textContent = hw.hint;
+  $('connectDemoCross').hidden = !(DEMO && hwId === 'technogym');
+  $('zwiftRow').hidden = hwId !== 'zwift';
+  for (const card of document.querySelectorAll('[data-connect]')) card.setAttribute('aria-current', String(card.dataset.connect === hwId));
+}
+for (const card of document.querySelectorAll('[data-connect]')) {
+  card.addEventListener('click', () => {
+    hwId = card.dataset.connect;
+    savePref(HW_KEY, hwId);
+    applyHardware();
+    refreshDevices();
+    showLog();
+    menu.open('connectPanel', card);
+  });
+}
+applyHardware();
+
+const demoKind = () => (DEMO && hwId === 'technogym' ? 'rower' : undefined);
+$('connectAny').addEventListener('click', () => connect('trainer', 'trainerStatus', () => devices.connectTrainer({ acceptAll: true, demoKind: demoKind() })));
+$('connectDemoCross').addEventListener('click', () => connect('trainer', 'trainerStatus', () => devices.connectTrainer({ demoKind: 'cross' })));
+
+const ago = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`);
+function refreshHwTest() {
+  const t = devices.trainer;
+  const box = $('hwTest');
+  box.hidden = NATIVE;
+  if (box.hidden) return;
+  if (!t.device) {
+    $('hwTestInfo').innerHTML = '<dt>Machine</dt><dd>aucune connectée pour l’instant</dd>';
+    $('hwPilot').disabled = true;
+    return;
+  }
+  const d = t.data;
+  const rows = [];
+  const info = t.deviceInfo || {};
+  rows.push(['Machine', [t.name, [info.manufacturer, info.model].filter(Boolean).join(' ')].filter(Boolean).join(' · ')]);
+  rows.push(['Connexion', t.connected ? 'connectée' : 'déconnectée', t.connected ? 'ok' : 'bad']);
+  if (t.connected) {
+    rows.push(['Type', t.kind ? `${MACHINE_LABELS[t.kind] || t.kind}${t.kind === 'power' ? ' (Cycling Power)' : ' (FTMS)'}` : 'inconnu (aucune donnée FTMS ni puissance)', t.kind ? 'ok' : 'bad']);
+    rows.push(['Services', (t.serviceList || []).map((u) => uuidName(u).replace(/ \[[^\]]+\]$/, '')).join(', ') || '(liste indisponible)']);
+    const age = t.lastPacketAt ? performance.now() - t.lastPacketAt : Infinity;
+    rows.push(['Données', t.packets ? `${t.packets} paquets, dernier il y a ${ago(age)}` : 'aucune pour l’instant : démarre une séance ou tire la poignée', t.packets && age < 3000 ? 'ok' : 'bad']);
+    const m = [];
+    if (d.power !== null) m.push(`${Math.round(d.power)} W`);
+    if (d.strokeRate !== null) m.push(`${Math.round(d.strokeRate)} coups/min`);
+    else if (d.stepRate !== null) m.push(`${Math.round(d.stepRate)} pas/min`);
+    else if (d.cadence !== null) m.push(`${Math.round(d.cadence)} rpm`);
+    if (d.speed !== null) m.push(`${d.speed.toFixed(1)} km/h`);
+    if (d.distance !== null) m.push(`${d.distance} m`);
+    if (d.pace) m.push(`${formatSplit(d.pace)} /500 m`);
+    if (d.resistance !== null) m.push(`résistance ${d.resistance}`);
+    if (d.heartRate) m.push(`${d.heartRate} bpm`);
+    rows.push(['Mesures', m.join(' · ') || '—']);
+    rows.push(['Pilotage', t.canControl ? `oui${t.features?.targets?.length ? ` (${t.features.targets.join(', ')})` : ''}` : 'non : lecture seule', t.canControl ? 'ok' : '']);
+  }
+  $('hwTestInfo').innerHTML = rows.map(([k, v, cls = '']) => `<dt>${k}</dt><dd class="${cls}">${v}</dd>`).join('');
+  $('hwPilot').disabled = !t.connected || !t.canControl;
+}
+
+// Test du pilotage : un peu plus dur pendant 5 s, puis retour (pente pour un vélo, résistance sinon).
+$('hwPilot').addEventListener('click', async () => {
+  const t = devices.trainer;
+  const btn = $('hwPilot');
+  btn.disabled = true;
+  try {
+    if (t.kind === 'bike') await t.setSimulation({ grade: 6 });
+    else {
+      const r = t.ranges.resistance || { min: 0, max: 20 };
+      await t.setResistanceLevel(r.min + (r.max - r.min) * 0.7);
+    }
+    btn.textContent = 'Plus dur pendant 5 s…';
+    await new Promise((res) => setTimeout(res, 5000));
+    if (t.kind === 'bike') await t.setSimulation({ grade: 0 });
+    else {
+      const r = t.ranges.resistance || { min: 0, max: 20 };
+      await t.setResistanceLevel(r.min + (r.max - r.min) * 0.3);
+    }
+    btn.textContent = 'Pilotage OK ✓';
+  } catch (e) {
+    btn.textContent = `Échec : ${explainError(e)}`;
+  }
+  setTimeout(() => {
+    btn.textContent = 'Tester le pilotage';
+    btn.disabled = false;
+  }, 2500);
+});
+
+// Console Bluetooth : visible par défaut sur chaque page de connexion.
+const logBox = $('hwLog');
+function showLog() {
+  logBox.textContent = logText().split('\n').slice(-80).join('\n') || 'La console affichera ici tout ce qui se passe en Bluetooth (services trouvés, paquets reçus, commandes envoyées).';
+  logBox.scrollTop = logBox.scrollHeight;
+}
+$('hwLogToggle').addEventListener('click', () => {
+  logBox.hidden = !logBox.hidden;
+  $('hwLogToggle').textContent = logBox.hidden ? 'Afficher la console' : 'Masquer la console';
+  if (!logBox.hidden) showLog();
+});
+onLog((e) => {
+  if (logBox.hidden) return;
+  if (!logBox.textContent.includes('\n') && !logBox.textContent.match(/^\d/)) logBox.textContent = formatEntry(e);
+  else logBox.textContent += `\n${formatEntry(e)}`;
+  logBox.scrollTop = logBox.scrollHeight;
+});
+$('hwLogCopy').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(logText());
+    $('hwLogCopy').textContent = 'Copié ✓';
+  } catch {
+    logBox.hidden = false;
+    logBox.textContent = logText();
+    $('hwLogToggle').textContent = 'Masquer la console';
+    $('hwLogCopy').textContent = 'Sélectionne le texte';
+  }
+  setTimeout(() => ($('hwLogCopy').textContent = 'Copier le journal'), 2000);
+});
+
+// Journal en fichier texte (à envoyer pour ajouter une machine non standard).
+$('hwLogDownload').addEventListener('click', () => {
+  const blob = new Blob([logText()], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `mycycleworld-bluetooth-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.txt`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+});
+
+// Inspecteur BLE : n'importe quel appareil, toutes les caractéristiques, octets bruts dans la console.
+const inspector = NATIVE ? null : new BleInspector({ requestDevice: (o) => devices.requestDevice(o) });
+const EXTRA_KEY = 'mycycleworld.inspectExtra';
+$('inspectExtra').value = storedPref(EXTRA_KEY) || '';
+function refreshInspector() {
+  if (!inspector) return;
+  $('inspectStop').disabled = !inspector.running;
+  $('inspectStatus').textContent = inspector.running
+    ? `Écoute de « ${inspector.device.name || 'appareil'} » : ${inspector.chars.size} caractéristiques, ${inspector.packets} paquets reçus.`
+    : inspector.device ? `Terminé : ${inspector.summary()}` : '';
+}
+inspector?.addEventListener('change', refreshInspector);
+$('inspectStart').addEventListener('click', async () => {
+  savePref(EXTRA_KEY, $('inspectExtra').value);
+  logBox.hidden = false;
+  $('hwLogToggle').textContent = 'Masquer la console';
+  showLog();
+  try {
+    $('inspectStatus').textContent = 'Choisis l’appareil dans la fenêtre Bluetooth…';
+    await inspector.inspect({ extraServices: parseServiceList($('inspectExtra').value) });
+  } catch (e) {
+    $('inspectStatus').textContent = explainError(e);
+  }
+  refreshInspector();
+});
+$('inspectStop').addEventListener('click', () => {
+  inspector.stop();
+  refreshInspector();
+});
+
+// Direction : selon le matériel, toujours automatique ou manuelle.
+for (const btn of document.querySelectorAll('.seg-btn[data-steer]')) {
+  btn.setAttribute('aria-pressed', String(btn.dataset.steer === steerPref));
+  btn.addEventListener('click', () => {
+    steerPref = btn.dataset.steer;
+    savePref(STEER_KEY, steerPref);
+    for (const b of document.querySelectorAll('.seg-btn[data-steer]')) b.setAttribute('aria-pressed', String(b === btn));
+  });
 }
 
 // Choix des graphismes : mémorisé, appliqué en rechargeant la page (le décor est construit au démarrage).
@@ -486,11 +932,11 @@ window.addEventListener('keydown', (e) => {
     if (state === 'race') pause();
     else if (state === 'paused') resume();
     else if (state === 'end') goHome();
-  } else if (code === 'Space' && state === 'race') {
+  } else if (code === 'Space' && state === 'race' && mode === 'bike') {
     race.useItem(race.player);
   } else if (code === 'Enter' || code === 'NumpadEnter') {
     if (state === 'paused') resume();
-    else if (state === 'end') startRace();
+    else if (state === 'end') (mode === 'row' ? startRowing(rowing.distance) : startRace());
   }
 });
 window.addEventListener('keyup', (e) => keys.delete(e.code));
@@ -514,8 +960,9 @@ gears.addEventListener('change', () => {
 
 function updateSim(dt) {
   const pedaling = keys.has('ArrowUp') && !devices.trainerActive && state !== 'paused';
+  const maxPower = mode === 'row' ? SIM_ROW.power : SIM.power;
   if (pedaling) {
-    sim.power = Math.min(SIM.power, sim.power + SIM.rise * dt);
+    sim.power = Math.min(maxPower, sim.power + SIM.rise * dt);
     sim.cadence = Math.min(SIM.cadence, sim.cadence + 200 * dt);
   } else {
     sim.power = Math.max(0, sim.power - SIM.fall * dt);
@@ -523,9 +970,21 @@ function updateSim(dt) {
   }
 }
 
+// Pilote automatique : forcé dans les options, ou choisi selon le matériel (machine sans boutons de
+// direction : elliptique, vélo ou rameur Technogym / BLE, sans manette Zwift connectée).
+function autoSteer() {
+  if (steerPref === 'on') return true;
+  if (steerPref === 'off') return false;
+  if (devices.connectedControllers.length) return false;
+  if (playMachine === 'cross' || playMachine === 'row') return true;
+  const kind = devices.machineKind;
+  return kind === 'cross' || kind === 'rower' || (hwId !== 'zwift' && devices.trainerActive);
+}
+
 function playerInput() {
   const trainer = devices.trainerActive;
   return {
+    auto: autoSteer(),
     power: trainer ? devices.power : sim.power,
     cadence: trainer ? devices.cadence : sim.cadence,
     steer: (keys.has('ArrowRight') ? 1 : 0) - (keys.has('ArrowLeft') ? 1 : 0),
@@ -535,6 +994,13 @@ function playerInput() {
 
 // Pente envoyée au trainer : terrain + effets des objets, puis vitesses virtuelles.
 function updateGrade() {
+  if (mode === 'row') {
+    // Au rameur, pas de pente : on laisse la machine sur sa résistance (et un trainer sur du plat).
+    if (lastSentGrade !== 0 && devices.machineKind !== 'rower') devices.sendGrade(0, 0);
+    lastSentGrade = 0;
+    feltGrade = 0;
+    return 0;
+  }
   const p = race.player;
   const t = race.time;
   const terrain = state === 'race' || state === 'end' ? track.gradeAt(p.s) : 0;
@@ -661,6 +1127,13 @@ function frame(nowMs) {
   const dt = Math.min(0.1, Math.max(0, (nowMs - lastFrame) / 1000));
   lastFrame = nowMs;
   updateSim(dt);
+  if (mode === 'row') {
+    frameRowing(dt, nowMs);
+    if (post) post.composer.render();
+    else renderer.render(scene, camera);
+    requestAnimationFrame(frame);
+    return;
+  }
   if (state === 'race' || state === 'end') {
     race.update(dt, playerInput());
     if (race.time < 0) hud.countdown(String(Math.ceil(-race.time)));
@@ -696,6 +1169,7 @@ function frame(nowMs) {
         draft: p.draft,
         offRoad: p.offRoad,
         surface: p.surface,
+        autoSteer: autoSteer() && !keys.has('ArrowLeft') && !keys.has('ArrowRight'),
         keyboard: !devices.trainerActive,
         touch: TOUCH,
       },
@@ -718,6 +1192,8 @@ window.__mcw = {
   renderer,
   get state() { return state; },
   get race() { return race; },
+  get mode() { return mode; },
+  get rowing() { return rowing; },
   devices,
   gears,
   get track() { return track; },

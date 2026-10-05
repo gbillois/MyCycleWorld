@@ -90,6 +90,13 @@ export class NativeDevices extends EventTarget {
     return this.trainer.connected;
   }
 
+  // L'appli iOS ne gère que des home trainers (vélos) pour l'instant.
+  get machineKind() {
+    return this.trainer.connected ? 'bike' : null;
+  }
+
+  setHardware() {}
+
   get power() {
     return this.snapshot.power ?? 0;
   }

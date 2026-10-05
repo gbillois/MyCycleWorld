@@ -11,6 +11,9 @@ export const SERVICES = {
   DIS: 0x180a,
   ZWIFT: '00000001-19ca-4651-86e5-fa29dcdd09d1',
   ZWIFT_FW2: 0xfc82,
+  RSC: 0x1814,
+  // Service propriétaire des vélos Technogym (repéré par qdomyos-zwift) : listé dans le journal s'il existe.
+  TECHNOGYM_BIKE: 'a913bfc0-929e-11e5-b928-0002a5d5c51b',
 };
 
 export const ALL_OPTIONAL_SERVICES = Object.values(SERVICES);

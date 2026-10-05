@@ -95,7 +95,7 @@ const THEMES = {
 export const SUN_DIR = new THREE.Vector3(-0.5, 0.62, 0.6).normalize();
 export const HORIZON = C('#d6ecff');
 
-function makeSky(colors) {
+export function makeSky(colors = THEMES.meadow.sky) {
   const mat = new THREE.ShaderMaterial({
     uniforms: {
       top: { value: C(colors[0]) },
@@ -138,7 +138,7 @@ function makeSky(colors) {
 }
 
 // Carte d'environnement (reflets du ciel sur l'eau, le métal et les cadres de vélo).
-function makeEnvironment(renderer, sky) {
+export function makeEnvironment(renderer, sky) {
   const envScene = new THREE.Scene();
   envScene.add(sky.clone());
   const pmrem = new THREE.PMREMGenerator(renderer);
@@ -183,14 +183,72 @@ function alongTrack(track, test, ramp) {
   return out;
 }
 
+// Altitude de la route la plus proche, sur une grille de 8 m, floutée sur ~50 m : une surface continue
+// qui relie en douceur des tronçons de route d'altitudes différentes.
+function smoothRoadField(track, margin = 560) {
+  const b = track.bounds;
+  const cell = 8;
+  const x0 = b.minX - margin;
+  const z0 = b.minZ - margin;
+  const nx = Math.ceil((b.maxX - b.minX + margin * 2) / cell) + 1;
+  const nz = Math.ceil((b.maxZ - b.minZ + margin * 2) / cell) + 1;
+  let g = new Float32Array(nx * nz);
+  for (let j = 0; j < nz; j++) {
+    for (let i = 0; i < nx; i++) {
+      const x = x0 + i * cell;
+      const z = z0 + j * cell;
+      let best = Infinity;
+      let y = 0;
+      for (let k = 0; k < track.count; k += 4) {
+        const d = (track.x[k] - x) ** 2 + (track.z[k] - z) ** 2;
+        if (d < best) { best = d; y = track.y[k]; }
+      }
+      g[j * nx + i] = y;
+    }
+  }
+  // Flou en boîte séparable, deux passes (proche d'un flou gaussien).
+  const R = 6;
+  const tmp = new Float32Array(nx * nz);
+  for (let pass = 0; pass < 2; pass++) {
+    for (let j = 0; j < nz; j++) {
+      for (let i = 0; i < nx; i++) {
+        let sum = 0;
+        for (let k = -R; k <= R; k++) sum += g[j * nx + Math.min(nx - 1, Math.max(0, i + k))];
+        tmp[j * nx + i] = sum / (2 * R + 1);
+      }
+    }
+    for (let j = 0; j < nz; j++) {
+      for (let i = 0; i < nx; i++) {
+        let sum = 0;
+        for (let k = -R; k <= R; k++) sum += tmp[Math.min(nz - 1, Math.max(0, j + k)) * nx + i];
+        g[j * nx + i] = sum / (2 * R + 1);
+      }
+    }
+  }
+  return (x, z) => {
+    const fx = Math.min(nx - 1.001, Math.max(0, (x - x0) / cell));
+    const fz = Math.min(nz - 1.001, Math.max(0, (z - z0) / cell));
+    const i = Math.floor(fx);
+    const j = Math.floor(fz);
+    const u = fx - i;
+    const v = fz - j;
+    const a = g[j * nx + i] + (g[j * nx + i + 1] - g[j * nx + i]) * u;
+    const c = g[(j + 1) * nx + i] + (g[(j + 1) * nx + i + 1] - g[(j + 1) * nx + i]) * u;
+    return a + (c - a) * v;
+  };
+}
+
 function makeGround(track, lake, theme, { coast = null, seaY = 0, flat = [] } = {}) {
   const n = track.count;
+  const field = smoothRoadField(track);
   // Sous la passerelle, le sol est plus bas (on voit les pilotis) ; sur les zones aménagées, le relief est adouci.
   const dip = alongTrack(track, (i) => track.surf[i] === 'boardwalk', 12);
   const calm = alongTrack(track, (i) => flat.some(([a, b]) => i / n >= a && i / n <= b), 30);
   const base = (x, z, near) => {
     const d = near.dist;
-    let roadY = near.y - 0.45 - dip[near.index] * 1.5;
+    // Loin de la route, l'altitude de base vient d'un champ lissé : pas de marche entre deux lacets empilés.
+    const y = near.y + (field(x, z) - near.y) * smoothstep(ROAD_HALF + 2, ROAD_HALF + 45, d);
+    let roadY = y - 0.45 - dip[near.index] * 1.5;
     if (coast) roadY = Math.max(roadY, Math.min(near.y - 0.45, seaY + 0.35)); // jamais sous le niveau de la mer
     const t = smoothstep(ROAD_HALF + 2.2, ROAD_HALF + 42, d);
     const amp = 1 - calm[near.index] * 0.8 * (1 - smoothstep(60, 140, d));

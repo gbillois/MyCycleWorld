@@ -172,6 +172,61 @@ export function createMockTrainer() {
   return d;
 }
 
+// Machine FTMS sans mode simulation (rameur ou elliptique), pilotable en résistance.
+function mockFtmsMachine(name, model, features, dataUuid, makePacket) {
+  const d = new MockDevice(name);
+  d.addDis('Technogym (démo)', model, '1.0.0');
+  const ftms = d.service(0x1826);
+  const targets = 1 << 2; // résistance
+  ftms.add(0x2acc, { read: true }, { read: () => [...u16(features), 0, 0, ...u16(targets), 0, 0] });
+  ftms.add(0x2ad6, { read: true }, { read: () => [...u16(10), ...u16(250), ...u16(10)] });
+  const data = ftms.add(dataUuid, { notify: true });
+  const state = { level: 8 };
+  const cp = ftms.add(0x2ad9, { write: true, indicate: true }, {
+    onWrite: (b) => {
+      const op = b[0];
+      if (op === 0x04) state.level = b[1] / 10;
+      setTimeout(() => cp.notify([0x80, op, op === 0x11 ? 0x02 : 0x01]), 40);
+    },
+  });
+  let t = 0;
+  d.onConnect = () =>
+    d.every(500, () => {
+      t += 0.5;
+      data.notify(makePacket(t, state));
+    });
+  return d;
+}
+
+// Rameur : cadence ~26 coups/min, distance, allure /500 m, puissance, cardio.
+export function createMockRower() {
+  let distance = 0;
+  let strokes = 0;
+  const features = (1 << 1) | (1 << 2) | (1 << 5) | (1 << 7) | (1 << 10) | (1 << 14);
+  return mockFtmsMachine('SKILLROW (démo)', 'Skillrow', features, 0x2ad1, (t, st) => {
+    const power = Math.round(165 + st.level * 2 + Math.sin(t * 2.3) * 25);
+    const v = Math.cbrt(power / 2.8);
+    distance += v * 0.5;
+    strokes += 26 / 120;
+    const pace = Math.round(500 / v);
+    const rate = Math.round((26 + Math.sin(t / 4) * 2) * 2);
+    const flags = (1 << 2) | (1 << 3) | (1 << 5) | (1 << 7) | (1 << 9);
+    const dist = Math.round(distance);
+    return [...u16(flags), rate, ...u16(Math.floor(strokes)), dist & 0xff, (dist >> 8) & 0xff, dist >> 16, ...u16(pace), ...u16(power), ...u16(Math.round(st.level)), 132 + Math.round(Math.sin(t / 9) * 8)];
+  });
+}
+
+// Elliptique : vitesse, pas/min, résistance, puissance.
+export function createMockCrossTrainer() {
+  const features = (1 << 2) | (1 << 7) | (1 << 14);
+  return mockFtmsMachine('EXCITE SYNCHRO (démo)', 'Excite Synchro', features, 0x2ace, (t, st) => {
+    const power = Math.round(140 + st.level * 3 + Math.sin(t * 1.4) * 15);
+    const steps = Math.round(140 + Math.sin(t / 3) * 8);
+    const flags = (1 << 3) | (1 << 7) | (1 << 8);
+    return [flags & 0xff, (flags >> 8) & 0xff, 0, ...u16(Math.round((9 + Math.sin(t) * 0.5) * 100)), ...u16(steps), ...u16(steps), ...u16(Math.round(st.level * 10)), ...u16(power)];
+  });
+}
+
 export function createMockHeartRate() {
   const d = new MockDevice('DEMO Ceinture HRM');
   d.addDis('Démo', 'HRM', '2.1');
@@ -241,6 +296,11 @@ export function createMockRequestDevice() {
     await new Promise((r) => setTimeout(r, 200));
     const filters = options.filters || [];
     const services = filters.flatMap((f) => f.services || []).map(canonicalUuid);
+    // Profil Technogym (filtre par nom) : rameur ou elliptique simulé selon la machine demandée.
+    if (filters.some((f) => f.namePrefix === 'Technogym')) {
+      if (options.demoKind === 'cross') return createMockCrossTrainer();
+      if (options.demoKind !== 'bike') return createMockRower();
+    }
     if (services.includes(canonicalUuid(0x1826))) return createMockTrainer();
     if (services.includes(canonicalUuid(0x180d))) return createMockHeartRate();
     if (filters.some((f) => f.namePrefix === 'Zwift')) return createMockZwiftPlay(zwiftCount++ % 2 === 0 ? 'L' : 'R');

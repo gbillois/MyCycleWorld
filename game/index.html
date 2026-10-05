@@ -37,57 +37,52 @@
         <span class="logo-tag">La course kart sur ton vrai vélo</span>
       </div>
       <nav class="menu" id="mainMenu" aria-label="Menu principal">
-        <button class="menu-btn primary" id="play" data-panel="coursePanel"><span class="mi">▶</span><span>Jouer</span><small id="playSummary">choisis ton circuit</small></button>
-        <button class="menu-btn" data-panel="devicesPanel"><span class="mi">🔗</span><span>Appareils</span><small id="devicesSummary">aucun appareil</small></button>
-        <button class="menu-btn" data-panel="optionsPanel"><span class="mi">⚙</span><span>Options</span><small id="optionsSummary"></small></button>
+        <button class="menu-btn primary" id="play" data-panel="playPanel"><span class="mi">▶</span><span>Jouer</span><small id="playSummary">vélo, elliptique ou rameur</small></button>
+        <button class="menu-btn" data-panel="optionsPanel"><span class="mi">⚙</span><span>Options</span><small id="optionsSummary">connexions, graphismes</small></button>
         <button class="menu-btn" data-panel="helpPanel"><span class="mi">🎮</span><span>Commandes</span><small>clavier, manettes, tactile</small></button>
       </nav>
       <p class="menu-hint" id="menuHint">↑ ↓ pour choisir · Entrée pour valider</p>
     </div>
 
     <div class="status-chips" aria-live="polite">
-      <span class="chip" id="chipTrainer"><i></i>Home trainer</span>
+      <span class="chip" id="chipTrainer"><i></i>Machine</span>
       <span class="chip" id="chipHr"><i></i>Cardio</span>
       <span class="chip" id="chipZwift"><i></i>Manettes</span>
     </div>
     <span class="version">prototype</span>
 
-    <!-- Panneaux secondaires -->
-    <aside class="side-panel" id="coursePanel" hidden aria-label="Circuits">
-      <h2>Choisis ton circuit</h2>
+    <!-- Jouer : machine, puis niveau -->
+    <aside class="side-panel" id="playPanel" hidden aria-label="Jouer">
+      <h2>Jouer</h2>
+      <div class="card-list">
+        <button type="button" class="mode-card" data-machine="bike"><span class="mc-icon">🚴</span><span><span class="c-name">Vélo</span><span class="c-tag">Home trainer ou vélo connecté · 3 circuits</span></span></button>
+        <button type="button" class="mode-card" data-machine="cross"><span class="mc-icon">🏃</span><span><span class="c-name">Elliptique</span><span class="c-tag">Les circuits vélo, direction automatique</span></span></button>
+        <button type="button" class="mode-card" data-machine="row"><span class="mc-icon">🚣</span><span><span class="c-name">Rameur</span><span class="c-tag">Course d'aviron sur le lac</span></span></button>
+      </div>
+      <button class="btn back" data-close>← Retour</button>
+    </aside>
+
+    <aside class="side-panel" id="coursePanel" hidden aria-label="Circuits" data-parent="playPanel">
+      <h2 id="courseTitle">Choisis ton circuit</h2>
+      <p class="panel-note" id="courseNote" hidden></p>
       <div class="course-list" id="courseList"></div>
       <button class="btn back" data-close>← Retour</button>
     </aside>
 
-    <aside class="side-panel" id="devicesPanel" hidden aria-label="Appareils">
-      <h2>Appareils</h2>
-      <div id="demoBanner" class="note demo" hidden>Mode démo : les appareils sont simulés. <a href="./">Revenir au vrai Bluetooth</a></div>
-      <div id="btWarning" class="note warn" hidden>Web Bluetooth n'est pas disponible ici (utilise Chrome ou Edge, en https ou sur localhost). Tu peux quand même jouer au clavier.</div>
-      <div id="nativeHint" class="note demo" hidden>Appli MyCycleWorld : connecte tes appareils dans l'onglet « Appareils », puis reviens ici pour jouer. Le home trainer est piloté pendant la course.</div>
-      <div class="devices">
-        <div class="device">
-          <button class="btn" id="connectTrainer">Connecter le home trainer</button>
-          <span class="status" id="trainerStatus">non connecté</span>
-        </div>
-        <div class="device">
-          <button class="btn" id="connectHr">Connecter la ceinture cardio</button>
-          <span class="status" id="hrStatus">non connectée</span>
-        </div>
-        <div class="device">
-          <button class="btn" id="connectZwift">Connecter une manette Zwift</button>
-          <span class="status" id="zwiftStatus">aucune manette</span>
-        </div>
-      </div>
-      <p class="hint" id="modeHint"></p>
-      <nav class="links">
-        <a href="../diag/" id="diagLink">Diagnostic du matériel</a>
-        <a href="?demo=1" id="demoLink">Mode démo</a>
-      </nav>
+    <aside class="side-panel" id="rowPanel" hidden aria-label="Bassins d'aviron" data-parent="playPanel">
+      <h2>Rameur : choisis ta course</h2>
+      <div class="course-list" id="rowList"></div>
       <button class="btn back" data-close>← Retour</button>
     </aside>
 
+    <!-- Options : connexions (une page par matériel) et réglages -->
     <aside class="side-panel" id="optionsPanel" hidden aria-label="Options">
       <h2>Options</h2>
+      <div class="card-list">
+        <button type="button" class="mode-card small" data-connect="zwift"><span class="mc-icon">🎮</span><span><span class="c-name">Connecter Zwift</span><span class="c-tag">Home trainer, manettes Zwift Play, cardio</span></span></button>
+        <button type="button" class="mode-card small" data-connect="technogym"><span class="mc-icon">🏋️</span><span><span class="c-name">Connecter Technogym</span><span class="c-tag">Vélo, elliptique ou rameur Technogym, cardio</span></span></button>
+        <button type="button" class="mode-card small" data-connect="ble"><span class="mc-icon">📶</span><span><span class="c-name">Bluetooth standard</span><span class="c-tag">Toute machine FTMS ou capteur de puissance</span></span></button>
+      </div>
       <div class="options">
         <span class="opt-label">Graphismes</span>
         <div class="seg" role="group" aria-label="Graphismes">
@@ -95,7 +90,67 @@
           <button type="button" class="seg-btn" data-gfx="simple">Graphisme simple</button>
         </div>
         <span class="opt-hint">Le graphisme simple reprend le style d'origine, plus léger pour les appareils anciens. Le changement recharge le jeu.</span>
+        <span class="opt-label">Direction</span>
+        <div class="seg" role="group" aria-label="Direction">
+          <button type="button" class="seg-btn" data-steer="auto">Selon le matériel</button>
+          <button type="button" class="seg-btn" data-steer="on">Automatique</button>
+          <button type="button" class="seg-btn" data-steer="off">Manuelle</button>
+        </div>
+        <span class="opt-hint">Automatique : le vélo suit la route, attrape les boîtes, évite les bananes et utilise les objets tout seul (machines sans boutons). ← → reprennent la main à tout moment. « Selon le matériel » l'active sur elliptique et rameur, et sur une machine Technogym ou Bluetooth standard sans manette Zwift.</span>
       </div>
+      <button class="btn back" data-close>← Retour</button>
+    </aside>
+
+    <aside class="side-panel" id="connectPanel" hidden aria-label="Connexion" data-parent="optionsPanel">
+      <h2 id="connectTitle">Connecter</h2>
+      <div id="demoBanner" class="note demo" hidden>Mode démo : les appareils sont simulés. <a href="./">Revenir au vrai Bluetooth</a></div>
+      <div id="btWarning" class="note warn" hidden>Web Bluetooth n'est pas disponible ici (utilise Chrome ou Edge, en https ou sur localhost). Tu peux quand même jouer au clavier.</div>
+      <div id="nativeHint" class="note demo" hidden>Appli MyCycleWorld : connecte tes appareils dans l'onglet « Appareils », puis reviens ici pour jouer. Le home trainer est piloté pendant la course.</div>
+      <p class="panel-note" id="hwHint"></p>
+      <div class="devices">
+        <div class="device">
+          <button class="btn" id="connectTrainer">Connecter le home trainer</button>
+          <span class="status" id="trainerStatus">non connecté</span>
+        </div>
+        <div class="device-extra">
+          <button class="btn small" id="connectAny" title="Le sélecteur montre tous les appareils Bluetooth, même sans service reconnu">Mon appareil n'apparaît pas : tout afficher</button>
+          <button class="btn small" id="connectDemoCross" hidden>Elliptique simulé</button>
+        </div>
+        <div class="device" id="zwiftRow">
+          <button class="btn" id="connectZwift">Connecter une manette Zwift</button>
+          <span class="status" id="zwiftStatus">aucune manette</span>
+        </div>
+        <div class="device">
+          <button class="btn" id="connectHr">Connecter la ceinture cardio</button>
+          <span class="status" id="hrStatus">non connectée</span>
+        </div>
+      </div>
+      <p class="hint" id="modeHint"></p>
+      <section class="hw-test" id="hwTest" aria-label="Test de connexion">
+        <h3>Test de connexion</h3>
+        <dl id="hwTestInfo"></dl>
+        <div class="hw-test-actions">
+          <button class="btn small" id="hwPilot">Tester le pilotage</button>
+          <button class="btn small" id="hwLogToggle">Masquer la console</button>
+          <button class="btn small" id="hwLogCopy">Copier le journal</button>
+        </div>
+        <pre class="hw-log" id="hwLog" aria-label="Console Bluetooth"></pre>
+        <div class="inspector">
+          <h3>Inspecteur BLE</h3>
+          <p class="opt-hint">Pour une machine non standard (pas de FTMS, données bizarres) : se connecte à n'importe quel appareil, lit tout ce qui est lisible et enregistre les octets bruts de chaque caractéristique. Fais tourner la machine pendant une minute, puis télécharge le journal et envoie-le.</p>
+          <input type="text" id="inspectExtra" class="text-input" placeholder="Services en plus (facultatif) : fff0, 6e400001-b5a3-…" aria-label="UUID de services supplémentaires" autocomplete="off" spellcheck="false">
+          <div class="hw-test-actions">
+            <button class="btn small" id="inspectStart">Inspecter un appareil</button>
+            <button class="btn small" id="inspectStop" disabled>Arrêter</button>
+            <button class="btn small" id="hwLogDownload">Télécharger le journal</button>
+          </div>
+          <p class="opt-hint" id="inspectStatus"></p>
+        </div>
+      </section>
+      <nav class="links">
+        <a href="../diag/" id="diagLink">Diagnostic complet</a>
+        <a href="?demo=1" id="demoLink">Mode démo</a>
+      </nav>
       <button class="btn back" data-close>← Retour</button>
     </aside>
 
@@ -137,6 +192,27 @@
         <div class="m main"><b id="hSpeed">0.0</b><i>km/h</i><span>Vitesse</span></div>
         <div class="m"><b id="hGear">12</b><i>/ 24</i><span>Vitesse virtuelle</span><div class="gearbar"><div id="hGearBar"></div></div></div>
         <div class="m"><b id="hGrade">0.0</b><i>%</i><span>Pente ressentie</span><small id="hTerrain">terrain 0.0 %</small></div>
+      </div>
+    </div>
+  </div>
+  <!-- Affichage tête haute du mode rameur -->
+  <div id="rowHud" hidden>
+    <div class="hud-top-left">
+      <div class="pos"><span id="rPos">1er</span><small id="rPosTotal">/ 6</small></div>
+      <div class="lap" id="rLeft">500 m</div>
+      <div class="time" id="rTime">0:00.0</div>
+    </div>
+    <div class="row-progress" id="rProgress" aria-hidden="true"><div class="row-finish"></div></div>
+    <div class="hud-effects" id="rEffects"></div>
+    <div class="hud-dock">
+      <div class="hud-hint" id="rHint"></div>
+      <div class="hud-bottom">
+        <div class="m"><b id="rPower">--</b><i>W</i><span>Puissance</span></div>
+        <div class="m"><b id="rRate">--</b><i>/min</i><span>Coups</span></div>
+        <div class="m"><b id="rHr">--</b><i>bpm</i><span>Cardio</span></div>
+        <div class="m main"><b id="rSplit">-:--</b><i>/500 m</i><span>Allure</span></div>
+        <div class="m"><b id="rSpeed">0.0</b><i>km/h</i><span>Vitesse</span></div>
+        <div class="m"><b id="rDist">0</b><i>m</i><span>Distance</span></div>
       </div>
     </div>
   </div>

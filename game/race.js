@@ -149,8 +149,54 @@ export class Race extends EventTarget {
   }
 
   // Le joueur ne glisse pas de côté : il s'incline, tourne puis se redresse (modèle de vélo).
+  // input.auto : pilote automatique (machines sans boutons : elliptique, vélo de salle). Une touche
+  // de direction reprend la main tant qu'elle est tenue.
   steerPlayer(r, dt, input) {
+    this.autoPilot = !!input.auto;
+    if (input.auto && !input.steer) {
+      r.targetLateral = this.autoLine(r);
+      stepSteering(r, { targetHeading: headingTowards(r.lateral, r.targetLateral) }, r.v, this.track.curvatureAt(r.s), dt, LATERAL_LIMIT);
+      this.autoItem(r);
+      return;
+    }
     stepSteering(r, { steer: input.steer, drift: input.drift }, r.v, this.track.curvatureAt(r.s), dt, LATERAL_LIMIT);
+  }
+
+  // Ligne choisie par le pilote automatique : boîte à objets à portée, sinon le milieu, en évitant les bananes.
+  autoLine(r) {
+    const L = this.track.length;
+    const t = this.time;
+    const v = Math.max(r.v, 1);
+    let target = 0;
+    if (!r.item) {
+      let best = Infinity;
+      for (const box of this.boxes) {
+        const d = mod(box.s - r.s, L);
+        if (d < 2 || d > 45 || d >= best) continue;
+        if (box.respawnAt > t + d / v) continue; // la boîte ne sera pas revenue à temps
+        best = d;
+        target = box.lateral;
+      }
+    }
+    for (const b of this.bananas) {
+      const d = mod(b.s - r.s, L);
+      if (d < 1 || d > 30 || Math.abs(target - b.lateral) > 1.5) continue;
+      target = b.lateral > 0 ? b.lateral - 1.9 : b.lateral + 1.9;
+    }
+    const lim = ROAD_HALF - 0.7;
+    return Math.max(-lim, Math.min(lim, target));
+  }
+
+  // Objets en pilote automatique : turbo dans les montées (ou après 6 s), banane quand quelqu'un suit de près.
+  autoItem(r) {
+    if (!r.item || this.time < 0) return;
+    const held = this.time - (r.itemSince ?? this.time);
+    if (r.item === 'turbo' && (this.track.gradeAt(r.s) > 3 || held > 6)) this.useItem(r);
+    else if (r.item === 'banana') {
+      const L = this.track.length;
+      const chaser = this.racers.some((o) => o !== r && mod(r.s - o.s, L) < 14 && mod(r.s - o.s, L) > 2);
+      if (chaser || held > 10) this.useItem(r);
+    }
   }
 
   driveAI(r, dt) {
@@ -227,6 +273,7 @@ export class Race extends EventTarget {
         box.respawnAt = t + BOX_RESPAWN;
         if (!r.item && r.finishTime === null) {
           r.item = this.random() < 0.5 ? 'turbo' : 'banana';
+          r.itemSince = t;
           if (!r.isPlayer) r.useItemAt = t + 1 + this.random() * 5;
           this.emit('pickup', { racer: r, item: r.item });
         }

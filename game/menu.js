@@ -7,7 +7,8 @@ export class TitleMenu {
   constructor(root) {
     this.root = root;
     this.panel = null;
-    for (const btn of root.querySelectorAll('[data-panel]')) btn.addEventListener('click', () => this.open(btn.dataset.panel));
+    this.openers = new Map();
+    for (const btn of root.querySelectorAll('[data-panel]')) btn.addEventListener('click', () => this.open(btn.dataset.panel, btn));
     for (const btn of root.querySelectorAll('[data-close]')) btn.addEventListener('click', () => this.close());
     window.addEventListener('keydown', (e) => this.onKey(e), true);
   }
@@ -27,22 +28,33 @@ export class TitleMenu {
     (list.find((el) => el.getAttribute('aria-current') === 'true') || list[0])?.focus({ preventScroll: true });
   }
 
-  open(id) {
-    this.close(false);
-    this.panel = document.getElementById(id);
-    if (!this.panel) return;
-    this.panel.hidden = false;
+  // opener : bouton qui ouvre le panneau (on y revient au retour). Un panneau avec data-parent est une
+  // sous-page : « Retour » et Échap ramènent au panneau parent.
+  open(id, opener = null) {
+    const panel = document.getElementById(id);
+    if (!panel) return;
+    if (this.panel && this.panel !== panel) this.panel.hidden = true;
+    if (opener) this.openers.set(id, opener);
+    this.panel = panel;
+    panel.hidden = false;
     this.root.classList.add('panel-open');
     this.focusDefault();
   }
 
   close(refocus = true) {
     if (!this.panel) return;
-    const id = this.panel.id;
-    this.panel.hidden = true;
+    const panel = this.panel;
+    const parent = panel.dataset.parent;
+    panel.hidden = true;
     this.panel = null;
+    const opener = this.openers.get(panel.id);
+    if (parent && refocus) {
+      this.open(parent);
+      if (opener && !opener.closest('[hidden]')) opener.focus({ preventScroll: true });
+      return;
+    }
     this.root.classList.remove('panel-open');
-    if (refocus) this.root.querySelector(`[data-panel="${id}"]`)?.focus({ preventScroll: true });
+    if (refocus) (opener || this.root.querySelector(`[data-panel="${panel.id}"]`))?.focus({ preventScroll: true });
   }
 
   onKey(e) {
@@ -77,9 +89,7 @@ export class TitleMenu {
     if (trainer) parts.push('trainer');
     if (hr) parts.push('cardio');
     if (controllers) parts.push(`${controllers} manette${controllers > 1 ? 's' : ''}`);
-    const summary = this.root.querySelector('#devicesSummary');
-    if (summary) summary.textContent = parts.length ? `connectés : ${parts.join(', ')}` : 'aucun appareil connecté';
     const opt = this.root.querySelector('#optionsSummary');
-    if (opt && gfxLabel) opt.textContent = gfxLabel;
+    if (opt) opt.textContent = [parts.length ? `connectés : ${parts.join(', ')}` : 'connexions', gfxLabel].filter(Boolean).join(' · ');
   }
 }
