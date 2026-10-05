@@ -89,8 +89,8 @@ function setupRace() {
   boxMeshes = race.boxes.map((b) => {
     const mesh = createItemBox();
     const f = track.frame(b.s, b.lateral);
-    mesh.position.set(f.x, f.y + 1.0, f.z);
-    mesh.userData.baseY = f.y + 1.0;
+    mesh.position.set(f.x, f.y + 1.3, f.z);
+    mesh.userData.baseY = f.y + 1.3;
     raceObjects.add(mesh);
     return mesh;
   });
@@ -362,8 +362,7 @@ function syncScene(dt) {
   race.boxes.forEach((b, i) => {
     const mesh = boxMeshes[i];
     mesh.visible = t >= b.respawnAt;
-    mesh.rotation.y = now * 1.4 + i;
-    mesh.rotation.x = 0.4;
+    mesh.rotation.y = now * 1.2 + i;
     mesh.position.y = mesh.userData.baseY + Math.sin(now * 2 + i) * 0.12;
   });
 }

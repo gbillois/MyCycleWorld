@@ -13,6 +13,9 @@ const TURBO_POWER = 380; // W "virtuels" ajoutés pendant le turbo
 const GRASS_CRR = 0.035; // rouler dans l'herbe freine nettement
 const BANANA_SPEED_KEEP = 0.35; // fraction de vitesse conservée après une banane (joueur)
 const BOX_RESPAWN = 4;
+// Position des rangées de boîtes sur le tour (fraction de la longueur), loin de la ligne de départ.
+const BOX_ROWS = [0.05, 0.17, 0.29, 0.41, 0.53, 0.65, 0.77, 0.89];
+const BOX_CATCH = 1.3; // largeur de capture (m) : un peu plus que le rayon visuel de la boîte
 const BANANA_LIFETIME = 90;
 const STEER_SPEED = 3.2; // m/s de déplacement latéral
 const COUNTDOWN = 3;
@@ -77,11 +80,13 @@ export class Race extends EventTarget {
       }
     });
 
-    // Boîtes à objets : deux rangées de trois par tour.
+    // Boîtes à objets : 8 rangées par tour, en quinconce (3 de front, puis 2 décalées).
     this.boxes = [];
-    for (const frac of [0.1, 0.6]) {
-      for (const lateral of [-2.6, 0, 2.6]) this.boxes.push({ s: frac * track.length, lateral, respawnAt: 0 });
-    }
+    BOX_ROWS.forEach((frac, row) => {
+      for (const lateral of row % 2 === 0 ? [-2.6, 0, 2.6] : [-1.3, 1.3]) {
+        this.boxes.push({ s: frac * track.length, lateral, respawnAt: 0 });
+      }
+    });
   }
 
   emit(type, detail) {
@@ -210,7 +215,7 @@ export class Race extends EventTarget {
     for (const box of this.boxes) {
       if (t < box.respawnAt) continue;
       for (const r of this.racers) {
-        if (Math.abs(r.lateral - box.lateral) > 1.15 || !this.crossed(r, box.s)) continue;
+        if (Math.abs(r.lateral - box.lateral) > BOX_CATCH || !this.crossed(r, box.s)) continue;
         box.respawnAt = t + BOX_RESPAWN;
         if (!r.item && r.finishTime === null) {
           r.item = this.random() < 0.5 ? 'turbo' : 'banana';

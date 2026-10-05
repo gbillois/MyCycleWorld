@@ -189,30 +189,75 @@ function makeLabel(text, color) {
 }
 
 let boxMaterial = null;
+let glowMaterial = null;
+const boxGeo = new THREE.BoxGeometry(1.5, 1.5, 1.5);
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// Boîte à bonus façon kart : arc-en-ciel vif, bordure blanche, gros point d'interrogation.
 export function createItemBox() {
   if (!boxMaterial) {
+    const S = 256;
     const cv = document.createElement('canvas');
-    cv.width = cv.height = 128;
+    cv.width = cv.height = S;
     const ctx = cv.getContext('2d');
-    const grad = ctx.createLinearGradient(0, 0, 128, 128);
-    grad.addColorStop(0, '#ffd23f');
-    grad.addColorStop(0.5, '#ff5a8a');
-    grad.addColorStop(1, '#4fc3ff');
+    const grad = ctx.createLinearGradient(0, 0, S, S);
+    grad.addColorStop(0, '#ff3d6e');
+    grad.addColorStop(0.35, '#ffb21f');
+    grad.addColorStop(0.65, '#2fd4c0');
+    grad.addColorStop(1, '#3d8bff');
     ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, 128, 128);
-    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-    ctx.lineWidth = 8;
-    ctx.strokeRect(6, 6, 116, 116);
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold 88px system-ui, sans-serif';
+    ctx.fillRect(0, 0, S, S);
+    // Bordure blanche arrondie
+    ctx.lineWidth = 14;
+    ctx.strokeStyle = '#ffffff';
+    roundRect(ctx, 14, 14, S - 28, S - 28, 30);
+    ctx.stroke();
+    // Point d'interrogation : contour sombre puis remplissage blanc
+    ctx.font = '900 190px "Arial Black", system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('?', 64, 70);
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = 22;
+    ctx.strokeStyle = 'rgba(40, 10, 70, 0.85)';
+    ctx.strokeText('?', S / 2, S / 2 + 12);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText('?', S / 2, S / 2 + 12);
     const tex = new THREE.CanvasTexture(cv);
     tex.colorSpace = THREE.SRGBColorSpace;
-    boxMaterial = new THREE.MeshLambertMaterial({ map: tex, transparent: true, opacity: 0.92, emissive: '#332200' });
+    tex.anisotropy = 4;
+    // MeshBasicMaterial : couleurs franches, indépendantes de la lumière, donc lisibles de loin.
+    boxMaterial = new THREE.MeshBasicMaterial({ map: tex });
+    // Lueur douce (disque dégradé, additif) : repère visible de loin, sans contour carré.
+    const g = document.createElement('canvas');
+    g.width = g.height = 128;
+    const gc = g.getContext('2d');
+    const rad = gc.createRadialGradient(64, 64, 6, 64, 64, 64);
+    rad.addColorStop(0, 'rgba(255, 236, 150, 0.85)');
+    rad.addColorStop(0.45, 'rgba(255, 190, 80, 0.28)');
+    rad.addColorStop(1, 'rgba(255, 170, 60, 0)');
+    gc.fillStyle = rad;
+    gc.fillRect(0, 0, 128, 128);
+    glowMaterial = new THREE.SpriteMaterial({
+      map: new THREE.CanvasTexture(g),
+      blending: THREE.AdditiveBlending,
+      transparent: true,
+      depthWrite: false,
+    });
   }
-  return new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, 0.9), boxMaterial);
+  const box = new THREE.Mesh(boxGeo, boxMaterial);
+  const glow = new THREE.Sprite(glowMaterial);
+  glow.scale.set(3.6, 3.6, 1);
+  box.add(glow);
+  return box;
 }
 
 const bananaGeo = new THREE.TorusGeometry(0.28, 0.09, 5, 9, Math.PI * 1.1).rotateX(-Math.PI / 2);
