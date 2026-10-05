@@ -21,10 +21,10 @@ export class TitleMenu {
     return [...scope.querySelectorAll('button, a[href]')].filter(visible);
   }
 
-  // Met le focus sur « Jouer » (ou le premier élément du panneau ouvert).
+  // Met le focus sur « Jouer » (ou, dans un panneau, sur l'élément courant ou le premier).
   focusDefault() {
     const list = this.focusables();
-    list[0]?.focus({ preventScroll: true });
+    (list.find((el) => el.getAttribute('aria-current') === 'true') || list[0])?.focus({ preventScroll: true });
   }
 
   open(id) {

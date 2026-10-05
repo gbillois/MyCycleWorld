@@ -3,6 +3,7 @@
 import { stepSpeed, bestDraftFactor, DEFAULTS } from '../src/core/physics.js';
 import { stepSteering, forwardSpeed, headingTowards } from '../src/core/steering.js';
 import { ROAD_HALF, LATERAL_LIMIT, mod } from './track.js';
+import { SURFACES } from './courses.js';
 
 export const ITEMS = {
   turbo: { label: 'Turbo', icon: '🚀' },
@@ -189,7 +190,11 @@ export class Race extends EventTarget {
     const grade = this.track.gradeAt(r.s);
     const offRoad = Math.abs(r.lateral) > ROAD_HALF + 0.3;
     const power = r.power + (r.turbo(t) ? TURBO_POWER : 0);
-    r.v = stepSpeed(r.v, power, grade, dt, { crr: offRoad ? GRASS_CRR : DEFAULTS.crr, cda: DEFAULTS.cda * r.draft });
+    // Résistance au roulement : herbe hors de la route, sinon selon le revêtement (le sable freine).
+    const surface = this.track.surfaceAt(r.s);
+    const crr = offRoad ? GRASS_CRR : SURFACES[surface]?.crr ?? DEFAULTS.crr;
+    r.surface = offRoad ? 'grass' : surface;
+    r.v = stepSpeed(r.v, power, grade, dt, { crr, cda: DEFAULTS.cda * r.draft });
     r.offRoad = offRoad;
     r.prevS = r.s;
     const lapBefore = Math.floor(r.s / L);

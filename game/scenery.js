@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { ROAD_HALF, rng, mod } from './track.js';
 import { mergeGeometries, paint, indexify } from './geom.js';
+import { addFarm, addAlpineVillage, addAlpineCows, addCoast, coastZ } from './features.js';
 
 const smoothstep = (a, b, x) => {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
@@ -70,17 +71,36 @@ function canvasTexture(w, h, draw) {
 
 const C = (hex) => new THREE.Color(hex);
 
+// --- Thèmes (un par type de circuit) ---
+const THEMES = {
+  meadow: {
+    hills: 17, farSlope: 0.3, grass: ['#4f9a3a', '#6cbd4b', '#94cc52', '#b8d65e'],
+    trees: 700, pineRatio: 0.55, pineNear: false, palms: false, fences: true, flowers: 2600, rocks: 90, bales: 24,
+    mountains: { n: 34, dist: [950, 420], h: [150, 230], w: [230, 180] }, sky: ['#3a86e0', '#8cc4f5', '#d6ecff'],
+  },
+  alpine: {
+    hills: 34, farSlope: 0.6, grass: ['#3f8a35', '#5aa845', '#7fbf4f', '#a3c45a'],
+    trees: 900, pineRatio: 0.85, pineNear: true, palms: false, fences: true, flowers: 1800, rocks: 260, bales: 0,
+    mountains: { n: 30, dist: [0, 320], h: [300, 260], w: [220, 160] }, sky: ['#2f7ad8', '#86c0f3', '#e2f1ff'],
+  },
+  coast: {
+    hills: 7, farSlope: 0.12, grass: ['#7ea845', '#9cbc58', '#b9c76c', '#d2cf86'],
+    trees: 320, pineRatio: 0.6, pineNear: true, palms: true, fences: false, flowers: 900, rocks: 50, bales: 0,
+    mountains: { n: 18, dist: [1150, 300], h: [110, 140], w: [260, 200] }, sky: ['#2f8fe6', '#8fd0f7', '#e4f5ff'],
+  },
+};
+
 // --- Ciel ---
 
 export const SUN_DIR = new THREE.Vector3(-0.5, 0.62, 0.6).normalize();
 export const HORIZON = C('#d6ecff');
 
-function makeSky() {
+function makeSky(colors) {
   const mat = new THREE.ShaderMaterial({
     uniforms: {
-      top: { value: C('#3a86e0') },
-      mid: { value: C('#8cc4f5') },
-      horizon: { value: HORIZON.clone() },
+      top: { value: C(colors[0]) },
+      mid: { value: C(colors[1]) },
+      horizon: { value: C(colors[2]) },
       ground: { value: C('#b9d3b0') },
       sunDir: { value: SUN_DIR.clone() },
       sunColor: { value: C('#fff1d0') },
@@ -142,14 +162,50 @@ function findLake(track) {
   return { x: best.x, z: best.z, r: Math.min(62, best.dist - 34) };
 }
 
-function makeGround(track, lake) {
+// Profil le long du tracé (0..1 par mètre), adouci sur ±ramp mètres : passerelle, zones aplanies.
+function alongTrack(track, test, ramp) {
+  const n = track.count;
+  const raw = Float32Array.from({ length: n }, (_, i) => (test(i) ? 1 : 0));
+  const out = new Float32Array(n + 1);
+  for (let i = 0; i < n; i++) {
+    let m = raw[i];
+    if (m < 1) {
+      for (let j = 1; j <= ramp; j++) {
+        if (raw[mod(i + j, n)] || raw[mod(i - j, n)]) {
+          m = 1 - j / (ramp + 1);
+          break;
+        }
+      }
+    }
+    out[i] = smoothstep(0, 1, m);
+  }
+  out[n] = out[0];
+  return out;
+}
+
+function makeGround(track, lake, theme, { coast = null, seaY = 0, flat = [] } = {}) {
+  const n = track.count;
+  // Sous la passerelle, le sol est plus bas (on voit les pilotis) ; sur les zones aménagées, le relief est adouci.
+  const dip = alongTrack(track, (i) => track.surf[i] === 'boardwalk', 12);
+  const calm = alongTrack(track, (i) => flat.some(([a, b]) => i / n >= a && i / n <= b), 30);
   const base = (x, z, near) => {
     const d = near.dist;
-    const roadY = near.y - 0.45;
+    let roadY = near.y - 0.45 - dip[near.index] * 1.5;
+    if (coast) roadY = Math.max(roadY, Math.min(near.y - 0.45, seaY + 0.35)); // jamais sous le niveau de la mer
     const t = smoothstep(ROAD_HALF + 2.2, ROAD_HALF + 42, d);
-    const hills = fbm(x * 0.0042, z * 0.0042, 4) * 17 + fbm(x * 0.017 + 11, z * 0.017 - 7, 3) * 3.2;
-    const far = Math.max(0, d - 150) * 0.3;
-    return roadY + t * (hills + 2.5 + far);
+    const amp = 1 - calm[near.index] * 0.8 * (1 - smoothstep(60, 140, d));
+    const hills = (fbm(x * 0.0042, z * 0.0042, 4) * theme.hills + fbm(x * 0.017 + 11, z * 0.017 - 7, 3) * 3.2) * amp;
+    const far = Math.max(0, d - 150) * theme.farSlope;
+    let h = roadY + t * (hills + 2.5 + far);
+    if (coast) {
+      // Plage en pente douce jusqu'au rivage, puis fond marin.
+      const zc = coastZ(coast, x);
+      const dune = fbm(x * 0.03, z * 0.03, 2) * 0.6;
+      const beach = Math.max(seaY - 6, seaY + (zc - z) * 0.075 + (z < zc ? dune * smoothstep(zc, zc - 20, z) : 0));
+      const k = smoothstep(zc - 70, zc - 12, z) * smoothstep(ROAD_HALF + 1.5, ROAD_HALF + 9, d);
+      h += (beach - h) * Math.max(k, smoothstep(zc, zc + 25, z));
+    }
+    return h;
   };
   let lakeY = 0;
   if (lake) {
@@ -175,13 +231,16 @@ function makeGround(track, lake) {
   return height;
 }
 
-const GRASS = [C('#4f9a3a'), C('#6cbd4b'), C('#94cc52'), C('#b8d65e')];
 const GRAVEL = C('#bcae8f');
 const SAND = C('#e3d3a1');
 const ROCK = C('#9a968a');
 const DIRT = C('#8a7a55');
+const WET_SAND = C('#c2ae7c');
+const SNOW = C('#f4f7fb');
 
-function buildTerrain(track, height, lake, quality) {
+function buildTerrain(track, height, lake, quality, theme, coast, seaY) {
+  const GRASS = theme.grass.map(C);
+  const snowLine = track.maxY + 70;
   const b = track.bounds;
   const margin = 520;
   const cell = quality === 'high' ? 4.5 : quality === 'medium' ? 6 : 8;
@@ -192,10 +251,12 @@ function buildTerrain(track, height, lake, quality) {
   geo.translate((b.minX + b.maxX) / 2, 0, (b.minZ + b.maxZ) / 2);
   const p = geo.attributes.position;
   const dist = new Float32Array(p.count);
+  const near = new Uint32Array(p.count);
   for (let i = 0; i < p.count; i++) {
-    const { h, near } = height(p.getX(i), p.getZ(i));
-    p.setY(i, h);
-    dist[i] = near.dist;
+    const r = height(p.getX(i), p.getZ(i));
+    p.setY(i, r.h);
+    dist[i] = r.near.dist;
+    near[i] = r.near.index;
   }
   geo.computeVertexNormals();
   const n = geo.attributes.normal;
@@ -212,12 +273,22 @@ function buildTerrain(track, height, lake, quality) {
     c.copy(GRASS[Math.floor(idx)]).lerp(GRASS[Math.ceil(idx)], idx % 1);
     c.multiplyScalar(0.92 + fbm(x * 0.08, z * 0.08, 2) * 0.12);
     // Bas-côtés en gravier, terre près de la route.
-    c.lerp(tmp.copy(DIRT), smoothstep(ROAD_HALF + 4.5, ROAD_HALF + 2.2, dist[i]) * 0.55);
-    c.lerp(GRAVEL, smoothstep(ROAD_HALF + 2.6, ROAD_HALF + 1.2, dist[i]));
+    const onSand = track.surf[near[i]] !== 'asphalt';
+    c.lerp(tmp.copy(onSand ? SAND : DIRT), smoothstep(ROAD_HALF + (onSand ? 9 : 4.5), ROAD_HALF + 2.2, dist[i]) * (onSand ? 0.9 : 0.55));
+    c.lerp(onSand ? SAND : GRAVEL, smoothstep(ROAD_HALF + 2.6, ROAD_HALF + 1.2, dist[i]));
     // Pentes raides : roche.
     c.lerp(ROCK, smoothstep(0.86, 0.7, n.getY(i)) * 0.8);
     // Rives du lac : sable.
     if (lake) c.lerp(SAND, smoothstep(lake.y + 1.1, lake.y + 0.2, y));
+    // Bord de mer : dunes et plage de sable, sable mouillé près de l'eau.
+    if (coast) {
+      const zc = coastZ(coast, x);
+      const sandK = Math.max(smoothstep(zc - 44, zc - 30, z + fbm(x * 0.04, z * 0.04, 2) * 10), smoothstep(seaY + 2.2, seaY + 1.2, y));
+      c.lerp(SAND, sandK);
+      c.lerp(WET_SAND, smoothstep(seaY + 0.5, seaY + 0.05, y));
+    }
+    // Montagne : neige sur les sommets.
+    if (theme === THEMES.alpine) c.lerp(SNOW, smoothstep(snowLine, snowLine + 25, y + fbm(x * 0.02, z * 0.02, 2) * 20) * smoothstep(0.55, 0.75, n.getY(i)));
     col[i * 3] = c.r;
     col[i * 3 + 1] = c.g;
     col[i * 3 + 2] = c.b;
@@ -262,15 +333,74 @@ function asphaltTexture(anisotropy) {
   return tex;
 }
 
+// Passerelle : planches en travers, joints sombres, clous.
+function boardwalkTexture(anisotropy) {
+  const tex = canvasTexture(256, 512, (ctx, w, h) => {
+    const r = rng(5);
+    const planks = 16;
+    const ph = h / planks;
+    for (let k = 0; k < planks; k++) {
+      const v = 0.85 + r() * 0.3;
+      ctx.fillStyle = `rgb(${Math.round(168 * v)},${Math.round(124 * v)},${Math.round(82 * v)})`;
+      ctx.fillRect(0, k * ph, w, ph);
+      for (let i = 0; i < 40; i++) {
+        ctx.fillStyle = `rgba(90,60,35,${0.08 + r() * 0.12})`;
+        ctx.fillRect(r() * w, k * ph + r() * ph, 20 + r() * 80, 1);
+      }
+      ctx.fillStyle = 'rgba(40,26,16,0.85)';
+      ctx.fillRect(0, k * ph, w, 2);
+      ctx.fillStyle = 'rgba(60,60,60,0.8)';
+      for (const u of [0.06, 0.5, 0.94]) ctx.fillRect(u * w - 2, k * ph + ph / 2 - 2, 4, 4);
+    }
+  });
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.anisotropy = anisotropy;
+  return tex;
+}
+
+// Sable tassé : grain clair, ondulations et traces de roues.
+function sandTexture(anisotropy) {
+  const tex = canvasTexture(256, 512, (ctx, w, h) => {
+    ctx.fillStyle = '#e2cf9a';
+    ctx.fillRect(0, 0, w, h);
+    const r = rng(9);
+    for (let i = 0; i < 14000; i++) {
+      const v = r();
+      ctx.fillStyle = v < 0.5 ? `rgba(255,248,220,${0.2 + r() * 0.3})` : `rgba(170,140,90,${0.15 + r() * 0.25})`;
+      ctx.fillRect(r() * w, r() * h, 1 + r() * 1.5, 1 + r() * 1.5);
+    }
+    for (let y = 0; y < h; y += 9) {
+      ctx.strokeStyle = 'rgba(160,130,80,0.18)';
+      ctx.beginPath();
+      for (let x = 0; x <= w; x += 8) ctx.lineTo(x, y + Math.sin(x * 0.05 + y) * 3);
+      ctx.stroke();
+    }
+    for (const u of [0.32, 0.68]) {
+      const g = ctx.createLinearGradient(u * w - 18, 0, u * w + 18, 0);
+      g.addColorStop(0, 'rgba(150,120,70,0)');
+      g.addColorStop(0.5, 'rgba(150,120,70,0.35)');
+      g.addColorStop(1, 'rgba(150,120,70,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(u * w - 18, 0, 36, h);
+    }
+  });
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.anisotropy = anisotropy;
+  return tex;
+}
+
+const SURFACE_INDEX = { asphalt: 0, boardwalk: 1, sand: 2 };
+
 function buildRoad(track, anisotropy) {
   const n = track.count;
   const TILE = 8; // longueur (m) d'une répétition de la texture
-  const SH = ROAD_HALF + 2.4; // bord extérieur des accotements
   const roadPos = [];
   const roadUv = [];
   const shPos = [];
   const shCol = [];
-  const inner = GRAVEL;
+  const WOOD = C('#6e4b2e');
   const outer = C('#6faa4c');
   for (let i = 0; i <= n; i++) {
     const k = i % n;
@@ -280,18 +410,31 @@ function buildRoad(track, anisotropy) {
     const rx = -track.tz[k];
     const rz = track.tx[k];
     const v = (i * track.step) / TILE;
+    const surf = track.surf[k];
     roadPos.push(x - rx * ROAD_HALF, y + 0.04, z - rz * ROAD_HALF, x + rx * ROAD_HALF, y + 0.04, z + rz * ROAD_HALF);
     roadUv.push(0, v, 1, v);
+    // Accotements : gravier et herbe ; sable sur la plage ; poutre de rive sous la passerelle.
+    const deck = surf === 'boardwalk';
+    const out = deck ? ROAD_HALF + 0.12 : ROAD_HALF + (surf === 'sand' ? 3.2 : 2.4);
+    const drop = deck ? 0.42 : 0.5;
+    const ci = deck ? WOOD : surf === 'sand' ? SAND : GRAVEL;
+    const co = deck ? WOOD : surf === 'sand' ? SAND : outer;
     for (const side of [-1, 1]) {
       shPos.push(x + rx * side * (ROAD_HALF - 0.05), y + 0.035, z + rz * side * (ROAD_HALF - 0.05));
-      shPos.push(x + rx * side * SH, y - 0.5, z + rz * side * SH);
-      shCol.push(inner.r, inner.g, inner.b, outer.r, outer.g, outer.b);
+      shPos.push(x + rx * side * out, y - drop, z + rz * side * out);
+      shCol.push(ci.r, ci.g, ci.b, co.r, co.g, co.b);
     }
   }
+  // Un groupe d'indices par revêtement continu, pour une matière par revêtement.
   const roadIdx = [];
+  const groups = [];
   const shIdx = [];
   for (let i = 0; i < n; i++) {
     const a = i * 2;
+    const m = SURFACE_INDEX[track.surf[i]] ?? 0;
+    const last = groups[groups.length - 1];
+    if (last && last.m === m) last.count += 6;
+    else groups.push({ start: roadIdx.length, count: 6, m });
     roadIdx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); // sens trigonométrique vu du dessus : face visible vers le haut
     const s = i * 4;
     // côté gauche (points s, s+1) puis côté droit (s+2, s+3)
@@ -302,8 +445,15 @@ function buildRoad(track, anisotropy) {
   road.setAttribute('position', new THREE.Float32BufferAttribute(roadPos, 3));
   road.setAttribute('uv', new THREE.Float32BufferAttribute(roadUv, 2));
   road.setIndex(roadIdx);
+  for (const g of groups) road.addGroup(g.start, g.count, g.m);
   road.computeVertexNormals();
-  const roadMesh = new THREE.Mesh(road, new THREE.MeshStandardMaterial({ map: asphaltTexture(anisotropy), roughness: 0.92, metalness: 0 }));
+  const used = new Set(track.surf);
+  const materials = [
+    new THREE.MeshStandardMaterial({ map: asphaltTexture(anisotropy), roughness: 0.92, metalness: 0 }),
+    used.has('boardwalk') ? new THREE.MeshStandardMaterial({ map: boardwalkTexture(anisotropy), roughness: 0.85, metalness: 0 }) : null,
+    used.has('sand') ? new THREE.MeshStandardMaterial({ map: sandTexture(anisotropy), roughness: 1, metalness: 0 }) : null,
+  ].map((m, i, all) => m || all[0]);
+  const roadMesh = new THREE.Mesh(road, materials);
   roadMesh.receiveShadow = true;
   const sh = new THREE.BufferGeometry();
   sh.setAttribute('position', new THREE.Float32BufferAttribute(shPos, 3));
@@ -355,9 +505,26 @@ function blobShadowTexture() {
   return tex;
 }
 
+// Libère géométries, matières et textures d'un sous-arbre (les matières partagées entre modules sont épargnées).
+export function disposeTree(root, keep = new Set()) {
+  const mats = new Set();
+  root.traverse((o) => {
+    if (o.geometry) o.geometry.dispose();
+    if (o.material) for (const m of [].concat(o.material)) mats.add(m);
+  });
+  for (const m of mats) {
+    if (keep.has(m)) continue;
+    for (const v of Object.values(m)) if (v && v.isTexture) v.dispose();
+    m.dispose();
+  }
+}
+
 // --- Construction du décor ---
 
 export function buildScenery(scene, track, { quality = 'high', renderer = null } = {}) {
+  const course = track.course;
+  const theme = THEMES[course.theme] || THEMES.meadow;
+  const feats = course.features || {};
   const group = new THREE.Group();
   scene.add(group);
   const density = quality === 'high' ? 1 : quality === 'medium' ? 0.65 : 0.4;
@@ -371,19 +538,24 @@ export function buildScenery(scene, track, { quality = 'high', renderer = null }
   const e = new THREE.Euler();
 
   // Ciel, brume et environnement
-  const sky = makeSky();
+  const sky = makeSky(theme.sky);
   scene.add(sky);
-  scene.fog = new THREE.Fog(HORIZON, 260, 1600);
+  scene.fog = new THREE.Fog(C(theme.sky[2]), 260, 1600);
+  let envTex = null;
   if (renderer) {
-    scene.environment = makeEnvironment(renderer, sky);
+    envTex = makeEnvironment(renderer, sky);
+    scene.environment = envTex;
     scene.environmentIntensity = 0.55;
   }
 
   // Terrain, lac, route
-  const lake = findLake(track);
-  const height = makeGround(track, lake);
+  const lake = feats.lake ? findLake(track) : null;
+  const coast = feats.coast || null;
+  const seaY = track.minY - 0.7;
+  const flat = [feats.village, feats.farm].filter(Boolean).map((z) => [z.from, z.to]);
+  const height = makeGround(track, lake, theme, { coast, seaY, flat });
   const heightAt = (x, z) => height(x, z).h;
-  group.add(buildTerrain(track, height, lake, quality));
+  group.add(buildTerrain(track, height, lake, quality, theme, coast, seaY));
   group.add(...buildRoad(track, anisotropy));
   if (lake) {
     const water = new THREE.Mesh(
@@ -398,13 +570,25 @@ export function buildScenery(scene, track, { quality = 'high', renderer = null }
   // Emplacements libres (loin de la route, hors du lac, hors de l'aire de départ)
   const b = track.bounds;
   const start = track.frame(0);
+  const reserved = [];
+  const reserve = (x, z, rad) => reserved.push([x, z, rad]);
   const free = (x, z, minRoad) => {
     const near = nearestFine(track, x, z);
     if (near.dist < minRoad) return null;
     if (lake && Math.hypot(x - lake.x, z - lake.z) < lake.r * 1.4) return null;
+    if (coast && z > coastZ(coast, x) - 34) return null; // plage et mer
     if (Math.hypot(x - start.x, z - start.z) < 14) return null;
+    for (const [rx, rz, rad] of reserved) if ((x - rx) ** 2 + (z - rz) ** 2 < rad * rad) return null;
     return near;
   };
+
+  // Éléments propres au circuit (avant la végétation, qui évite leurs emplacements)
+  const ctx = { track, heightAt, reserve, lake, rnd: rng(23), cast: castTrees, free, seaY };
+  const updaters = [];
+  if (feats.farm) updaters.push(addFarm(group, ctx, feats.farm));
+  if (feats.village) updaters.push(addAlpineVillage(group, ctx, feats.village));
+  if (feats.cows) updaters.push(addAlpineCows(group, ctx));
+  if (coast) updaters.push(addCoast(group, scene, ctx, coast));
   const randomPoint = (spread) => [b.minX - spread + r() * (b.maxX - b.minX + spread * 2), b.minZ - spread + r() * (b.maxZ - b.minZ + spread * 2)];
 
   // Arbres : bosquets (bruit) + arbres isolés ; feuillus ronds et sapins.
@@ -412,7 +596,7 @@ export function buildScenery(scene, track, { quality = 'high', renderer = null }
   const pines = [];
   const bushes = [];
   const shadows = [];
-  const wantTrees = Math.round(700 * density);
+  const wantTrees = Math.round(theme.trees * density);
   for (let tries = 0; tries < 20000 && round.length + pines.length < wantTrees; tries++) {
     const [x, z] = randomPoint(320);
     const forest = fbm(x * 0.008 + 40, z * 0.008, 3);
@@ -421,7 +605,7 @@ export function buildScenery(scene, track, { quality = 'high', renderer = null }
     if (!near) continue;
     const y = heightAt(x, z);
     const sc = 0.75 + r() * 0.75;
-    if (near.dist > 140 && r() < 0.55) pines.push([x, y, z, sc * 1.1, r()]);
+    if ((theme.pineNear || near.dist > 140) && r() < theme.pineRatio) pines.push([x, y, z, sc * 1.1, r()]);
     else round.push([x, y, z, sc, r()]);
     shadows.push([x, y, z, sc * 2.4]);
   }
@@ -478,7 +662,7 @@ export function buildScenery(scene, track, { quality = 'high', renderer = null }
     const f = track.frame(s, lat);
     if (!free(f.x, f.z, ROAD_HALF + 2.4)) continue;
     const y = heightAt(f.x, f.z);
-    if (fbm(f.x * 0.05, f.z * 0.05, 2) > 0.1 && flowers.length < 2600 * density) flowers.push([f.x, y, f.z, r()]);
+    if (fbm(f.x * 0.05, f.z * 0.05, 2) > 0.1 && flowers.length < theme.flowers * density) flowers.push([f.x, y, f.z, r()]);
     else tufts.push([f.x, y, f.z, r()]);
   }
   const tuftMesh = new THREE.InstancedMesh(tuftGeo, treeMat, tufts.length);
@@ -501,7 +685,7 @@ export function buildScenery(scene, track, { quality = 'high', renderer = null }
 
   // Rochers
   const rocks = [];
-  for (let tries = 0; tries < 3000 && rocks.length < Math.round(90 * density); tries++) {
+  for (let tries = 0; tries < 6000 && rocks.length < Math.round(theme.rocks * density); tries++) {
     const [x, z] = randomPoint(200);
     if (!free(x, z, ROAD_HALF + 5)) continue;
     rocks.push([x, heightAt(x, z), z, 0.5 + r() * 1.8, r()]);
@@ -519,12 +703,13 @@ export function buildScenery(scene, track, { quality = 'high', renderer = null }
   // Clôtures en bois le long de certains tronçons
   const posts = [];
   const rails = [];
-  for (const side of [-1, 1]) {
+  for (const side of theme.fences ? [-1, 1] : []) {
     for (let s = 20; s < track.length - 20; s += 2.6) {
       if (fbm(s * 0.006 + side * 13, side * 7, 2) < 0.12) continue;
       const a = track.frame(s, side * (ROAD_HALF + 3.4));
       const c2 = track.frame(s + 2.6, side * (ROAD_HALF + 3.4));
       if (lake && Math.hypot(a.x - lake.x, a.z - lake.z) < lake.r * 1.4) continue;
+      if (reserved.some(([rx, rz, rad]) => (a.x - rx) ** 2 + (a.z - rz) ** 2 < (rad + 3) ** 2)) continue;
       const ya = heightAt(a.x, a.z);
       const yc = heightAt(c2.x, c2.z);
       posts.push([a.x, ya, a.z]);
@@ -553,7 +738,7 @@ export function buildScenery(scene, track, { quality = 'high', renderer = null }
 
   // Maisons de campagne
   const houses = [];
-  for (let tries = 0; tries < 4000 && houses.length < 8; tries++) {
+  for (let tries = 0; tries < 4000 && houses.length < (feats.cottages ? 8 : 0); tries++) {
     const s = r() * track.length;
     const side = r() < 0.5 ? -1 : 1;
     const f = track.frame(s, side * (ROAD_HALF + 16 + r() * 30));
@@ -597,7 +782,7 @@ export function buildScenery(scene, track, { quality = 'high', renderer = null }
 
   // Bottes de foin dans les champs
   const bales = [];
-  for (let tries = 0; tries < 2000 && bales.length < Math.round(24 * density); tries++) {
+  for (let tries = 0; tries < 2000 && bales.length < Math.round(theme.bales * density); tries++) {
     const [x, z] = randomPoint(60);
     const near = free(x, z, ROAD_HALF + 10);
     if (!near || near.dist > 70) continue;
@@ -633,14 +818,24 @@ export function buildScenery(scene, track, { quality = 'high', renderer = null }
     c.copy(C('#6f8fae')).lerp(C('#9db6cc'), smoothstep(0, 0.6, y));
     c.lerp(C('#ffffff'), smoothstep(0.62, 0.72, y));
   });
-  const mountains = new THREE.InstancedMesh(mountainGeo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, flatShading: true }), 34);
-  for (let i = 0; i < 34; i++) {
-    const a = (i / 34) * Math.PI * 2 + r() * 0.12;
-    const dist = 950 + r() * 420;
-    const hgt = 150 + r() * 230;
-    m4.compose(v3.set(cx + Math.cos(a) * dist, -30, cz + Math.sin(a) * dist), q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, r() * 6), s3.set(230 + r() * 180, hgt, 230 + r() * 180));
-    mountains.setMatrixAt(i, m4);
+  const M = theme.mountains;
+  const mountains = new THREE.InstancedMesh(mountainGeo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, flatShading: true }), M.n);
+  const span = Math.max(b.maxX - b.minX, b.maxZ - b.minZ) / 2;
+  let mi = 0;
+  for (let i = 0; i < M.n * 3 && mi < M.n; i++) {
+    const a = (i / M.n) * Math.PI * 2 + r() * 0.12;
+    const wx = M.w[0] + r() * M.w[1];
+    const wz = M.w[0] + r() * M.w[1];
+    // Le pied de la montagne reste loin du circuit.
+    const dist = Math.max(M.dist[0], span + 200 + Math.max(wx, wz)) + r() * M.dist[1];
+    const mx = cx + Math.cos(a) * dist;
+    const mz = cz + Math.sin(a) * dist;
+    if (coast && mz > coastZ(coast, mx) - 150) continue; // pas de montagne dans la mer
+    const hgt = M.h[0] + r() * M.h[1];
+    m4.compose(v3.set(mx, track.minY - 30, mz), q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, r() * 6), s3.set(wx, hgt, wz));
+    mountains.setMatrixAt(mi++, m4);
   }
+  mountains.count = mi;
   group.add(mountains);
 
   // Nuages cotonneux qui dérivent lentement
@@ -705,10 +900,25 @@ export function buildScenery(scene, track, { quality = 'high', renderer = null }
   arch.rotation.y = Math.atan2(start.tx, start.tz);
   group.add(arch);
 
+  const anim = updaters.filter(Boolean);
+  let time = 0;
   const update = (dt, camera) => {
+    time += dt;
     sky.position.copy(camera.position);
     cloudGroup.rotation.y += dt * 0.004;
+    for (const u of anim) u(dt, time);
   };
 
-  return { group, sky, heightAt, lake, update, center: new THREE.Vector3(cx, (track.minY + track.maxY) / 2, cz) };
+  // Libère tout le décor (changement de circuit sans recharger la page).
+  const dispose = () => {
+    for (const root of [group, sky, cloudGroup]) {
+      scene.remove(root);
+      disposeTree(root);
+    }
+    if (envTex) envTex.dispose();
+    scene.environment = null;
+    scene.fog = null;
+  };
+
+  return { group, sky, heightAt, lake, update, dispose, center: new THREE.Vector3(cx, (track.minY + track.maxY) / 2, cz) };
 }

@@ -13,7 +13,7 @@ Un jeu de course façon kart sur un vrai vélo : home trainer connecté, ceintur
   - `mock.js` : appareils simulés pour développer sans vélo
 - `src/core/` : vitesses virtuelles (`gears.js`) et boutons des manettes transformés en touches clavier (`keymap.js`)
 - `src/core/steering.js` : direction réaliste du vélo (il s'incline, tourne puis se redresse ; inclinaison naturelle dans les virages)
-- `game/` : le jeu 3D. Écran titre façon jeu (navigable au clavier et aux manettes Zwift), graphismes **détaillés** (`scenery.js`, `rider.js` : ombres, ciel peint, lac, village, prairies) ou **simples** (style d'origine, plus léger), au choix dans Options. `?quality=high|medium|low` force le niveau de détail.
+- `game/` : le jeu 3D. Écran titre façon jeu (navigable au clavier et aux manettes Zwift), graphismes **détaillés** (`scenery.js`, `rider.js` : ombres, ciel peint, lac, village, prairies) ou **simples** (style d'origine, plus léger), au choix dans Options. `?quality=high|medium|low` force le niveau de détail. Trois circuits (`courses.js`) : **Vallée Verte** (lac, village, ferme et animaux), **Col des Chalets** (grandes montées et descentes, village de chalets) et **Côte des Dunes** (passerelle en bois puis route de sable, plus dure à pédaler : résistance au roulement en jeu et pente équivalente envoyée au trainer). `?course=vallee|col|plage` choisit le circuit, `?laps=` le nombre de tours.
 
 ## Développer
 

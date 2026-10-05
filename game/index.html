@@ -37,7 +37,7 @@
         <span class="logo-tag">La course kart sur ton vrai vélo</span>
       </div>
       <nav class="menu" id="mainMenu" aria-label="Menu principal">
-        <button class="menu-btn primary" id="play"><span class="mi">▶</span><span>Jouer</span><small>3 tours · 5 adversaires</small></button>
+        <button class="menu-btn primary" id="play" data-panel="coursePanel"><span class="mi">▶</span><span>Jouer</span><small id="playSummary">choisis ton circuit</small></button>
         <button class="menu-btn" data-panel="devicesPanel"><span class="mi">🔗</span><span>Appareils</span><small id="devicesSummary">aucun appareil</small></button>
         <button class="menu-btn" data-panel="optionsPanel"><span class="mi">⚙</span><span>Options</span><small id="optionsSummary"></small></button>
         <button class="menu-btn" data-panel="helpPanel"><span class="mi">🎮</span><span>Commandes</span><small>clavier, manettes, tactile</small></button>
@@ -53,6 +53,12 @@
     <span class="version">prototype</span>
 
     <!-- Panneaux secondaires -->
+    <aside class="side-panel" id="coursePanel" hidden aria-label="Circuits">
+      <h2>Choisis ton circuit</h2>
+      <div class="course-list" id="courseList"></div>
+      <button class="btn back" data-close>← Retour</button>
+    </aside>
+
     <aside class="side-panel" id="devicesPanel" hidden aria-label="Appareils">
       <h2>Appareils</h2>
       <div id="demoBanner" class="note demo" hidden>Mode démo : les appareils sont simulés. <a href="./">Revenir au vrai Bluetooth</a></div>

@@ -1,7 +1,9 @@
 // MyCycleWorld, prototype jouable : scène 3D, boucle de jeu, écrans, clavier/manettes, pente au trainer.
 import * as THREE from 'three';
-import { Track, buildScenery } from './track.js';
-import { buildScenery as buildDetailedScenery, SUN_DIR } from './scenery.js';
+import { Track, buildScenery, minimapPath } from './track.js';
+import { buildScenery as buildDetailedScenery, SUN_DIR, disposeTree } from './scenery.js';
+import { COURSE_ORDER, courseById, SURFACES } from './courses.js';
+import { elevationGain } from '../src/core/profile.js';
 import { RiderModel, createItemBox, createBanana } from './models.js';
 import { DetailedRider } from './rider.js';
 import { Race, ITEMS } from './race.js';
@@ -18,7 +20,19 @@ import { TitleMenu } from './menu.js';
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
 const DEMO = params.has('demo');
-const LAPS = Math.max(1, Math.min(10, parseInt(params.get('laps'), 10) || 3));
+const LAPS_PARAM = parseInt(params.get('laps'), 10);
+const lapsFor = (course) => Math.max(1, Math.min(10, LAPS_PARAM || course.laps || 3));
+
+// Circuit choisi : paramètre d'adresse ?course=, sinon le dernier joué sur cet appareil.
+const COURSE_KEY = 'mycycleworld.course';
+function storedCourse() {
+  try {
+    return localStorage.getItem(COURSE_KEY);
+  } catch {
+    return null;
+  }
+}
+let courseId = courseById(params.get('course') || storedCourse()).id;
 
 // Puissance simulée au clavier (sans home trainer).
 const SIM = { power: 250, cadence: 90, rise: 900, fall: 140, cadenceFall: 70 };
@@ -47,7 +61,7 @@ const renderer = new THREE.WebGLRenderer({ canvas: $('scene'), antialias: true, 
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, DETAILED && QUALITY === 'high' ? 2 : 1.5));
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(65, 1, 0.1, 4000);
-const track = new Track();
+let track = new Track(courseById(courseId));
 let scenery;
 let sun = null;
 if (DETAILED) {
@@ -67,7 +81,6 @@ if (DETAILED) {
     sun.shadow.normalBias = 0.03;
   }
   scene.add(sun, sun.target);
-  scenery = buildDetailedScenery(scene, track, { quality: QUALITY, renderer });
 } else {
   const skyColor = new THREE.Color('#cfe6fb');
   scene.background = skyColor;
@@ -76,9 +89,28 @@ if (DETAILED) {
   const simpleSun = new THREE.DirectionalLight('#fff3dc', 2.2);
   simpleSun.position.set(-300, 400, 200);
   scene.add(simpleSun);
-  const simple = buildScenery(scene, track);
-  scenery = { ...simple, update: (dt, cam) => simple.sky.position.copy(cam.position) };
 }
+
+// Décor du circuit courant (reconstruit quand on change de circuit, sans recharger la page :
+// un rechargement couperait les connexions Bluetooth).
+function buildWorld() {
+  if (DETAILED) {
+    scenery = buildDetailedScenery(scene, track, { quality: QUALITY, renderer });
+    return;
+  }
+  const simple = buildScenery(scene, track);
+  scenery = {
+    ...simple,
+    update: (dt, cam) => simple.sky.position.copy(cam.position),
+    dispose: () => {
+      for (const root of [simple.group, simple.sky]) {
+        scene.remove(root);
+        disposeTree(root);
+      }
+    },
+  };
+}
+buildWorld();
 const Rider = DETAILED ? DetailedRider : RiderModel;
 const hud = new Hud(track);
 const menu = new TitleMenu($('home'));
@@ -150,10 +182,11 @@ const tmpFrame2 = {};
 
 // Crée une course (et ses objets 3D). Utilisé aussi pour l'aperçu de l'écran d'accueil.
 function setupRace() {
+  disposeTree(raceObjects); // coureurs, étiquettes et objets de la course précédente
   raceObjects.clear();
   bananaMeshes.clear();
   models = new Map();
-  race = new Race(track, { laps: LAPS });
+  race = new Race(track, { laps: lapsFor(track.course) });
   for (const r of race.racers) {
     const m = new Rider({ jersey: r.color, bike: r.bike, helmet: r.helmet, name: r.isPlayer ? '' : r.name });
     if (m.blob) m.blob.visible = !SHADOWS; // la pastille d'ombre ne sert que sans ombres portées
@@ -281,6 +314,70 @@ function showEnd() {
   show('end');
 }
 
+// ---------- Circuits ----------
+
+// Mini-carte SVG d'un circuit (pour les cartes du menu).
+function courseSvg(t) {
+  const { pts } = minimapPath(t, 8);
+  const d = pts.map(([x, z], i) => `${i ? 'L' : 'M'}${(8 + x * 84).toFixed(1)} ${(8 + z * 84).toFixed(1)}`).join(' ');
+  const bg = { meadow: '#3f7d34', alpine: '#4b6a7d', coast: '#2a8fb5' }[t.course.theme] || '#3f7d34';
+  return `<svg viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" fill="${bg}"/><path d="${d}Z" fill="none" stroke="#1c1f26" stroke-width="7" stroke-linejoin="round"/><path d="${d}Z" fill="none" stroke="#fff" stroke-width="3" stroke-linejoin="round"/><circle cx="${(8 + pts[0][0] * 84).toFixed(1)}" cy="${(8 + pts[0][1] * 84).toFixed(1)}" r="5" fill="#ff5a1f" stroke="#fff" stroke-width="1.5"/></svg>`;
+}
+
+const plural = (n, word) => `${n} ${word}${n > 1 ? 's' : ''}`;
+const courseInfo = new Map();
+function describeCourse(id) {
+  if (!courseInfo.has(id)) {
+    const t = id === track.course.id ? track : new Track(courseById(id));
+    const c = t.course;
+    const gain = elevationGain(t.grade, t.step);
+    const maxGrade = Math.max(...t.grade);
+    const stats = [`${(t.length / 1000).toFixed(1)} km`, `D+ ${Math.round(gain)} m`, plural(lapsFor(c), 'tour')];
+    const hot = [];
+    if (maxGrade >= 8) hot.push(`pente max ${Math.round(maxGrade)} %`);
+    if (t.surf.includes('sand')) hot.push('sable');
+    courseInfo.set(id, { svg: courseSvg(t), name: c.name, tagline: c.tagline, stats, hot });
+  }
+  return courseInfo.get(id);
+}
+
+function renderCourses() {
+  $('courseList').innerHTML = COURSE_ORDER.map((id) => {
+    const info = describeCourse(id);
+    return `<button type="button" class="course-card" data-course="${id}" aria-current="${id === courseId}">${info.svg}<span><span class="c-name">${info.name}</span><span class="c-tag">${info.tagline}</span><span class="c-stats">${info.stats.map((x) => `<span>${x}</span>`).join('')}${info.hot.map((x) => `<span class="hot">${x}</span>`).join('')}</span></span></button>`;
+  }).join('');
+  const cur = describeCourse(courseId);
+  $('playSummary').textContent = `${cur.name} · ${plural(lapsFor(courseById(courseId)), 'tour')}`;
+}
+
+// Change de circuit sur place : écran de chargement, décor reconstruit, nouvelle course.
+async function loadCourse(id) {
+  id = courseById(id).id;
+  if (id === courseId && track.course.id === id) return;
+  courseId = id;
+  try {
+    localStorage.setItem(COURSE_KEY, id);
+  } catch {
+    /* stockage indisponible */
+  }
+  $('loadingText').textContent = `Chargement : ${courseById(id).name}…`;
+  show('loading');
+  // Deux images pour que l'écran de chargement s'affiche avant le calcul du décor.
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  scenery.dispose();
+  track = new Track(courseById(id));
+  buildWorld();
+  hud.setTrack(track);
+  renderCourses();
+}
+
+$('courseList').addEventListener('click', async (e) => {
+  const card = e.target.closest('[data-course]');
+  if (!card) return;
+  await loadCourse(card.dataset.course);
+  startRace();
+});
+
 // ---------- Matériel ----------
 
 function setStatus(id, text, cls = '') {
@@ -339,7 +436,6 @@ async function connect(kind, statusId, fn) {
 $('connectTrainer').addEventListener('click', () => connect('trainer', 'trainerStatus', () => devices.connectTrainer()));
 $('connectHr').addEventListener('click', () => connect('hr', 'hrStatus', () => devices.connectHeartRate()));
 $('connectZwift').addEventListener('click', () => connect('zwift', 'zwiftStatus', () => devices.connectController()));
-$('play').addEventListener('click', startRace);
 $('resume').addEventListener('click', resume);
 $('quit').addEventListener('click', goHome);
 $('replay').addEventListener('click', startRace);
@@ -442,7 +538,9 @@ function updateGrade() {
   const p = race.player;
   const t = race.time;
   const terrain = state === 'race' || state === 'end' ? track.gradeAt(p.s) : 0;
-  const effects = state === 'race' ? (p.turbo(t) ? TURBO_GRADE : 0) + (p.slipping(t) ? BANANA_GRADE : 0) : 0;
+  // Le sable (et un peu la passerelle) se ressent aussi dans les jambes : pente équivalente en plus.
+  const surface = state === 'race' && !p.offRoad ? SURFACES[track.surfaceAt(p.s)]?.gradeExtra ?? 0 : 0;
+  const effects = state === 'race' ? (p.turbo(t) ? TURBO_GRADE : 0) + (p.slipping(t) ? BANANA_GRADE : 0) + surface : 0;
   feltGrade = gears.effectiveGrade(terrain + effects);
   if (lastSentGrade === null || Math.abs(feltGrade - lastSentGrade) >= 0.1) {
     lastSentGrade = feltGrade;
@@ -597,6 +695,7 @@ function frame(nowMs) {
         slipLeft: p.slipUntil - race.time,
         draft: p.draft,
         offRoad: p.offRoad,
+        surface: p.surface,
         keyboard: !devices.trainerActive,
         touch: TOUCH,
       },
@@ -621,10 +720,13 @@ window.__mcw = {
   get race() { return race; },
   devices,
   gears,
-  track,
+  get track() { return track; },
+  get courseId() { return courseId; },
+  loadCourse,
   get feltGrade() { return feltGrade; },
 };
 
+renderCourses();
 goHome();
 window.__mcwStarted = true;
 requestAnimationFrame(frame);

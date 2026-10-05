@@ -1,41 +1,21 @@
 // Circuit : spline fermée dans le plan XZ + profil d'altitude maîtrisé (montée, descente, plat).
 // La logique de course n'utilise que des distances (s, en m) et des décalages latéraux.
 import * as THREE from 'three';
+import { buildProfile } from '../src/core/profile.js';
+import { courseById, surfaceAtFraction } from './courses.js';
 
 export const ROAD_HALF = 4; // demi-largeur de la route (m)
 export const LATERAL_LIMIT = ROAD_HALF + 2.5; // on peut rouler un peu dans l'herbe, pas plus
 
-// Points de passage du tracé (m).
-const CONTROL = [
-  [0, 0], [130, -30], [250, 10], [320, 120], [290, 240], [180, 290],
-  [60, 250], [-30, 310], [-170, 290], [-250, 180], [-220, 60], [-120, 10],
-];
-
-// Profil de pente (%) en fonction de la fraction du tour, interpolé en douceur entre les clés.
-// Les pentes négatives sont ensuite mises à l'échelle pour que la boucle se referme à la même altitude.
-const PROFILE = [
-  [0, 0], [0.14, 0], [0.2, 7], [0.38, 7], [0.42, 1.5], [0.48, 0],
-  [0.52, -6], [0.7, -6], [0.75, -1], [0.8, 0], [0.86, 2], [0.9, 2], [0.94, 0], [1, 0],
-];
-
 const smooth = (t) => t * t * (3 - 2 * t);
-
-function profileGrade(u) {
-  for (let i = 1; i < PROFILE.length; i++) {
-    const [u1, g1] = PROFILE[i];
-    if (u <= u1) {
-      const [u0, g0] = PROFILE[i - 1];
-      return g0 + (g1 - g0) * smooth((u - u0) / (u1 - u0));
-    }
-  }
-  return 0;
-}
 
 export const mod = (a, n) => ((a % n) + n) % n;
 
+// Un circuit (voir courses.js) : tracé, profil d'altitude, revêtements.
 export class Track {
-  constructor() {
-    const pts = CONTROL.map(([x, z]) => new THREE.Vector3(x, 0, z));
+  constructor(course = courseById('vallee')) {
+    this.course = course;
+    const pts = course.control.map(([x, z]) => new THREE.Vector3(x, 0, z));
     this.curve = new THREE.CatmullRomCurve3(pts, true, 'centripetal');
     this.length = this.curve.getLength();
     const n = Math.ceil(this.length);
@@ -61,19 +41,12 @@ export class Track {
       this.tz[i] = t.z / len;
     }
 
-    // Pentes : montées telles quelles, descentes ajustées pour boucler.
-    const raw = Array.from({ length: n }, (_, i) => profileGrade(i / n));
-    const up = raw.reduce((a, g) => a + Math.max(0, g), 0);
-    const down = raw.reduce((a, g) => a - Math.min(0, g), 0);
-    const k = down > 0 ? up / down : 1;
-    for (let i = 0; i < n; i++) this.grade[i] = raw[i] > 0 ? raw[i] : raw[i] * k;
-    this.grade[n] = this.grade[0];
-    let h = 0;
-    for (let i = 0; i < n; i++) {
-      this.y[i] = h;
-      h += (this.grade[i] / 100) * this.step;
-    }
-    this.y[n] = this.y[0];
+    // Pentes et altitudes : montées telles quelles, descentes ajustées pour boucler.
+    const prof = buildProfile(course.profile, n, this.step);
+    this.grade.set(prof.grade);
+    this.y.set(prof.y);
+    // Revêtement de chaque mètre (asphalte, passerelle, sable).
+    this.surf = Array.from({ length: n + 1 }, (_, i) => surfaceAtFraction(course, (i % n) / n));
 
     // Courbure (1/m, + = virage à droite) : variation du cap le long du tracé, lissée sur ±6 m.
     const yaw = Array.from({ length: n + 1 }, (_, i) => Math.atan2(this.tx[i], this.tz[i]));
@@ -107,6 +80,10 @@ export class Track {
     const f = mod(s, this.length) / this.step;
     const i = Math.min(this.count - 1, Math.floor(f));
     return [i, f - i];
+  }
+
+  surfaceAt(s) {
+    return this.surf[this.locate(s)[0]];
   }
 
   curvatureAt(s) {
@@ -177,7 +154,12 @@ export function makeTerrainHeight(track) {
     const base = near.y - 0.3;
     const t = smooth(Math.min(1, Math.max(0, (near.dist - ROAD_HALF - 3) / 45)));
     const far = Math.max(0, near.dist - 120) * 0.25;
-    return base + t * (bumps(x, z) + 2 + far);
+    const h = base + t * (bumps(x, z) + 2 + far);
+    const coast = track.course.features?.coast;
+    if (!coast) return h;
+    // Plage puis fond marin sous le niveau de la mer.
+    const k = smooth(Math.min(1, Math.max(0, (z - coast.z + 40) / 50))) * Math.min(1, Math.max(0, (near.dist - ROAD_HALF - 1) / 6));
+    return h + (track.minY - 0.3 - (z - coast.z) * 0.06 - h) * k;
   };
 }
 
@@ -219,7 +201,8 @@ export function buildScenery(scene, track) {
   const vc = (opts = {}) => new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, ...opts });
 
   // Route, bordures rouges et blanches, ligne médiane pointillée.
-  const road = ribbon(track, -ROAD_HALF, ROAD_HALF, 0.02, 2, (k) => (k % 2 ? '#4a4d55' : '#474a52'));
+  const ROAD_COLORS = { asphalt: ['#4a4d55', '#474a52'], boardwalk: ['#a87a4f', '#93683f'], sand: ['#e2cf9a', '#d9c48d'] };
+  const road = ribbon(track, -ROAD_HALF, ROAD_HALF, 0.02, 2, (k) => (ROAD_COLORS[track.surf[k * 2]] || ROAD_COLORS.asphalt)[k % 2]);
   group.add(new THREE.Mesh(road, vc()));
   const curb = (k) => (k % 2 ? '#e8e8e8' : '#d6322b');
   group.add(new THREE.Mesh(ribbon(track, ROAD_HALF, ROAD_HALF + 0.7, 0.05, 3, curb), vc()));
@@ -251,7 +234,12 @@ export function buildScenery(scene, track) {
   const flat = tg.toNonIndexed();
   const fp = flat.attributes.position;
   const colors = new Float32Array(fp.count * 3);
-  const grass = ['#5f9e3c', '#67a843', '#579436', '#6fae4a', '#4f8a31'].map((h) => new THREE.Color(h));
+  const theme = track.course.theme;
+  const grass = (theme === 'coast'
+    ? ['#a9b862', '#b9c46f', '#c9cd82', '#dccf95', '#e3d3a1']
+    : theme === 'alpine'
+      ? ['#4f8f3a', '#5a9a42', '#477f34', '#6aa84a', '#8a8f86']
+      : ['#5f9e3c', '#67a843', '#579436', '#6fae4a', '#4f8a31']).map((h) => new THREE.Color(h));
   for (let i = 0; i < fp.count; i += 3) {
     const c = grass[Math.floor(r() * grass.length)];
     for (let v = 0; v < 3; v++) colors.set([c.r, c.g, c.b], (i + v) * 3);
@@ -259,6 +247,14 @@ export function buildScenery(scene, track) {
   flat.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   flat.computeVertexNormals();
   group.add(new THREE.Mesh(flat, vc()));
+
+  // Bord de mer : une grande étendue d'eau au niveau de la plage.
+  const coast = track.course.features?.coast;
+  if (coast) {
+    const sea = new THREE.Mesh(new THREE.PlaneGeometry(6000, 3000).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: '#2a9fd0' }));
+    sea.position.set((b.minX + b.maxX) / 2, track.minY - 0.6, coast.z + 1500);
+    group.add(sea);
+  }
 
   // Arbres et rochers (instanciés : un seul appel de dessin par type).
   const trees = [];
@@ -268,6 +264,7 @@ export function buildScenery(scene, track) {
     const z = b.minZ - 160 + r() * (d - 200);
     const near = track.nearest(x, z);
     if (near.dist < ROAD_HALF + 6) continue;
+    if (coast && z > coast.z - 30) continue;
     if (r() < 0.8) trees.push([x, z, 0.8 + r() * 0.8, r()]);
     else if (rocks.length < 70) rocks.push([x, z, 0.6 + r() * 1.6, r()]);
   }

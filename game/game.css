@@ -496,6 +496,8 @@ body.native .device { grid-template-columns: minmax(0, 1fr); }
   color: #dfe6f5;
   backdrop-filter: blur(6px);
 }
+.badge.sand { background: rgba(227, 196, 120, 0.9); color: #3b2c10; }
+.badge.wood { background: rgba(155, 112, 72, 0.9); color: #fff; }
 .chip i { width: 9px; height: 9px; border-radius: 50%; background: #6b7385; }
 .chip.ok i { background: var(--ok); box-shadow: 0 0 10px var(--ok); }
 .version { position: absolute; right: 18px; bottom: 14px; font: 700 12px system-ui, sans-serif; color: rgba(255, 255, 255, 0.7); letter-spacing: 0.1em; text-transform: uppercase; }
@@ -519,6 +521,20 @@ body.native .device { grid-template-columns: minmax(0, 1fr); }
 .side-panel h2 { font: 400 32px/1 'Lilita One', 'Arial Black', system-ui, sans-serif; margin: 0 0 14px; letter-spacing: 0.01em; }
 .side-panel .back { width: 100%; margin-top: 16px; }
 .side-panel .options { margin-top: 0; }
+.course-list { display: grid; gap: 10px; }
+.course-card {
+  display: grid; grid-template-columns: 74px 1fr; gap: 14px; align-items: center; text-align: left; width: 100%;
+  font: inherit; color: var(--text); background: rgba(255, 255, 255, 0.06); border: 2px solid transparent; border-radius: 14px;
+  padding: 10px 12px; cursor: pointer; transition: background 0.15s, border-color 0.15s, transform 0.15s;
+}
+.course-card:hover, .course-card:focus-visible { background: rgba(255, 255, 255, 0.12); border-color: var(--accent); outline: none; transform: translateX(-3px); }
+.course-card[aria-current="true"] { border-color: rgba(255, 255, 255, 0.35); }
+.course-card svg { width: 74px; height: 74px; border-radius: 10px; }
+.course-card .c-name { display: block; font: 400 22px/1.1 'Lilita One', 'Arial Black', system-ui, sans-serif; letter-spacing: 0.01em; }
+.course-card .c-tag { display: block; font-size: 13px; color: var(--muted); margin: 2px 0 6px; }
+.course-card .c-stats { display: flex; flex-wrap: wrap; gap: 6px; }
+.course-card .c-stats span { font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 999px; background: rgba(255, 255, 255, 0.1); color: #dfe6f5; }
+.course-card .c-stats .hot { background: rgba(255, 90, 31, 0.25); color: #ffb08f; }
 .keys-table { border-collapse: collapse; font-size: 14px; }
 .keys-table td { padding: 6px 12px 6px 0; vertical-align: top; color: var(--muted); }
 .keys-table td:first-child { color: var(--text); white-space: nowrap; }
