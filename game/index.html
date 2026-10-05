@@ -6,8 +6,15 @@
   <title>MyCycleWorld · Course</title>
   <meta name="description" content="Prototype jouable : course façon kart sur ton vrai vélo et ton home trainer connecté.">
   <script type="importmap">
-    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+      }
+    }
   </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lilita+One&display=swap">
   <link rel="stylesheet" href="game.css">
 </head>
 <body>
@@ -20,16 +27,37 @@
     </div>
   </div>
 
-  <!-- Accueil et connexion du matériel -->
-  <section id="home" class="screen" hidden>
-    <div class="panel">
-      <h1>MyCycleWorld <span class="tag">prototype</span></h1>
-      <p class="muted">Course façon kart sur ton vrai vélo : 3 tours, 5 adversaires, des objets. Les montées se sentent dans les jambes.</p>
+  <!-- Écran titre : menu principal par-dessus la 3D (clavier, souris, tactile ou manettes Zwift) -->
+  <section id="home" class="title-screen" hidden>
+    <div class="title-vignette"></div>
+    <div class="title-main">
+      <div class="logo" aria-label="MyCycleWorld">
+        <span class="logo-line"><span class="l-my">My</span><span class="l-cycle">Cycle</span></span>
+        <span class="logo-line l-world">World</span>
+        <span class="logo-tag">La course kart sur ton vrai vélo</span>
+      </div>
+      <nav class="menu" id="mainMenu" aria-label="Menu principal">
+        <button class="menu-btn primary" id="play"><span class="mi">▶</span><span>Jouer</span><small>3 tours · 5 adversaires</small></button>
+        <button class="menu-btn" data-panel="devicesPanel"><span class="mi">🔗</span><span>Appareils</span><small id="devicesSummary">aucun appareil</small></button>
+        <button class="menu-btn" data-panel="optionsPanel"><span class="mi">⚙</span><span>Options</span><small id="optionsSummary"></small></button>
+        <button class="menu-btn" data-panel="helpPanel"><span class="mi">🎮</span><span>Commandes</span><small>clavier, manettes, tactile</small></button>
+      </nav>
+      <p class="menu-hint" id="menuHint">↑ ↓ pour choisir · Entrée pour valider</p>
+    </div>
+
+    <div class="status-chips" aria-live="polite">
+      <span class="chip" id="chipTrainer"><i></i>Home trainer</span>
+      <span class="chip" id="chipHr"><i></i>Cardio</span>
+      <span class="chip" id="chipZwift"><i></i>Manettes</span>
+    </div>
+    <span class="version">prototype</span>
+
+    <!-- Panneaux secondaires -->
+    <aside class="side-panel" id="devicesPanel" hidden aria-label="Appareils">
+      <h2>Appareils</h2>
       <div id="demoBanner" class="note demo" hidden>Mode démo : les appareils sont simulés. <a href="./">Revenir au vrai Bluetooth</a></div>
       <div id="btWarning" class="note warn" hidden>Web Bluetooth n'est pas disponible ici (utilise Chrome ou Edge, en https ou sur localhost). Tu peux quand même jouer au clavier.</div>
-
       <div id="nativeHint" class="note demo" hidden>Appli MyCycleWorld : connecte tes appareils dans l'onglet « Appareils », puis reviens ici pour jouer. Le home trainer est piloté pendant la course.</div>
-
       <div class="devices">
         <div class="device">
           <button class="btn" id="connectTrainer">Connecter le home trainer</button>
@@ -44,28 +72,41 @@
           <span class="status" id="zwiftStatus">aucune manette</span>
         </div>
       </div>
-
-      <button class="btn play" id="play">Jouer</button>
       <p class="hint" id="modeHint"></p>
-
-      <details class="keys">
-        <summary>Commandes</summary>
-        <table>
-          <tr><td><kbd>↑</kbd></td><td>Pédaler (seulement sans home trainer)</td></tr>
-          <tr><td><kbd>←</kbd> <kbd>→</kbd> ou ◀ ▶</td><td>Se déplacer sur la largeur de la route</td></tr>
-          <tr><td><kbd>-</kbd> <kbd>=</kbd> ou boutons latéraux</td><td>Vitesse virtuelle moins / plus</td></tr>
-          <tr><td><kbd>Espace</kbd></td><td>Utiliser l’objet</td></tr>
-          <tr><td><kbd>Maj</kbd></td><td>Déplacement latéral rapide</td></tr>
-          <tr><td><kbd>Échap</kbd></td><td>Pause</td></tr>
-          <tr><td>📱 Tactile</td><td>Boutons à l’écran : ◀ ▶ à gauche, Pédaler, Objet et vitesses − / + à droite, ❚❚ pause</td></tr>
-        </table>
-      </details>
-
       <nav class="links">
         <a href="../diag/" id="diagLink">Diagnostic du matériel</a>
         <a href="?demo=1" id="demoLink">Mode démo</a>
       </nav>
-    </div>
+      <button class="btn back" data-close>← Retour</button>
+    </aside>
+
+    <aside class="side-panel" id="optionsPanel" hidden aria-label="Options">
+      <h2>Options</h2>
+      <div class="options">
+        <span class="opt-label">Graphismes</span>
+        <div class="seg" role="group" aria-label="Graphismes">
+          <button type="button" class="seg-btn" data-gfx="detailed">Détaillés</button>
+          <button type="button" class="seg-btn" data-gfx="simple">Graphisme simple</button>
+        </div>
+        <span class="opt-hint">Le graphisme simple reprend le style d'origine, plus léger pour les appareils anciens. Le changement recharge le jeu.</span>
+      </div>
+      <button class="btn back" data-close>← Retour</button>
+    </aside>
+
+    <aside class="side-panel" id="helpPanel" hidden aria-label="Commandes">
+      <h2>Commandes</h2>
+      <table class="keys-table">
+        <tr><td><kbd>↑</kbd></td><td>Pédaler (seulement sans home trainer)</td></tr>
+        <tr><td><kbd>←</kbd> <kbd>→</kbd> ou ◀ ▶</td><td>Tourner : le vélo s'incline puis change de ligne</td></tr>
+        <tr><td><kbd>-</kbd> <kbd>=</kbd> ou boutons latéraux</td><td>Vitesse virtuelle moins / plus</td></tr>
+        <tr><td><kbd>Espace</kbd> ou Z</td><td>Utiliser l’objet</td></tr>
+        <tr><td><kbd>Maj</kbd> ou levier gauche</td><td>Virage plus serré</td></tr>
+        <tr><td><kbd>Échap</kbd> ou B</td><td>Pause / retour</td></tr>
+        <tr><td>📱 Tactile</td><td>Boutons à l’écran : ◀ ▶ à gauche, Pédaler, Objet et vitesses à droite, ❚❚ pause</td></tr>
+        <tr><td>🎮 Menu</td><td>Manette gauche ▲ ▼ pour choisir, A pour valider, B pour revenir</td></tr>
+      </table>
+      <button class="btn back" data-close>← Retour</button>
+    </aside>
   </section>
 
   <!-- Affichage tête haute -->

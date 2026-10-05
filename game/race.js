@@ -1,6 +1,7 @@
 // Logique de course, sans rendu : coureurs, IA, boîtes à objets, peaux de banane, classement.
 // Toutes les durées sont en secondes de course (this.time), les distances en mètres.
 import { stepSpeed, bestDraftFactor, DEFAULTS } from '../src/core/physics.js';
+import { stepSteering, forwardSpeed, headingTowards } from '../src/core/steering.js';
 import { ROAD_HALF, LATERAL_LIMIT, mod } from './track.js';
 
 export const ITEMS = {
@@ -17,7 +18,6 @@ const BOX_RESPAWN = 4;
 const BOX_ROWS = [0.05, 0.17, 0.29, 0.41, 0.53, 0.65, 0.77, 0.89];
 const BOX_CATCH = 1.3; // largeur de capture (m) : un peu plus que le rayon visuel de la boîte
 const BANANA_LIFETIME = 90;
-const STEER_SPEED = 3.2; // m/s de déplacement latéral
 const COUNTDOWN = 3;
 
 const AI_PROFILES = [
@@ -40,6 +40,10 @@ export class Racer {
     this.slipUntil = -Infinity; // glissade sur banane
     this.finishTime = null;
     this.draft = 1;
+    // Direction (voir src/core/steering.js) : cap par rapport à la route, vitesse de lacet, inclinaison.
+    this.heading = 0;
+    this.yawRate = 0;
+    this.lean = 0;
     this.targetLateral = lateral;
     this.nextLaneChange = 2 + Math.random() * 6;
     this.useItemAt = null;
@@ -143,9 +147,9 @@ export class Race extends EventTarget {
     });
   }
 
+  // Le joueur ne glisse pas de côté : il s'incline, tourne puis se redresse (modèle de vélo).
   steerPlayer(r, dt, input) {
-    const speed = STEER_SPEED * (input.drift ? 1.7 : 1) * Math.min(1, 0.4 + r.v / 6);
-    r.lateral = Math.max(-LATERAL_LIMIT, Math.min(LATERAL_LIMIT, r.lateral + input.steer * speed * dt));
+    stepSteering(r, { steer: input.steer, drift: input.drift }, r.v, this.track.curvatureAt(r.s), dt, LATERAL_LIMIT);
   }
 
   driveAI(r, dt) {
@@ -165,8 +169,7 @@ export class Race extends EventTarget {
       r.targetLateral = (this.random() * 2 - 1) * (ROAD_HALF - 0.9);
       r.nextLaneChange = t + 4 + this.random() * 8;
     }
-    const dl = r.targetLateral - r.lateral;
-    r.lateral += Math.sign(dl) * Math.min(Math.abs(dl), 1.1 * dt);
+    stepSteering(r, { targetHeading: headingTowards(r.lateral, r.targetLateral) }, r.v, this.track.curvatureAt(r.s), dt, LATERAL_LIMIT);
 
     // Utilisation des objets avec un petit délai.
     if (r.item && r.useItemAt !== null && t >= r.useItemAt) this.useItem(r);
@@ -190,7 +193,7 @@ export class Race extends EventTarget {
     r.offRoad = offRoad;
     r.prevS = r.s;
     const lapBefore = Math.floor(r.s / L);
-    r.s += r.v * dt;
+    r.s += forwardSpeed(r.v, r.heading) * dt;
     r.crank += (r.cadence / 60) * Math.PI * 2 * dt;
 
     if (r.finishTime === null && r.s >= this.distance) {
@@ -236,6 +239,7 @@ export class Race extends EventTarget {
         this.bananas.splice(this.bananas.indexOf(b), 1);
         r.slipUntil = t + EFFECT_DURATION;
         r.v *= r.isPlayer ? BANANA_SPEED_KEEP : 0.4;
+        r.yawRate += (this.random() < 0.5 ? -1 : 1) * 0.35; // la roue part sur le côté
         this.emit('banana-hit', { racer: r, banana: b });
         this.emit('banana-removed', b);
         break;

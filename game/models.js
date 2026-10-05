@@ -164,7 +164,7 @@ function solveKnee(hip, foot, a, b, out) {
   return out;
 }
 
-function makeLabel(text, color) {
+export function makeLabel(text, color) {
   const cv = document.createElement('canvas');
   cv.width = 256;
   cv.height = 64;

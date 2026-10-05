@@ -75,6 +75,23 @@ export class Track {
     }
     this.y[n] = this.y[0];
 
+    // Courbure (1/m, + = virage à droite) : variation du cap le long du tracé, lissée sur ±6 m.
+    const yaw = Array.from({ length: n + 1 }, (_, i) => Math.atan2(this.tx[i], this.tz[i]));
+    const rawK = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      let d = yaw[i + 1] - yaw[i];
+      d = Math.atan2(Math.sin(d), Math.cos(d));
+      rawK[i] = -d / this.step;
+    }
+    this.curv = new Float32Array(n + 1);
+    const W = 6;
+    for (let i = 0; i < n; i++) {
+      let sum = 0;
+      for (let j = -W; j <= W; j++) sum += rawK[mod(i + j, n)];
+      this.curv[i] = sum / (2 * W + 1);
+    }
+    this.curv[n] = this.curv[0];
+
     this.minY = Math.min(...this.y);
     this.maxY = Math.max(...this.y);
     let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
@@ -90,6 +107,11 @@ export class Track {
     const f = mod(s, this.length) / this.step;
     const i = Math.min(this.count - 1, Math.floor(f));
     return [i, f - i];
+  }
+
+  curvatureAt(s) {
+    const [i, a] = this.locate(s);
+    return this.curv[i] + (this.curv[i + 1] - this.curv[i]) * a;
   }
 
   gradeAt(s) {

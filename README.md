@@ -12,6 +12,8 @@ Un jeu de course façon kart sur un vrai vélo : home trainer connecté, ceintur
   - `zwift.js` : manettes Zwift Play (firmware 1.x et 2.x), Zwift Click et Zwift Ride
   - `mock.js` : appareils simulés pour développer sans vélo
 - `src/core/` : vitesses virtuelles (`gears.js`) et boutons des manettes transformés en touches clavier (`keymap.js`)
+- `src/core/steering.js` : direction réaliste du vélo (il s'incline, tourne puis se redresse ; inclinaison naturelle dans les virages)
+- `game/` : le jeu 3D. Écran titre façon jeu (navigable au clavier et aux manettes Zwift), graphismes **détaillés** (`scenery.js`, `rider.js` : ombres, ciel peint, lac, village, prairies) ou **simples** (style d'origine, plus léger), au choix dans Options. `?quality=high|medium|low` force le niveau de détail.
 
 ## Développer
 
