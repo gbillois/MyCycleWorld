@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0a0e1c">
   <title>MyCycleWorld · Course</title>
   <meta name="description" content="Prototype jouable : course façon kart sur ton vrai vélo et ton home trainer connecté.">
   <script type="importmap">
@@ -14,226 +15,360 @@
     }
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lilita+One&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Barlow+Condensed:ital,wght@0,600;0,700;0,800;1,700;1,800&display=swap">
   <link rel="stylesheet" href="game.css">
 </head>
-<body>
+<body data-input="kbd">
+  <!-- Pictogrammes de l'interface (réutilisés avec <use href="#i-…">) -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l12-7.5a1 1 0 0 0 0-1.72l-12-7.5A1 1 0 0 0 7 4.5z" fill="currentColor"/></symbol>
+      <symbol id="i-gear" viewBox="0 0 24 24"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l2-1.6-2-3.4-2.4.9a7.5 7.5 0 0 0-2.6-1.5L14 2.5h-4l-.4 2.4A7.5 7.5 0 0 0 7 6.4l-2.4-.9-2 3.4 2 1.6a7.6 7.6 0 0 0 0 3l-2 1.6 2 3.4 2.4-.9a7.5 7.5 0 0 0 2.6 1.5l.4 2.4h4l.4-2.4a7.5 7.5 0 0 0 2.6-1.5l2.4.9 2-3.4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+      <symbol id="i-pad" viewBox="0 0 24 24"><path d="M7.5 7h9a5 5 0 0 1 4.9 4l.9 4.7a2.6 2.6 0 0 1-4.5 2.2L15.6 16H8.4l-2.2 1.9a2.6 2.6 0 0 1-4.5-2.2l.9-4.7a5 5 0 0 1 4.9-4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M8 10v4M6 12h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="15.5" cy="11" r="1.2" fill="currentColor"/><circle cx="17.5" cy="13.2" r="1.2" fill="currentColor"/></symbol>
+      <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-chev" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-bike" viewBox="0 0 48 48"><circle cx="11" cy="31" r="8" fill="none" stroke="currentColor" stroke-width="3"/><circle cx="37" cy="31" r="8" fill="none" stroke="currentColor" stroke-width="3"/><path d="M11 31l8-14h12l6 14M19 17l6 14h-14M25 31l6-14M17 13h6M31 17l-2-5h5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-cross" viewBox="0 0 48 48"><circle cx="25" cy="7" r="3.5" fill="currentColor"/><path d="M25 12l-3 11 5 5-2 10M22 23l-6 7M25 14l7 4 5-6" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 42h32M12 42l6-12h14l4 12M36 12v30" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity=".7"/></symbol>
+      <symbol id="i-row" viewBox="0 0 48 48"><path d="M3 31h42l-5 6H9z" fill="currentColor"/><circle cx="23" cy="13" r="3.5" fill="currentColor"/><path d="M23 18l-4 10h9M21 22l8-3" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 44l38-30" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/><path d="M2 42q5-3 10 0t10 0 10 0 10 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity=".6"/></symbol>
+      <symbol id="i-trainer" viewBox="0 0 24 24"><circle cx="8" cy="15" r="5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="8" cy="15" r="1.6" fill="currentColor"/><path d="M13 15h4l3-7M17 15l-2 5h6M3 21h18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20s-7.5-4.6-9.2-9.5C1.7 7.2 4 4 7.3 4c2 0 3.6 1.2 4.7 2.8C13.1 5.2 14.7 4 16.7 4 20 4 22.3 7.2 21.2 10.5 19.5 15.4 12 20 12 20z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M5 12h4l1.5-3 3 6 1.5-3h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-bt" viewBox="0 0 24 24"><path d="M7 7l10 10-5 4V3l5 4L7 17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-dumbbell" viewBox="0 0 24 24"><path d="M3 9v6M6 6v12M18 6v12M21 9v6M6 12h12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></symbol>
+      <symbol id="i-route" viewBox="0 0 24 24"><circle cx="6" cy="18" r="2.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="18" cy="6" r="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8.5 18H16a3 3 0 0 0 0-6H8a3 3 0 0 1 0-6h7.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+      <symbol id="i-mountain" viewBox="0 0 24 24"><path d="M2 20l7-12 4 6 3-4 6 10z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M7.3 11l1.7 1.5L10.5 11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
+      <symbol id="i-lap" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 21V4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M5 4h14l-2.5 4.5L19 13H5" fill="currentColor" opacity=".9"/></symbol>
+      <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="13" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 9v4l2.5 2M10 2h4M19 6l1.5-1.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+      <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7z" fill="currentColor"/></symbol>
+      <symbol id="i-spin" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 12l5-3M12 4v3M12 17v3M4 12h3M17 12h3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+      <symbol id="i-slope" viewBox="0 0 24 24"><path d="M2 19L22 7v12z" fill="currentColor" opacity=".9"/></symbol>
+      <symbol id="i-trophy" viewBox="0 0 24 24"><path d="M7 4h10v5a5 5 0 0 1-10 0z" fill="currentColor"/><path d="M7 6H4a3 3 0 0 0 3 4M17 6h3a3 3 0 0 1-3 4M12 14v4M8 21h8M9 18h6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+      <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="2.5" y="4" width="19" height="16" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7 10l3 2.5L7 15M12 15h5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M15.5 15.5L21 21" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></symbol>
+      <symbol id="i-boat" viewBox="0 0 32 12"><path d="M1 6c6-4 22-4 30 0-8 4-24 4-30 0z" fill="currentColor"/><path d="M16 0v12" stroke="#fff" stroke-width="1.6"/></symbol>
+      <symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M6 10h1M10 10h1M14 10h1M18 10h0M7 14h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+      <symbol id="i-touch" viewBox="0 0 24 24"><path d="M9 11V5.5a1.5 1.5 0 0 1 3 0V11l5 1.2a2 2 0 0 1 1.5 2.3L17.5 21H10l-4-5.5a1.6 1.6 0 0 1 2.5-2L9 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+      <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="4.5" width="4" height="15" rx="1.2" fill="currentColor"/><rect x="14" y="4.5" width="4" height="15" rx="1.2" fill="currentColor"/></symbol>
+      <symbol id="i-wave" viewBox="0 0 24 24"><path d="M2 9q2.5-3 5 0t5 0 5 0 5 0M2 15q2.5-3 5 0t5 0 5 0 5 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    </defs>
+  </svg>
+
   <canvas id="scene" aria-label="Vue 3D de la course"></canvas>
 
-  <div id="loading" class="screen">
-    <div class="panel narrow">
-      <h1>MyCycleWorld</h1>
-      <p id="loadingText">Chargement du circuit…</p>
+  <!-- Chargement : roue qui tourne, barre de progression et astuces -->
+  <div id="loading" class="screen loading-screen">
+    <div class="loading-card">
+      <div class="logo logo-sm" aria-hidden="true"><span class="logo-line"><span class="l-my">My</span><span class="l-cycle">Cycle</span><span class="l-world">World</span></span></div>
+      <div class="ld-wheel" aria-hidden="true"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="44" fill="none" stroke="currentColor" stroke-width="7"/><circle cx="50" cy="50" r="7" fill="currentColor"/><g stroke="currentColor" stroke-width="2.4" opacity=".75"><path d="M50 8v84M8 50h84M20 20l60 60M80 20L20 80"/></g></svg></div>
+      <p id="loadingText" role="status">Chargement du circuit…</p>
+      <div class="ld-bar" aria-hidden="true"><i></i></div>
+      <p class="ld-tip" id="loadingTip"><b>Astuce</b><span>Les boîtes dorées donnent un objet : turbo ou peau de banane.</span></p>
     </div>
   </div>
 
   <!-- Écran titre : menu principal par-dessus la 3D (clavier, souris, tactile ou manettes Zwift) -->
   <section id="home" class="title-screen" hidden>
     <div class="title-vignette"></div>
+    <div class="title-fx" aria-hidden="true"><i class="streak s1"></i><i class="streak s2"></i><i class="streak s3"></i></div>
     <div class="title-main">
       <div class="logo" aria-label="MyCycleWorld">
-        <span class="logo-line"><span class="l-my">My</span><span class="l-cycle">Cycle</span></span>
-        <span class="logo-line l-world">World</span>
-        <span class="logo-tag">La course kart sur ton vrai vélo</span>
+        <span class="logo-line" data-text="MyCycle"><span class="l-my">My</span><span class="l-cycle">Cycle</span></span>
+        <span class="logo-line l-world" data-text="World">World</span>
+        <span class="logo-tag"><span>La course kart sur ton vrai vélo</span></span>
       </div>
       <nav class="menu" id="mainMenu" aria-label="Menu principal">
-        <button class="menu-btn primary" id="play" data-panel="playPanel"><span class="mi">▶</span><span>Jouer</span><small id="playSummary">vélo, elliptique ou rameur</small></button>
-        <button class="menu-btn" data-panel="optionsPanel"><span class="mi">⚙</span><span>Options</span><small id="optionsSummary">connexions, graphismes</small></button>
-        <button class="menu-btn" data-panel="helpPanel"><span class="mi">🎮</span><span>Commandes</span><small>clavier, manettes, tactile</small></button>
+        <button class="menu-btn primary" id="play" data-panel="playPanel"><span class="mi"><svg class="ico"><use href="#i-play"/></svg></span><span class="ml">Jouer</span><small id="playSummary">vélo, elliptique ou rameur</small><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
+        <button class="menu-btn" data-panel="optionsPanel"><span class="mi"><svg class="ico"><use href="#i-gear"/></svg></span><span class="ml">Options</span><small id="optionsSummary">connexions, graphismes</small><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
+        <button class="menu-btn" data-panel="helpPanel"><span class="mi"><svg class="ico"><use href="#i-pad"/></svg></span><span class="ml">Commandes</span><small>clavier, manettes, tactile</small><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
       </nav>
-      <p class="menu-hint" id="menuHint">↑ ↓ pour choisir · Entrée pour valider</p>
+      <p class="menu-hint" id="menuHint" hidden>↑ ↓ pour choisir · Entrée pour valider</p>
     </div>
 
-    <div class="status-chips" aria-live="polite">
-      <span class="chip" id="chipTrainer"><i></i>Machine</span>
-      <span class="chip" id="chipHr"><i></i>Cardio</span>
-      <span class="chip" id="chipZwift"><i></i>Manettes</span>
-    </div>
-    <span class="version">prototype</span>
+    <footer class="title-bar">
+      <div class="status-chips" aria-live="polite">
+        <span class="chip" id="chipTrainer"><i></i><svg class="ico"><use href="#i-trainer"/></svg>Machine</span>
+        <span class="chip" id="chipHr"><i></i><svg class="ico"><use href="#i-heart"/></svg>Cardio</span>
+        <span class="chip" id="chipZwift"><i></i><svg class="ico"><use href="#i-pad"/></svg>Manettes</span>
+      </div>
+      <div class="prompts" aria-hidden="true">
+        <span class="prompt"><span class="glyph nav"><span class="k-kbd">↑↓</span><span class="k-pad dpad"><i></i></span></span>Choisir</span>
+        <span class="prompt"><span class="glyph"><span class="k-kbd">Entrée</span><span class="k-pad pad-a">A</span></span>Valider</span>
+        <span class="prompt p-back"><span class="glyph"><span class="k-kbd">Échap</span><span class="k-pad pad-b">B</span></span>Retour</span>
+      </div>
+      <span class="version">Prototype <b>v1.0</b></span>
+    </footer>
 
     <!-- Jouer : machine, puis niveau -->
-    <aside class="side-panel" id="playPanel" hidden aria-label="Jouer">
-      <h2>Jouer</h2>
-      <div class="card-list">
-        <button type="button" class="mode-card" data-machine="bike"><span class="mc-icon">🚴</span><span><span class="c-name">Vélo</span><span class="c-tag">Home trainer ou vélo connecté · 3 circuits</span></span></button>
-        <button type="button" class="mode-card" data-machine="cross"><span class="mc-icon">🏃</span><span><span class="c-name">Elliptique</span><span class="c-tag">Les circuits vélo, direction automatique</span></span></button>
-        <button type="button" class="mode-card" data-machine="row"><span class="mc-icon">🚣</span><span><span class="c-name">Rameur</span><span class="c-tag">Course d'aviron sur le lac</span></span></button>
+    <section class="side-panel screen-panel" id="playPanel" hidden aria-label="Jouer" data-crumb="Jouer">
+      <header class="sp-head">
+        <button class="btn back" data-close aria-label="Retour"><svg class="ico"><use href="#i-back"/></svg><span>Retour</span></button>
+        <div class="sp-titles"><nav class="crumbs" aria-label="Chemin"></nav><h2>Choisis ta machine</h2></div>
+      </header>
+      <div class="sp-body">
+        <div class="machine-grid">
+          <button type="button" class="machine-card m-bike" data-machine="bike" data-crumb="Vélo">
+            <span class="mc-art"><svg class="mc-ico"><use href="#i-bike"/></svg></span>
+            <span class="mc-text"><span class="c-name">Vélo</span><span class="c-tag">Home trainer ou vélo connecté</span>
+            <span class="c-stats"><span>3 circuits</span><span>Objets</span><span>Pente pilotée</span></span></span>
+          </button>
+          <button type="button" class="machine-card m-cross" data-machine="cross" data-crumb="Elliptique">
+            <span class="mc-art"><svg class="mc-ico"><use href="#i-cross"/></svg></span>
+            <span class="mc-text"><span class="c-name">Elliptique</span><span class="c-tag">Les circuits vélo, direction automatique</span>
+            <span class="c-stats"><span>3 circuits</span><span>Pilote auto</span></span></span>
+          </button>
+          <button type="button" class="machine-card m-row" data-machine="row" data-crumb="Rameur">
+            <span class="mc-art"><svg class="mc-ico"><use href="#i-row"/></svg></span>
+            <span class="mc-text"><span class="c-name">Rameur</span><span class="c-tag">Course d'aviron sur le lac</span>
+            <span class="c-stats"><span>500 m ou 1 000 m</span><span>6 bateaux</span></span></span>
+          </button>
+        </div>
       </div>
-      <button class="btn back" data-close>← Retour</button>
-    </aside>
+    </section>
 
-    <aside class="side-panel" id="coursePanel" hidden aria-label="Circuits" data-parent="playPanel">
-      <h2 id="courseTitle">Choisis ton circuit</h2>
-      <p class="panel-note" id="courseNote" hidden></p>
-      <div class="course-list" id="courseList"></div>
-      <button class="btn back" data-close>← Retour</button>
-    </aside>
+    <section class="side-panel screen-panel" id="coursePanel" hidden aria-label="Circuits" data-parent="playPanel" data-crumb="Circuit">
+      <header class="sp-head">
+        <button class="btn back" data-close aria-label="Retour"><svg class="ico"><use href="#i-back"/></svg><span>Retour</span></button>
+        <div class="sp-titles"><nav class="crumbs" aria-label="Chemin"></nav><h2 id="courseTitle">Choisis ton circuit</h2></div>
+      </header>
+      <div class="sp-body level-layout">
+        <div class="level-col">
+          <p class="panel-note" id="courseNote" hidden></p>
+          <div class="course-list" id="courseList"></div>
+        </div>
+        <aside class="level-preview" id="coursePreview" aria-hidden="true"></aside>
+      </div>
+    </section>
 
-    <aside class="side-panel" id="rowPanel" hidden aria-label="Bassins d'aviron" data-parent="playPanel">
-      <h2>Rameur : choisis ta course</h2>
-      <div class="course-list" id="rowList"></div>
-      <button class="btn back" data-close>← Retour</button>
-    </aside>
+    <section class="side-panel screen-panel" id="rowPanel" hidden aria-label="Bassins d'aviron" data-parent="playPanel" data-crumb="Bassin">
+      <header class="sp-head">
+        <button class="btn back" data-close aria-label="Retour"><svg class="ico"><use href="#i-back"/></svg><span>Retour</span></button>
+        <div class="sp-titles"><nav class="crumbs" aria-label="Chemin"></nav><h2>Choisis ta course</h2></div>
+      </header>
+      <div class="sp-body level-layout">
+        <div class="level-col">
+          <div class="course-list" id="rowList"></div>
+        </div>
+        <aside class="level-preview" id="rowPreview" aria-hidden="true"></aside>
+      </div>
+    </section>
 
     <!-- Options : connexions (une page par matériel) et réglages -->
-    <aside class="side-panel" id="optionsPanel" hidden aria-label="Options">
-      <h2>Options</h2>
-      <div class="card-list">
-        <button type="button" class="mode-card small" data-connect="zwift"><span class="mc-icon">🎮</span><span><span class="c-name">Connecter Zwift</span><span class="c-tag">Home trainer, manettes Zwift Play, cardio</span></span></button>
-        <button type="button" class="mode-card small" data-connect="technogym"><span class="mc-icon">🏋️</span><span><span class="c-name">Connecter Technogym</span><span class="c-tag">Vélo, elliptique ou rameur Technogym, cardio</span></span></button>
-        <button type="button" class="mode-card small" data-connect="ble"><span class="mc-icon">📶</span><span><span class="c-name">Bluetooth standard</span><span class="c-tag">Toute machine FTMS ou capteur de puissance</span></span></button>
-      </div>
-      <div class="options">
-        <span class="opt-label">Graphismes</span>
-        <div class="seg" role="group" aria-label="Graphismes">
-          <button type="button" class="seg-btn" data-gfx="detailed">Détaillés</button>
-          <button type="button" class="seg-btn" data-gfx="simple">Graphisme simple</button>
+    <section class="side-panel screen-panel" id="optionsPanel" hidden aria-label="Options" data-crumb="Options">
+      <header class="sp-head">
+        <button class="btn back" data-close aria-label="Retour"><svg class="ico"><use href="#i-back"/></svg><span>Retour</span></button>
+        <div class="sp-titles"><nav class="crumbs" aria-label="Chemin"></nav><h2>Options</h2></div>
+      </header>
+      <div class="sp-body">
+        <h3 class="sec-title">Connexions</h3>
+        <div class="card-list connect-grid">
+          <button type="button" class="mode-card small" data-connect="zwift" data-crumb="Zwift"><span class="mc-icon"><svg class="ico"><use href="#i-pad"/></svg></span><span><span class="c-name">Connecter Zwift</span><span class="c-tag">Home trainer, manettes Zwift Play, cardio</span></span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
+          <button type="button" class="mode-card small" data-connect="technogym" data-crumb="Technogym"><span class="mc-icon"><svg class="ico"><use href="#i-dumbbell"/></svg></span><span><span class="c-name">Connecter Technogym</span><span class="c-tag">Vélo, elliptique ou rameur Technogym, cardio</span></span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
+          <button type="button" class="mode-card small" data-connect="ble" data-crumb="Bluetooth"><span class="mc-icon"><svg class="ico"><use href="#i-bt"/></svg></span><span><span class="c-name">Bluetooth standard</span><span class="c-tag">Toute machine FTMS ou capteur de puissance</span></span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
         </div>
-        <span class="opt-hint">Le graphisme simple reprend le style d'origine, plus léger pour les appareils anciens. Le changement recharge le jeu.</span>
-        <span class="opt-label">Direction</span>
-        <div class="seg" role="group" aria-label="Direction">
-          <button type="button" class="seg-btn" data-steer="auto">Selon le matériel</button>
-          <button type="button" class="seg-btn" data-steer="on">Automatique</button>
-          <button type="button" class="seg-btn" data-steer="off">Manuelle</button>
-        </div>
-        <span class="opt-hint">Automatique : le vélo suit la route, attrape les boîtes, évite les bananes et utilise les objets tout seul (machines sans boutons). ← → reprennent la main à tout moment. « Selon le matériel » l'active sur elliptique et rameur, et sur une machine Technogym ou Bluetooth standard sans manette Zwift.</span>
-      </div>
-      <button class="btn back" data-close>← Retour</button>
-    </aside>
-
-    <aside class="side-panel" id="connectPanel" hidden aria-label="Connexion" data-parent="optionsPanel">
-      <h2 id="connectTitle">Connecter</h2>
-      <div id="demoBanner" class="note demo" hidden>Mode démo : les appareils sont simulés. <a href="./">Revenir au vrai Bluetooth</a></div>
-      <div id="btWarning" class="note warn" hidden>Web Bluetooth n'est pas disponible ici (utilise Chrome ou Edge, en https ou sur localhost). Tu peux quand même jouer au clavier.</div>
-      <div id="nativeHint" class="note demo" hidden>Appli MyCycleWorld : connecte tes appareils dans l'onglet « Appareils », puis reviens ici pour jouer. Le home trainer est piloté pendant la course.</div>
-      <p class="panel-note" id="hwHint"></p>
-      <div class="devices">
-        <div class="device">
-          <button class="btn" id="connectTrainer">Connecter le home trainer</button>
-          <span class="status" id="trainerStatus">non connecté</span>
-        </div>
-        <div class="device-extra">
-          <button class="btn small" id="connectAny" title="Le sélecteur montre tous les appareils Bluetooth, même sans service reconnu">Mon appareil n'apparaît pas : tout afficher</button>
-          <button class="btn small" id="connectDemoCross" hidden>Elliptique simulé</button>
-        </div>
-        <div class="device" id="zwiftRow">
-          <button class="btn" id="connectZwift">Connecter une manette Zwift</button>
-          <span class="status" id="zwiftStatus">aucune manette</span>
-        </div>
-        <div class="device">
-          <button class="btn" id="connectHr">Connecter la ceinture cardio</button>
-          <span class="status" id="hrStatus">non connectée</span>
-        </div>
-      </div>
-      <p class="hint" id="modeHint"></p>
-      <section class="hw-test" id="hwTest" aria-label="Test de connexion">
-        <h3>Test de connexion</h3>
-        <dl id="hwTestInfo"></dl>
-        <div class="hw-test-actions">
-          <button class="btn small" id="hwPilot">Tester le pilotage</button>
-          <button class="btn small" id="hwLogToggle">Masquer la console</button>
-          <button class="btn small" id="hwLogCopy">Copier le journal</button>
-        </div>
-        <pre class="hw-log" id="hwLog" aria-label="Console Bluetooth"></pre>
-        <div class="inspector">
-          <h3>Inspecteur BLE</h3>
-          <p class="opt-hint">Pour une machine non standard (pas de FTMS, données bizarres) : se connecte à n'importe quel appareil, lit tout ce qui est lisible et enregistre les octets bruts de chaque caractéristique. Fais tourner la machine pendant une minute, puis télécharge le journal et envoie-le.</p>
-          <input type="text" id="inspectExtra" class="text-input" placeholder="Services en plus (facultatif) : fff0, 6e400001-b5a3-…" aria-label="UUID de services supplémentaires" autocomplete="off" spellcheck="false">
-          <div class="hw-test-actions">
-            <button class="btn small" id="inspectStart">Inspecter un appareil</button>
-            <button class="btn small" id="inspectStop" disabled>Arrêter</button>
-            <button class="btn small" id="hwLogDownload">Télécharger le journal</button>
+        <h3 class="sec-title">Réglages</h3>
+        <div class="options">
+          <div class="opt-row">
+            <span class="opt-label">Graphismes</span>
+            <div class="seg" role="group" aria-label="Graphismes">
+              <button type="button" class="seg-btn" data-gfx="detailed">Détaillés</button>
+              <button type="button" class="seg-btn" data-gfx="simple">Graphisme simple</button>
+            </div>
+            <span class="opt-hint">Le graphisme simple reprend le style d'origine, plus léger pour les appareils anciens. Le changement recharge le jeu.</span>
           </div>
-          <p class="opt-hint" id="inspectStatus"></p>
+          <div class="opt-row">
+            <span class="opt-label">Direction</span>
+            <div class="seg" role="group" aria-label="Direction">
+              <button type="button" class="seg-btn" data-steer="auto">Selon le matériel</button>
+              <button type="button" class="seg-btn" data-steer="on">Automatique</button>
+              <button type="button" class="seg-btn" data-steer="off">Manuelle</button>
+            </div>
+            <span class="opt-hint">Automatique : le vélo suit la route, attrape les boîtes, évite les bananes et utilise les objets tout seul (machines sans boutons). ← → reprennent la main à tout moment. « Selon le matériel » l'active sur elliptique et rameur, et sur une machine Technogym ou Bluetooth standard sans manette Zwift.</span>
+          </div>
         </div>
-      </section>
-      <nav class="links">
-        <a href="../diag/" id="diagLink">Diagnostic complet</a>
-        <a href="?demo=1" id="demoLink">Mode démo</a>
-      </nav>
-      <button class="btn back" data-close>← Retour</button>
-    </aside>
+      </div>
+    </section>
 
-    <aside class="side-panel" id="helpPanel" hidden aria-label="Commandes">
-      <h2>Commandes</h2>
-      <table class="keys-table">
-        <tr><td><kbd>↑</kbd></td><td>Pédaler (seulement sans home trainer)</td></tr>
-        <tr><td><kbd>←</kbd> <kbd>→</kbd> ou ◀ ▶</td><td>Tourner : le vélo s'incline puis change de ligne</td></tr>
-        <tr><td><kbd>-</kbd> <kbd>=</kbd> ou boutons latéraux</td><td>Vitesse virtuelle moins / plus</td></tr>
-        <tr><td><kbd>Espace</kbd> ou Z</td><td>Utiliser l’objet</td></tr>
-        <tr><td><kbd>Maj</kbd> ou levier gauche</td><td>Virage plus serré</td></tr>
-        <tr><td><kbd>Échap</kbd> ou B</td><td>Pause / retour</td></tr>
-        <tr><td>📱 Tactile</td><td>Boutons à l’écran : ◀ ▶ à gauche, Pédaler, Objet et vitesses à droite, ❚❚ pause</td></tr>
-        <tr><td>🎮 Menu</td><td>Manette gauche ▲ ▼ pour choisir, A pour valider, B pour revenir</td></tr>
-      </table>
-      <button class="btn back" data-close>← Retour</button>
-    </aside>
+    <section class="side-panel screen-panel" id="connectPanel" hidden aria-label="Connexion" data-parent="optionsPanel" data-crumb="Connexion">
+      <header class="sp-head">
+        <button class="btn back" data-close aria-label="Retour"><svg class="ico"><use href="#i-back"/></svg><span>Retour</span></button>
+        <div class="sp-titles"><nav class="crumbs" aria-label="Chemin"></nav><h2 id="connectTitle">Connecter</h2></div>
+      </header>
+      <div class="sp-body connect-layout">
+        <div class="connect-col">
+          <div id="demoBanner" class="note demo" hidden>Mode démo : les appareils sont simulés. <a href="./">Revenir au vrai Bluetooth</a></div>
+          <div id="btWarning" class="note warn" hidden>Web Bluetooth n'est pas disponible ici (utilise Chrome ou Edge, en https ou sur localhost). Tu peux quand même jouer au clavier.</div>
+          <div id="nativeHint" class="note demo" hidden>Appli MyCycleWorld : connecte tes appareils dans l'onglet « Appareils », puis reviens ici pour jouer. Le home trainer est piloté pendant la course.</div>
+          <p class="panel-note" id="hwHint"></p>
+          <div class="devices">
+            <div class="device">
+              <span class="dv-icon"><svg class="ico"><use href="#i-trainer"/></svg></span>
+              <span class="dv-text"><span class="dv-name">Home trainer / machine</span><span class="status" id="trainerStatus">non connecté</span></span>
+              <button class="btn" id="connectTrainer">Connecter le home trainer</button>
+            </div>
+            <div class="device-extra">
+              <button class="btn small" id="connectAny" title="Le sélecteur montre tous les appareils Bluetooth, même sans service reconnu">Mon appareil n'apparaît pas : tout afficher</button>
+              <button class="btn small" id="connectDemoCross" hidden>Elliptique simulé</button>
+            </div>
+            <div class="device" id="zwiftRow">
+              <span class="dv-icon"><svg class="ico"><use href="#i-pad"/></svg></span>
+              <span class="dv-text"><span class="dv-name">Manettes Zwift Play</span><span class="status" id="zwiftStatus">aucune manette</span></span>
+              <button class="btn" id="connectZwift">Connecter une manette Zwift</button>
+            </div>
+            <div class="device">
+              <span class="dv-icon"><svg class="ico"><use href="#i-heart"/></svg></span>
+              <span class="dv-text"><span class="dv-name">Ceinture cardio</span><span class="status" id="hrStatus">non connectée</span></span>
+              <button class="btn" id="connectHr">Connecter la ceinture cardio</button>
+            </div>
+          </div>
+          <p class="hint" id="modeHint"></p>
+          <nav class="links">
+            <a href="../diag/" id="diagLink">Diagnostic complet</a>
+            <a href="?demo=1" id="demoLink">Mode démo</a>
+          </nav>
+        </div>
+        <section class="hw-test" id="hwTest" aria-label="Test de connexion">
+          <h3><svg class="ico"><use href="#i-search"/></svg>Diagnostic de connexion</h3>
+          <dl id="hwTestInfo"></dl>
+          <div class="hw-test-actions">
+            <button class="btn small" id="hwPilot">Tester le pilotage</button>
+            <button class="btn small" id="hwLogToggle">Masquer la console</button>
+            <button class="btn small" id="hwLogCopy">Copier le journal</button>
+          </div>
+          <div class="term">
+            <div class="term-bar" aria-hidden="true"><i></i><i></i><i></i><span>Console Bluetooth</span></div>
+            <pre class="hw-log" id="hwLog" aria-label="Console Bluetooth"></pre>
+          </div>
+          <div class="inspector">
+            <h3><svg class="ico"><use href="#i-terminal"/></svg>Inspecteur BLE</h3>
+            <p class="opt-hint">Pour une machine non standard (pas de FTMS, données bizarres) : se connecte à n'importe quel appareil, lit tout ce qui est lisible et enregistre les octets bruts de chaque caractéristique. Fais tourner la machine pendant une minute, puis télécharge le journal et envoie-le.</p>
+            <input type="text" id="inspectExtra" class="text-input" placeholder="Services en plus (facultatif) : fff0, 6e400001-b5a3-…" aria-label="UUID de services supplémentaires" autocomplete="off" spellcheck="false">
+            <div class="hw-test-actions">
+              <button class="btn small" id="inspectStart">Inspecter un appareil</button>
+              <button class="btn small" id="inspectStop" disabled>Arrêter</button>
+              <button class="btn small" id="hwLogDownload">Télécharger le journal</button>
+            </div>
+            <p class="opt-hint" id="inspectStatus"></p>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <section class="side-panel screen-panel" id="helpPanel" hidden aria-label="Commandes" data-crumb="Commandes">
+      <header class="sp-head">
+        <button class="btn back" data-close aria-label="Retour"><svg class="ico"><use href="#i-back"/></svg><span>Retour</span></button>
+        <div class="sp-titles"><nav class="crumbs" aria-label="Chemin"></nav><h2>Commandes</h2></div>
+      </header>
+      <div class="sp-body">
+        <table class="keys-table">
+          <thead><tr><th>Action</th><th><svg class="ico"><use href="#i-keyboard"/></svg>Clavier</th><th><svg class="ico"><use href="#i-pad"/></svg>Zwift Play</th><th><svg class="ico"><use href="#i-touch"/></svg>Tactile</th></tr></thead>
+          <tbody>
+            <tr><td>Pédaler <small>sans home trainer</small></td><td><kbd>↑</kbd></td><td>le home trainer</td><td><span class="tk">Pédaler</span></td></tr>
+            <tr><td>Tourner <small>le vélo s'incline puis change de ligne</small></td><td><kbd>←</kbd> <kbd>→</kbd></td><td><span class="pb">◀</span> <span class="pb">▶</span></td><td><span class="tk">◀</span> <span class="tk">▶</span></td></tr>
+            <tr><td>Vitesse virtuelle <small>moins / plus</small></td><td><kbd>-</kbd> <kbd>=</kbd></td><td>boutons latéraux</td><td><span class="tk">−</span> <span class="tk">+</span></td></tr>
+            <tr><td>Utiliser l'objet</td><td><kbd>Espace</kbd></td><td><span class="pb pad-z">Z</span></td><td><span class="tk">Objet</span></td></tr>
+            <tr><td>Virage plus serré</td><td><kbd>Maj</kbd></td><td>levier gauche</td><td></td></tr>
+            <tr><td>Pause / retour</td><td><kbd>Échap</kbd></td><td><span class="pb pad-b">B</span></td><td><span class="tk">❚❚</span></td></tr>
+            <tr><td>Menus <small>choisir, valider, revenir</small></td><td><kbd>↑</kbd> <kbd>↓</kbd> <kbd>Entrée</kbd> <kbd>Échap</kbd></td><td><span class="pb">▲</span> <span class="pb">▼</span> <span class="pb pad-a">A</span> <span class="pb pad-b">B</span></td><td>toucher</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
   </section>
 
   <!-- Affichage tête haute -->
   <div id="hud" hidden>
-    <div class="hud-top-left">
+    <div class="hud-top-left hud-card">
       <div class="pos"><span id="hPos">1er</span><small id="hPosTotal">/ 6</small></div>
-      <div class="lap" id="hLap">Tour 1 / 3</div>
-      <div class="time" id="hTime">0:00.0</div>
+      <div class="hud-meta">
+        <div class="lap"><svg class="ico"><use href="#i-lap"/></svg><span id="hLap">Tour 1 / 3</span></div>
+        <div class="time"><svg class="ico"><use href="#i-clock"/></svg><span id="hTime">0:00.0</span></div>
+      </div>
     </div>
     <div class="hud-item">
-      <div class="slot"><span id="hItem"></span></div>
+      <div class="slot"><span class="slot-roll" aria-hidden="true"><i>🚀</i><i>🍌</i><i>🚀</i><i>🍌</i><i>🚀</i><i>🍌</i><i>🚀</i><i>🍌</i></span><span id="hItem"></span></div>
       <div class="slot-label" id="hItemLabel">aucun objet</div>
     </div>
-    <canvas id="minimap" class="minimap" aria-label="Mini-carte du circuit"></canvas>
+    <div class="hud-map hud-card"><canvas id="minimap" class="minimap" aria-label="Mini-carte du circuit"></canvas></div>
     <div class="hud-effects" id="hEffects"></div>
     <div class="hud-dock">
       <div class="hud-hint" id="hHint"></div>
       <div class="hud-bottom">
-        <div class="m"><b id="hPower">--</b><i>W</i><span>Puissance</span></div>
-        <div class="m"><b id="hCadence">--</b><i>rpm</i><span>Cadence</span></div>
-        <div class="m"><b id="hHr">--</b><i>bpm</i><span>Cardio</span></div>
-        <div class="m main"><b id="hSpeed">0.0</b><i>km/h</i><span>Vitesse</span></div>
-        <div class="m"><b id="hGear">12</b><i>/ 24</i><span>Vitesse virtuelle</span><div class="gearbar"><div id="hGearBar"></div></div></div>
-        <div class="m"><b id="hGrade">0.0</b><i>%</i><span>Pente ressentie</span><small id="hTerrain">terrain 0.0 %</small></div>
+        <div class="hud-wing wl">
+          <div class="m m-power" id="hPowerBox" data-zone="0"><svg class="ico"><use href="#i-bolt"/></svg><b id="hPower">--</b><i>W</i><span>Puissance</span><em class="zone" id="hZone">Z1</em></div>
+          <div class="m"><svg class="ico"><use href="#i-spin"/></svg><b id="hCadence">--</b><i>rpm</i><span>Cadence</span></div>
+          <div class="m m-hr"><svg class="ico"><use href="#i-heart"/></svg><b id="hHr">--</b><i>bpm</i><span>Cardio</span></div>
+        </div>
+        <div class="m main">
+          <svg class="gauge" viewBox="0 0 120 120" aria-hidden="true"><circle class="g-track" cx="60" cy="60" r="52"/><circle class="g-val" id="hSpeedArc" cx="60" cy="60" r="52"/></svg>
+          <b id="hSpeed">0.0</b><i>km/h</i><span>Vitesse</span>
+        </div>
+        <div class="hud-wing wr">
+          <div class="m m-gear"><b id="hGear">12</b><i>/ 24</i><span>Vitesse virtuelle</span><div class="gearbar"><div id="hGearBar"></div></div></div>
+          <div class="m m-grade" id="hGradeBox" data-g="flat"><svg class="ico slope" id="hSlope"><use href="#i-slope"/></svg><b id="hGrade">0.0</b><i>%</i><span>Pente ressentie</span><small id="hTerrain">terrain 0.0 %</small></div>
+        </div>
       </div>
     </div>
   </div>
   <!-- Affichage tête haute du mode rameur -->
   <div id="rowHud" hidden>
-    <div class="hud-top-left">
+    <div class="hud-top-left hud-card">
       <div class="pos"><span id="rPos">1er</span><small id="rPosTotal">/ 6</small></div>
-      <div class="lap" id="rLeft">500 m</div>
-      <div class="time" id="rTime">0:00.0</div>
+      <div class="hud-meta">
+        <div class="lap"><svg class="ico"><use href="#i-flag"/></svg><span id="rLeft">500 m</span></div>
+        <div class="time"><svg class="ico"><use href="#i-clock"/></svg><span id="rTime">0:00.0</span></div>
+      </div>
     </div>
     <div class="row-progress" id="rProgress" aria-hidden="true"><div class="row-finish"></div></div>
     <div class="hud-effects" id="rEffects"></div>
     <div class="hud-dock">
       <div class="hud-hint" id="rHint"></div>
       <div class="hud-bottom">
-        <div class="m"><b id="rPower">--</b><i>W</i><span>Puissance</span></div>
-        <div class="m"><b id="rRate">--</b><i>/min</i><span>Coups</span></div>
-        <div class="m"><b id="rHr">--</b><i>bpm</i><span>Cardio</span></div>
-        <div class="m main"><b id="rSplit">-:--</b><i>/500 m</i><span>Allure</span></div>
-        <div class="m"><b id="rSpeed">0.0</b><i>km/h</i><span>Vitesse</span></div>
-        <div class="m"><b id="rDist">0</b><i>m</i><span>Distance</span></div>
+        <div class="hud-wing wl">
+          <div class="m"><svg class="ico"><use href="#i-bolt"/></svg><b id="rPower">--</b><i>W</i><span>Puissance</span></div>
+          <div class="m m-rate"><svg class="ico"><use href="#i-wave"/></svg><b id="rRate">--</b><i>/min</i><span>Coups</span></div>
+          <div class="m m-hr"><svg class="ico"><use href="#i-heart"/></svg><b id="rHr">--</b><i>bpm</i><span>Cardio</span></div>
+        </div>
+        <div class="m main split"><b id="rSplit">-:--</b><i>/500 m</i><span>Allure</span></div>
+        <div class="hud-wing wr">
+          <div class="m"><b id="rSpeed">0.0</b><i>km/h</i><span>Vitesse</span></div>
+          <div class="m"><b id="rDist">0</b><i>m</i><span>Distance</span></div>
+        </div>
       </div>
     </div>
   </div>
   <div id="banner" class="banner" aria-live="polite"></div>
 
   <section id="pause" class="screen dim" hidden>
-    <div class="panel narrow">
+    <div class="panel narrow pause-card">
+      <div class="pause-badge" aria-hidden="true"><svg class="ico"><use href="#i-pause"/></svg></div>
       <h2>Pause</h2>
       <p class="muted">La course est arrêtée. Le home trainer repasse sur du plat.</p>
-      <button class="btn play" id="resume">Reprendre</button>
-      <button class="btn" id="quit">Quitter la course</button>
+      <button class="btn play" id="resume"><span>Reprendre</span><span class="glyph"><span class="k-kbd">Entrée</span><span class="k-pad pad-a">A</span></span></button>
+      <button class="btn" id="quit"><span>Quitter la course</span></button>
+      <div class="prompts mini" aria-hidden="true">
+        <span class="prompt"><span class="glyph nav"><span class="k-kbd">↑↓</span><span class="k-pad dpad"><i></i></span></span>Choisir</span>
+        <span class="prompt"><span class="glyph"><span class="k-kbd">Échap</span><span class="k-pad pad-b">B</span></span>Reprendre</span>
+      </div>
     </div>
   </section>
 
-  <section id="end" class="screen dim" hidden>
-    <div class="panel">
-      <h2 id="endTitle">Arrivée !</h2>
-      <table class="results" id="results"></table>
-      <p class="small muted" id="endNote"></p>
-      <button class="btn play" id="replay">Rejouer</button>
-      <button class="btn" id="backHome">Accueil</button>
+  <section id="end" class="screen dim end-screen" hidden>
+    <div class="panel end-card">
+      <div class="end-head">
+        <span class="end-kicker">Course terminée</span>
+        <h2 id="endTitle">Arrivée !</h2>
+      </div>
+      <div class="end-body">
+        <div class="podium" id="podium" aria-hidden="true"></div>
+        <div class="end-table">
+          <table class="results" id="results"></table>
+          <p class="small muted" id="endNote"></p>
+        </div>
+      </div>
+      <div class="end-actions">
+        <button class="btn play" id="replay"><span>Rejouer</span><span class="glyph"><span class="k-kbd">Entrée</span><span class="k-pad pad-a">A</span></span></button>
+        <button class="btn" id="backHome"><span>Accueil</span><span class="glyph"><span class="k-kbd">Échap</span><span class="k-pad pad-b">B</span></span></button>
+      </div>
     </div>
   </section>
 
@@ -245,6 +380,26 @@
           'Impossible de démarrer le jeu. Vérifie ta connexion (Three.js est chargé depuis un CDN) ou ton navigateur.';
       }
     }, 10000);
+    // Astuces de l'écran de chargement : une nouvelle toutes les 4 s, seulement quand il est visible.
+    (function () {
+      var tips = [
+        'Les boîtes dorées donnent un objet : turbo ou peau de banane.',
+        'Le turbo fait baisser la pente de 5 % pendant 3 secondes : garde-le pour une montée.',
+        'Roule dans la roue d’un adversaire : l’aspiration rend le pédalage plus facile.',
+        'Le sable de la Côte des Dunes freine beaucoup : change de vitesse virtuelle avant.',
+        'Au rameur, garde une allure régulière : la puissance fait avancer le bateau.',
+        'Sans boutons sur ta machine ? Le pilote automatique tourne pour toi.',
+        'Manettes Zwift Play : ▲ ▼ pour choisir, A pour valider, B pour revenir.',
+      ];
+      var i = Math.floor(Math.random() * tips.length);
+      var el = document.querySelector('#loadingTip span');
+      el.textContent = tips[i];
+      setInterval(function () {
+        if (document.getElementById('loading').hidden) return;
+        i = (i + 1) % tips.length;
+        el.textContent = tips[i];
+      }, 4000);
+    })();
   </script>
   <script type="module" src="main.js"></script>
 </body>

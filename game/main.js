@@ -9,7 +9,7 @@ import { DetailedRider } from './rider.js';
 import { Race, ITEMS } from './race.js';
 import { Devices, explainError } from './devices.js';
 import { NativeDevices, isNativeApp } from './native.js';
-import { Hud, formatTime, ordinal } from './hud.js';
+import { Hud, formatTime, ordinal, ordinalHtml, renderResults } from './hud.js';
 import { VirtualGears } from '../src/core/gears.js';
 import { msToKmh } from '../src/core/physics.js';
 import { bluetoothAdvice } from '../src/core/platform.js';
@@ -349,29 +349,64 @@ function showEnd() {
   touch?.releaseAll();
   const rows = race.ranking().map((r) => ({ r, ...race.estimatedTime(r) }));
   rows.sort((a, b) => (a.estimated === b.estimated ? a.time - b.time : a.estimated ? 1 : -1));
-  const best = rows[0].time;
+  fillEnd(rows, { kind: 'bike', note: 'le coureur' });
+}
+
+// Écran d'arrivée commun : titre, podium des trois premiers, tableau complet.
+function fillEnd(rows, { kind, distance = 0, note }) {
   const me = rows.findIndex((x) => x.r.isPlayer) + 1;
-  $('endTitle').textContent = me === 1 ? 'Victoire ! 🏆' : `Arrivée : ${ordinal(me)} sur ${rows.length}`;
-  $('results').innerHTML =
-    '<tr><th>#</th><th>Coureur</th><th>Temps</th><th>Écart</th></tr>' +
-    rows
-      .map((x, i) => {
-        const gap = i === 0 ? '' : `+${formatTime(x.time - best)}`;
-        return `<tr class="${x.r.isPlayer ? 'me' : ''}"><td>${i + 1}</td><td><span class="dot" style="background:${x.r.color}"></span>${x.r.name}</td><td>${x.estimated ? '≈ ' : ''}${formatTime(x.time)}</td><td>${gap}</td></tr>`;
-      })
-      .join('');
-  $('endNote').textContent = rows.some((x) => x.estimated) ? '≈ : temps estimé, le coureur n’avait pas encore franchi la ligne.' : '';
+  $('endTitle').textContent = me === 1 ? 'Victoire !' : me <= 3 ? `Podium : ${ordinal(me)} sur ${rows.length}` : `Arrivée : ${ordinal(me)} sur ${rows.length}`;
+  $('end').dataset.rank = me <= 3 ? String(me) : 'other';
+  const { podium, table } = renderResults(rows, { kind, distance });
+  $('podium').innerHTML = podium;
+  $('results').innerHTML = table;
+  $('endNote').textContent = rows.some((x) => x.estimated) ? `≈ : temps estimé, ${note} n’avait pas encore franchi la ligne.` : '';
   show('end');
 }
 
 // ---------- Circuits ----------
 
-// Mini-carte SVG d'un circuit (pour les cartes du menu).
-function courseSvg(t) {
-  const { pts } = minimapPath(t, 8);
-  const d = pts.map(([x, z], i) => `${i ? 'L' : 'M'}${(8 + x * 84).toFixed(1)} ${(8 + z * 84).toFixed(1)}`).join(' ');
-  const bg = { meadow: '#3f7d34', alpine: '#4b6a7d', coast: '#2a8fb5' }[t.course.theme] || '#3f7d34';
-  return `<svg viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" fill="${bg}"/><path d="${d}Z" fill="none" stroke="#1c1f26" stroke-width="7" stroke-linejoin="round"/><path d="${d}Z" fill="none" stroke="#fff" stroke-width="3" stroke-linejoin="round"/><circle cx="${(8 + pts[0][0] * 84).toFixed(1)}" cy="${(8 + pts[0][1] * 84).toFixed(1)}" r="5" fill="#ff5a1f" stroke="#fff" stroke-width="1.5"/></svg>`;
+const THEMES = {
+  meadow: ['#4fae47', '#1d5a2a', '#9be37a'],
+  alpine: ['#6a8fa8', '#24384a', '#cfe6ff'],
+  coast: ['#33b2d6', '#0f5f84', '#9ff0ff'],
+};
+const SURF_COLORS = { sand: '#f2cf7a', boardwalk: '#c08a55' };
+const icon = (id) => `<svg class="ico" aria-hidden="true"><use href="#${id}"/></svg>`;
+const stars = (n, max = 5) => `<span class="stars" role="img" aria-label="Difficulté ${n} sur ${max}">${'<i class="on"></i>'.repeat(n)}${'<i></i>'.repeat(max - n)}</span>`;
+
+// Mini-carte SVG d'un circuit (cartes et aperçu du menu) : fond du décor, revêtements en couleur, départ en damier.
+function courseSvg(t, big = false) {
+  const { pts } = minimapPath(t, big ? 4 : 8);
+  const P = (x, z) => `${(8 + x * 84).toFixed(1)} ${(8 + z * 84).toFixed(1)}`;
+  const d = pts.map(([x, z], i) => `${i ? 'L' : 'M'}${P(x, z)}`).join(' ');
+  const theme = t.course.theme in THEMES ? t.course.theme : 'meadow';
+  const [c1, c2] = THEMES[theme];
+  const gid = `g-${t.course.id}-${big ? 'b' : 's'}`;
+  const every = Math.max(1, Math.round(t.count / Math.max(1, pts.length - 1)));
+  let surf = '';
+  for (let i = 1; i < pts.length; i++) {
+    const col = SURF_COLORS[t.surf[Math.min(t.count, i * every)]];
+    if (col) surf += `<path d="M${P(...pts[i - 1])} L${P(...pts[i])}" stroke="${col}" stroke-width="${big ? 2.8 : 3.2}" stroke-linecap="round"/>`;
+  }
+  const deco = {
+    meadow: '<ellipse cx="74" cy="22" rx="13" ry="8" fill="#5cc3ff" opacity=".55"/><circle cx="18" cy="80" r="5" fill="#2f7d33" opacity=".7"/><circle cx="26" cy="86" r="4" fill="#2f7d33" opacity=".7"/>',
+    alpine: '<path d="M0 34 L16 14 L28 28 L42 8 L60 32 L74 16 L100 40 V0 H0z" fill="#e8f2ff" opacity=".22"/>',
+    coast: '<path d="M0 86 Q25 80 50 86 T100 86 V100 H0z" fill="#0b4d73" opacity=".55"/><path d="M0 80 Q25 74 50 80 T100 80 V86 Q75 80 50 86 T0 86z" fill="#f2cf7a" opacity=".55"/>',
+  }[theme];
+  const [sx, sz] = pts[0];
+  const start = `<g transform="translate(${(8 + sx * 84 - 4).toFixed(1)} ${(8 + sz * 84 - 4).toFixed(1)})"><rect width="8" height="8" rx="1.5" fill="#fff" stroke="#11151f" stroke-width="1"/><rect width="4" height="4" fill="#11151f"/><rect x="4" y="4" width="4" height="4" fill="#11151f"/></g>`;
+  return `<svg viewBox="0 0 100 100" aria-hidden="true"><defs><radialGradient id="${gid}" cx="35%" cy="30%" r="85%"><stop offset="0" stop-color="${c1}"/><stop offset="1" stop-color="${c2}"/></radialGradient></defs><rect width="100" height="100" fill="url(#${gid})"/>${deco}<path d="${d}Z" fill="none" stroke="#0b0e16" stroke-opacity=".6" stroke-width="${big ? 6 : 7.5}" stroke-linejoin="round"/><path d="${d}Z" fill="none" stroke="#fff" stroke-width="${big ? 2.6 : 3.2}" stroke-linejoin="round"/>${surf}${start}</svg>`;
+}
+
+// Profil d'altitude (aire + ligne), revêtements particuliers en bandes sous la courbe.
+function profileSvg(info, cls = 'spark') {
+  const { prof, bands, theme } = info;
+  const light = (THEMES[theme] || THEMES.meadow)[2];
+  const gid = `pf-${info.id}-${cls}`;
+  const line = prof.map(([u, y], i) => `${i ? 'L' : 'M'}${(u * 200).toFixed(1)} ${y.toFixed(1)}`).join(' ');
+  const band = bands.map(([a, b, col]) => `<rect x="${(a * 200).toFixed(1)}" y="56" width="${((b - a) * 200).toFixed(1)}" height="4" fill="${col}"/>`).join('');
+  return `<svg class="${cls}" viewBox="0 0 200 60" preserveAspectRatio="none" aria-hidden="true"><defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${light}" stop-opacity=".55"/><stop offset="1" stop-color="${light}" stop-opacity="0"/></linearGradient></defs><path d="${line} L200 60 L0 60Z" fill="url(#${gid})"/><path d="${line}" fill="none" stroke="${light}" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>${band}</svg>`;
 }
 
 const plural = (n, word) => `${n} ${word}${n > 1 ? 's' : ''}`;
@@ -382,21 +417,76 @@ function describeCourse(id) {
     const c = t.course;
     const gain = elevationGain(t.grade, t.step);
     const maxGrade = Math.max(...t.grade);
+    const hasSand = t.surf.includes('sand');
     const stats = [`${(t.length / 1000).toFixed(1)} km`, `D+ ${Math.round(gain)} m`, plural(lapsFor(c), 'tour')];
     const hot = [];
     if (maxGrade >= 8) hot.push(`pente max ${Math.round(maxGrade)} %`);
-    if (t.surf.includes('sand')) hot.push('sable');
-    courseInfo.set(id, { svg: courseSvg(t), name: c.name, tagline: c.tagline, stats, hot });
+    if (hasSand) hot.push('sable');
+    // Profil échantillonné (120 points) et bandes de revêtement.
+    const range = Math.max(8, t.maxY - t.minY);
+    const prof = [];
+    for (let k = 0; k <= 120; k++) {
+      const i = Math.round((k / 120) * t.count);
+      prof.push([k / 120, 52 - ((t.y[i] - t.minY) / range) * 44]);
+    }
+    const bands = [];
+    for (const [a, b, type] of c.surfaces || []) if (SURF_COLORS[type]) bands.push([a, b, SURF_COLORS[type]]);
+    const surfaces = [...new Set(['asphalt', ...t.surf])].map((x) => SURFACES[x]?.label || x);
+    const difficulty = Math.max(1, Math.min(5, Math.round(maxGrade / 3) + (hasSand ? 1 : 0) + (gain / t.length > 0.025 ? 1 : 0)));
+    courseInfo.set(id, {
+      id, svg: courseSvg(t), big: courseSvg(t, true), name: c.name, tagline: c.tagline, stats, hot, theme: c.theme,
+      prof, bands, surfaces, difficulty, km: (t.length / 1000).toFixed(1), gain: Math.round(gain), laps: lapsFor(c),
+      maxGrade: Math.round(maxGrade), alt: Math.round(t.maxY - t.minY),
+    });
   }
   return courseInfo.get(id);
+}
+
+// Aperçu du niveau sélectionné (grande carte, profil, chiffres clés).
+function coursePreview(id) {
+  const x = describeCourse(id);
+  const machine = playMachine === 'cross' ? 'Elliptique' : 'Vélo';
+  return `<div class="pv" data-theme="${x.theme}">
+    <div class="pv-map">${x.big}</div>
+    <div class="pv-info">
+      <span class="pv-kicker">${machine} · circuit</span>
+      <h3>${x.name}</h3>
+      <p>${x.tagline}</p>
+      <div class="pv-diff"><span>Difficulté</span>${stars(x.difficulty)}</div>
+      <div class="pv-profile">${profileSvg(x, 'profile')}<span class="pv-alt">${x.alt} m</span></div>
+      <dl class="pv-stats"><div><dt>${icon('i-route')}Longueur</dt><dd>${x.km} km</dd></div><div><dt>${icon('i-mountain')}Dénivelé</dt><dd>${x.gain} m</dd></div><div><dt>${icon('i-lap')}Tours</dt><dd>${x.laps}</dd></div><div><dt>${icon('i-slope')}Pente max</dt><dd>${x.maxGrade} %</dd></div></dl>
+      <div class="pv-surf">${x.surfaces.map((s) => `<span>${s}</span>`).join('')}</div>
+      <div class="pv-go"><span class="glyph"><span class="k-kbd">Entrée</span><span class="k-pad pad-a">A</span></span>Lancer la course</div>
+    </div>
+  </div>`;
 }
 
 function renderCourses() {
   $('courseList').innerHTML = COURSE_ORDER.map((id) => {
     const info = describeCourse(id);
-    return `<button type="button" class="course-card" data-course="${id}" aria-current="${id === courseId}">${info.svg}<span><span class="c-name">${info.name}</span><span class="c-tag">${info.tagline}</span><span class="c-stats">${info.stats.map((x) => `<span>${x}</span>`).join('')}${info.hot.map((x) => `<span class="hot">${x}</span>`).join('')}</span></span></button>`;
+    return `<button type="button" class="course-card" data-course="${id}" data-theme="${info.theme}" aria-current="${id === courseId}"><span class="cc-map">${info.svg}</span><span class="cc-body"><span class="c-name">${info.name}</span><span class="c-tag">${info.tagline}</span>${profileSvg(info)}<span class="c-stats">${info.stats.map((x) => `<span>${x}</span>`).join('')}${info.hot.map((x) => `<span class="hot">${x}</span>`).join('')}</span></span>${stars(info.difficulty)}</button>`;
   }).join('');
+  previewOf.coursePreview = null;
+  showPreview('coursePreview', courseId, coursePreview);
 }
+
+// L'aperçu suit le niveau qui a le focus (flèches, manette) ou sous la souris.
+const previewOf = {};
+function showPreview(box, key, render) {
+  const k = `${key}|${playMachine}`;
+  if (previewOf[box] === k) return;
+  previewOf[box] = k;
+  $(box).innerHTML = render(key);
+}
+function bindPreview(list, box, attr, render) {
+  const pick = (e) => {
+    const card = e.target.closest(`[${attr}]`);
+    if (card) showPreview(box, card.getAttribute(attr), render);
+  };
+  $(list).addEventListener('focusin', pick);
+  $(list).addEventListener('pointerover', pick);
+}
+bindPreview('courseList', 'coursePreview', 'data-course', coursePreview);
 
 // Change de circuit sur place : écran de chargement, décor reconstruit, nouvelle course.
 async function loadCourse(id) {
@@ -419,17 +509,42 @@ async function loadCourse(id) {
   renderCourses();
 }
 
-// Bassins d'aviron (miniature : couloirs et bateaux).
+// Bassins d'aviron (miniature : couloirs, ligne d'arrivée et bateaux).
 const ROW_LEVELS = [
-  { distance: 500, name: 'Lac Bleu · Sprint', tagline: '500 m en ligne droite, 5 adversaires' },
-  { distance: 1000, name: 'Lac Bleu · Classique', tagline: '1 000 m, garde ton allure jusqu’au bout' },
+  { distance: 500, name: 'Lac Bleu · Sprint', tagline: '500 m en ligne droite, 5 adversaires', difficulty: 2, ref: '1:55' },
+  { distance: 1000, name: 'Lac Bleu · Classique', tagline: '1 000 m, garde ton allure jusqu’au bout', difficulty: 3, ref: '3:55' },
 ];
-function rowSvg(distance) {
-  const lanes = [0, 1, 2, 3, 4, 5].map((i) => `<line x1="${14 + i * 14.4}" y1="6" x2="${14 + i * 14.4}" y2="94" stroke="#fff" stroke-width="1" stroke-dasharray="2 3" opacity="0.8"/>`).join('');
-  const boats = [0, 1, 2, 3, 4].map((i) => `<rect x="${19 + i * 14.4}" y="${70 - ((i * 37) % 30) - (distance > 500 ? 0 : 10)}" width="4" height="14" rx="2" fill="${['#e0384b', '#2b6cff', '#ff5a1f', '#ffd23f', '#3ccf7a'][i]}"/>`).join('');
-  return `<svg viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" fill="#2a7fb8"/><rect width="8" height="100" fill="#5aa845"/><rect x="92" width="8" height="100" fill="#5aa845"/>${lanes}<rect x="8" y="10" width="84" height="3" fill="#ff3b2f"/>${boats}<text x="50" y="58" font-size="14" font-weight="900" text-anchor="middle" fill="#fff" opacity="0.9">${distance} m</text></svg>`;
+const BOAT_COLORS = ['#e0384b', '#2b6cff', '#ff5a1f', '#ffd23f', '#3ccf7a', '#9b5de5'];
+function rowSvg(distance, big = false) {
+  const gid = `rw-${distance}-${big ? 'b' : 's'}`;
+  const lanes = [0, 1, 2, 3, 4, 5, 6].map((i) => `<line x1="${8 + i * 14}" y1="12" x2="${8 + i * 14}" y2="96" stroke="#fff" stroke-width="1.6" stroke-dasharray="0.1 4" stroke-linecap="round" opacity=".85"/>`).join('');
+  const boats = BOAT_COLORS.map((c, i) => {
+    const y = 74 - ((i * 37) % 30) - (distance > 500 ? 0 : 10);
+    return `<path d="M${15 + i * 14} ${y + 16} l-3.5 7 h7z" fill="#fff" opacity=".3"/><rect x="${13 + i * 14}" y="${y}" width="4" height="16" rx="2" fill="${c}" stroke="#fff" stroke-width=".8"/>`;
+  }).join('');
+  const finish = Array.from({ length: 21 }, (_, k) => `<rect x="${8 + k * 4}" y="${8 + (k % 2) * 2}" width="4" height="2" fill="#fff"/><rect x="${8 + k * 4}" y="${10 - (k % 2) * 2}" width="4" height="2" fill="#11151f"/>`).join('');
+  const label = big ? '' : `<text x="50" y="58" font-size="15" font-weight="900" text-anchor="middle" fill="#fff" style="paint-order:stroke" stroke="#0d4f86" stroke-width="3">${distance} m</text>`;
+  return `<svg viewBox="0 0 100 100" aria-hidden="true"><defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2f9be0"/><stop offset="1" stop-color="#0d4f86"/></linearGradient></defs><rect width="100" height="100" fill="url(#${gid})"/><rect width="8" height="100" fill="#4f9e3e"/><rect x="92" width="8" height="100" fill="#4f9e3e"/>${lanes}${finish}${boats}${label}</svg>`;
 }
-$('rowList').innerHTML = ROW_LEVELS.map((l) => `<button type="button" class="course-card" data-row="${l.distance}">${rowSvg(l.distance)}<span><span class="c-name">${l.name}</span><span class="c-tag">${l.tagline}</span><span class="c-stats"><span>${l.distance} m</span><span>6 bateaux</span></span></span></button>`).join('');
+const rowLevel = (d) => ROW_LEVELS.find((l) => l.distance === +d) || ROW_LEVELS[0];
+function rowPreview(d) {
+  const l = rowLevel(d);
+  return `<div class="pv" data-theme="lake">
+    <div class="pv-map">${rowSvg(l.distance, true)}</div>
+    <div class="pv-info">
+      <span class="pv-kicker">Rameur · bassin</span>
+      <h3>${l.name}</h3>
+      <p>${l.tagline}</p>
+      <div class="pv-diff"><span>Difficulté</span>${stars(l.difficulty)}</div>
+      <dl class="pv-stats"><div><dt>${icon('i-flag')}Distance</dt><dd>${l.distance} m</dd></div><div><dt>${icon('i-row')}Bateaux</dt><dd>6</dd></div><div><dt>${icon('i-clock')}Temps visé</dt><dd>${l.ref}</dd></div><div><dt>${icon('i-wave')}Couloirs</dt><dd>bouées</dd></div></dl>
+      <div class="pv-surf"><span>Eau calme</span><span>Ligne droite</span><span>Pilote auto du couloir</span></div>
+      <div class="pv-go"><span class="glyph"><span class="k-kbd">Entrée</span><span class="k-pad pad-a">A</span></span>Lancer la course</div>
+    </div>
+  </div>`;
+}
+$('rowList').innerHTML = ROW_LEVELS.map((l) => `<button type="button" class="course-card" data-row="${l.distance}" data-theme="lake"><span class="cc-map">${rowSvg(l.distance)}</span><span class="cc-body"><span class="c-name">${l.name}</span><span class="c-tag">${l.tagline}</span><span class="c-stats"><span>${l.distance} m</span><span>6 bateaux</span><span>temps visé ${l.ref}</span></span></span>${stars(l.difficulty)}</button>`).join('');
+showPreview('rowPreview', 500, rowPreview);
+bindPreview('rowList', 'rowPreview', 'data-row', rowPreview);
 $('rowList').addEventListener('click', (e) => {
   const card = e.target.closest('[data-row]');
   if (card) startRowing(+card.dataset.row);
@@ -517,7 +632,7 @@ function setupRowing() {
     raceObjects.add(boat.group);
   }
   // Pastilles de la barre de progression
-  $('rProgress').innerHTML = '<div class="row-finish"></div>' + r.racers.map((x, i) => `<span class="dot${x.isPlayer ? ' me' : ''}" data-i="${i}" style="background:${x.color}"></span>`).join('');
+  $('rProgress').innerHTML = '<div class="row-finish"></div><span class="rp-mark"></span>' + r.racers.map((x, i) => `<span class="dot${x.isPlayer ? ' me' : ''}" data-i="${i}" style="color:${x.color}"><svg aria-hidden="true"><use href="#i-boat"/></svg></span>`).join('');
   r.addEventListener('go', () => hud.flash('Partez !', 1100, 'good'));
   r.addEventListener('finish', ({ detail }) => {
     if (!detail.isPlayer) return;
@@ -608,7 +723,17 @@ function updateRowHud() {
     if (el.textContent !== v) el.textContent = v;
   };
   const pos = r.positionOf(p);
-  set('rPos', ordinal(pos));
+  if (updateRowHud.pos !== pos) {
+    // Position : grand chiffre, et un éclair vert ou rouge quand elle change.
+    const box = $('rPos').closest('.hud-card');
+    if (updateRowHud.pos !== undefined) {
+      const flip = box.classList.contains('chg-a');
+      box.classList.remove('chg-a', 'chg-b', 'up', 'down');
+      box.classList.add(flip ? 'chg-b' : 'chg-a', pos < updateRowHud.pos ? 'up' : 'down');
+    }
+    updateRowHud.pos = pos;
+    $('rPos').innerHTML = ordinalHtml(pos);
+  }
   set('rPosTotal', `/ ${r.racers.length}`);
   set('rLeft', p.finishTime !== null ? 'Arrivé !' : `${Math.max(0, Math.ceil(r.distance - p.s))} m`);
   set('rTime', formatTime(Math.max(0, p.finishTime ?? r.time)));
@@ -627,7 +752,8 @@ function updateRowHud() {
   if (!devices.trainerActive) hint = TOUCH ? 'Maintiens « Pédaler » pour ramer (180 W simulés)' : 'Maintiens ↑ pour ramer (180 W simulés) · ← → pour rester dans ton couloir';
   else if (kind && kind !== 'rower') hint = `Machine connectée : ${MACHINE_LABELS[kind] || kind} (sa puissance fait avancer le bateau)`;
   set('rHint', hint);
-  $('rEffects').innerHTML = p.offLane ? '<span class="badge grass">Hors couloir : les bouées freinent !</span>' : autoSteer() ? '<span class="badge auto">🧭 Pilote auto</span>' : '';
+  const fx = p.offLane ? '<span class="badge grass">Hors couloir : les bouées freinent !</span>' : autoSteer() ? '<span class="badge auto">🧭 Pilote auto</span>' : '';
+  if (updateRowHud.fx !== fx) $('rEffects').innerHTML = updateRowHud.fx = fx;
   touch?.setPedalVisible(!devices.trainerActive);
   touch?.setItemReady(false);
 }
@@ -643,19 +769,7 @@ function showRowEnd() {
   const r = rowing.race;
   const rows = r.ranking().map((x) => ({ r: x, ...r.estimatedTime(x) }));
   rows.sort((a, b) => (a.estimated === b.estimated ? a.time - b.time : a.estimated ? 1 : -1));
-  const best = rows[0].time;
-  const me = rows.findIndex((x) => x.r.isPlayer) + 1;
-  $('endTitle').textContent = me === 1 ? 'Victoire ! 🏆' : `Arrivée : ${ordinal(me)} sur ${rows.length}`;
-  $('results').innerHTML =
-    '<tr><th>#</th><th>Rameur</th><th>Temps</th><th>Allure</th></tr>' +
-    rows
-      .map((x, i) => {
-        const split = formatSplit((x.time / r.distance) * 500);
-        return `<tr class="${x.r.isPlayer ? 'me' : ''}"><td>${i + 1}</td><td><span class="dot" style="background:${x.r.color}"></span>${x.r.name}</td><td>${x.estimated ? '≈ ' : ''}${formatTime(x.time)}${i ? ` <small>+${formatTime(x.time - best)}</small>` : ''}</td><td>${split} /500 m</td></tr>`;
-      })
-      .join('');
-  $('endNote').textContent = rows.some((x) => x.estimated) ? '≈ : temps estimé, le rameur n’avait pas encore franchi la ligne.' : '';
-  show('end');
+  fillEnd(rows, { kind: 'row', distance: r.distance, note: 'le rameur' });
 }
 
 // ---------- Matériel ----------
@@ -808,7 +922,7 @@ function refreshHwTest() {
     if (d.pace) m.push(`${formatSplit(d.pace)} /500 m`);
     if (d.resistance !== null) m.push(`résistance ${d.resistance}`);
     if (d.heartRate) m.push(`${d.heartRate} bpm`);
-    rows.push(['Mesures', m.join(' · ') || '—']);
+    rows.push(['Mesures', m.join(' · ') || '--']);
     rows.push(['Pilotage', t.canControl ? `oui${t.features?.targets?.length ? ` (${t.features.targets.join(', ')})` : ''}` : 'non : lecture seule', t.canControl ? 'ok' : '']);
   }
   $('hwTestInfo').innerHTML = rows.map(([k, v, cls = '']) => `<dt>${k}</dt><dd class="${cls}">${v}</dd>`).join('');

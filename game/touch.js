@@ -9,10 +9,11 @@ export function wantsTouch(params = new URLSearchParams(location.search)) {
   return matchMedia('(any-pointer: coarse)').matches;
 }
 
+const icon = (id) => `<svg class="ico" aria-hidden="true"><use href="#${id}"/></svg>`;
 const LAYOUT = `
   <div class="tc-left">
-    <button class="tc steer" data-code="ArrowLeft" aria-label="Aller à gauche">◀</button>
-    <button class="tc steer" data-code="ArrowRight" aria-label="Aller à droite">▶</button>
+    <button class="tc steer" data-code="ArrowLeft" aria-label="Aller à gauche">${icon('i-back')}</button>
+    <button class="tc steer" data-code="ArrowRight" aria-label="Aller à droite">${icon('i-chev')}</button>
   </div>
   <div class="tc-right">
     <div class="tc-gears">
@@ -20,11 +21,11 @@ const LAYOUT = `
       <button class="tc gear" data-code="Equal" aria-label="Vitesse plus">+</button>
     </div>
     <div class="tc-actions">
-      <button class="tc item" data-code="Space" aria-label="Utiliser l'objet">Objet</button>
-      <button class="tc pedal" data-code="ArrowUp" aria-label="Pédaler (maintenir)">Pédaler</button>
+      <button class="tc item" data-code="Space" aria-label="Utiliser l'objet"><span class="tc-glyph">★</span><span class="tc-label">Objet</span></button>
+      <button class="tc pedal" data-code="ArrowUp" aria-label="Pédaler (maintenir)">${icon('i-spin')}<span class="tc-label">Pédaler</span></button>
     </div>
   </div>
-  <button class="tc pause" data-code="Escape" aria-label="Pause">❚❚</button>
+  <button class="tc pause" data-code="Escape" aria-label="Pause">${icon('i-pause')}</button>
 `;
 
 export class TouchControls {
@@ -67,7 +68,9 @@ export class TouchControls {
 
   fire(type, code) {
     const key = KEYS[code]?.key ?? code;
-    window.dispatchEvent(new KeyboardEvent(type, { key, code, bubbles: true, cancelable: true }));
+    const ev = new KeyboardEvent(type, { key, code, bubbles: true, cancelable: true });
+    Object.defineProperty(ev, 'fromTouch', { value: true }); // pour l'aide à l'écran : ce n'est pas une manette
+    window.dispatchEvent(ev);
   }
 
   // Relâche tout (pause, fin de course) sans attendre que les doigts se lèvent.
