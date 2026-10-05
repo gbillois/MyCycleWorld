@@ -609,3 +609,6 @@ body.native .hw-select, body.native .device-extra, body.native .hw-test-actions,
 @media (prefers-reduced-motion: reduce) {
   .logo, .menu-btn, .side-panel { animation: none; }
 }
+
+/* Compteur d'images par seconde (?fps=1) */
+.fps-meter { position: fixed; left: 50%; bottom: 4px; transform: translateX(-50%); z-index: 50; padding: 2px 8px; border-radius: 6px; background: rgba(0, 0, 0, 0.6); color: #9effa8; font: 700 11px ui-monospace, monospace; pointer-events: none; }

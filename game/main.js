@@ -23,6 +23,7 @@ import { MACHINE_LABELS } from '../src/ble/trainer.js';
 import { onLog, logText, formatEntry } from '../src/ble/log.js';
 import { uuidName } from '../src/ble/bytes.js';
 import { BleInspector, parseServiceList } from '../src/ble/inspector.js';
+import { FrameGovernor } from '../src/core/framerate.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -87,7 +88,8 @@ const SHADOWS = DETAILED && QUALITY !== 'low';
 // ---------- Scène ----------
 
 const renderer = new THREE.WebGLRenderer({ canvas: $('scene'), antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, DETAILED && QUALITY === 'high' ? 2 : 1.5));
+const BASE_RATIO = Math.min(window.devicePixelRatio || 1, DETAILED && QUALITY === 'high' ? 2 : 1.5);
+renderer.setPixelRatio(BASE_RATIO);
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(65, 1, 0.1, 4000);
 let track = new Track(courseById(courseId));
@@ -179,6 +181,17 @@ function resize() {
 }
 window.addEventListener('resize', resize);
 resize();
+
+// Fluidité : 60 images/s au plus, résolution abaissée automatiquement si la machine peine (?fps=1 affiche le compteur).
+const governor = new FrameGovernor({
+  min: QUALITY === 'high' ? 0.5 : 0.6,
+  onScale: (k) => {
+    if (params.has('fixedres')) return; // captures d'écran et tests : résolution fixe
+    renderer.setPixelRatio(BASE_RATIO * k);
+    resize();
+  },
+});
+const fpsMeter = params.has('fps') ? document.body.appendChild(Object.assign(document.createElement('div'), { className: 'fps-meter' })) : null;
 
 // ---------- État du jeu ----------
 
@@ -1124,6 +1137,14 @@ function updateSun() {
 
 let lastFrame = performance.now();
 function frame(nowMs) {
+  if (!governor.allow(nowMs)) {
+    requestAnimationFrame(frame);
+    return;
+  }
+  if (fpsMeter && nowMs - (frame.lastFps || 0) > 500) {
+    frame.lastFps = nowMs;
+    fpsMeter.textContent = `${Math.round(governor.fps)} i/s · résolution ${Math.round(governor.scale * 100)} %`;
+  }
   const dt = Math.min(0.1, Math.max(0, (nowMs - lastFrame) / 1000));
   lastFrame = nowMs;
   updateSim(dt);
@@ -1192,6 +1213,7 @@ window.__mcw = {
   renderer,
   get state() { return state; },
   get race() { return race; },
+  governor,
   get mode() { return mode; },
   get rowing() { return rowing; },
   devices,
