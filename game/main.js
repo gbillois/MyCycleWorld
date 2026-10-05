@@ -4,6 +4,7 @@ import { Track, buildScenery } from './track.js';
 import { RiderModel, createItemBox, createBanana } from './models.js';
 import { Race, ITEMS } from './race.js';
 import { Devices, explainError } from './devices.js';
+import { NativeDevices, isNativeApp } from './native.js';
 import { Hud, formatTime, ordinal } from './hud.js';
 import { VirtualGears } from '../src/core/gears.js';
 import { msToKmh } from '../src/core/physics.js';
@@ -54,8 +55,14 @@ resize();
 
 // ---------- État du jeu ----------
 
-const devices = new Devices({ demo: DEMO });
+// Dans l'appli iOS, le Bluetooth et les manettes viennent de l'appli native (voir native.js).
+const NATIVE = isNativeApp();
+const devices = NATIVE ? new NativeDevices() : new Devices({ demo: DEMO });
 const gears = new VirtualGears();
+if (NATIVE) {
+  devices.attachGears(gears);
+  document.body.classList.add('native');
+}
 const keys = new Set();
 const sim = { power: 0, cadence: 0 };
 let state = 'home'; // home | race | paused | end
@@ -153,6 +160,7 @@ function goHome() {
 
 function startRace() {
   keepScreenOn();
+  devices.prepareRace?.(); // appli iOS : prise de contrôle du trainer au départ
   clearTimeout(endTimer);
   document.activeElement?.blur?.();
   setupRace();
@@ -260,7 +268,9 @@ $('quit').addEventListener('click', goHome);
 $('replay').addEventListener('click', startRace);
 $('backHome').addEventListener('click', goHome);
 
-if (DEMO) {
+if (NATIVE) {
+  $('nativeHint').hidden = false;
+} else if (DEMO) {
   $('demoBanner').hidden = false;
   $('demoLink').textContent = 'Vrai Bluetooth';
   $('demoLink').href = './';
@@ -280,8 +290,8 @@ window.addEventListener('keydown', (e) => {
   if (PREVENT.has(e.code) && state !== 'home') e.preventDefault();
   keys.add(e.code);
   const code = e.code;
-  if (code === 'Minus' || code === 'NumpadSubtract') return void gears.down();
-  if (code === 'Equal' || code === 'NumpadAdd') return void gears.up();
+  if (code === 'Minus' || code === 'NumpadSubtract') return void shiftGear(-1);
+  if (code === 'Equal' || code === 'NumpadAdd') return void shiftGear(1);
   if (e.repeat) return;
   if (code === 'Escape') {
     if (state === 'race') pause();
@@ -299,6 +309,13 @@ window.addEventListener('blur', () => keys.clear());
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) pause();
 });
+
+// Dans l'appli, c'est elle qui change de vitesse (et applique la pente) puis nous renvoie le résultat.
+function shiftGear(delta) {
+  if (NATIVE) devices.shift(delta);
+  else if (delta < 0) gears.down();
+  else gears.up();
+}
 
 gears.addEventListener('change', () => {
   if (state === 'race') hud.flash(`Vitesse ${gears.gear} / ${gears.count}`, 600);
@@ -336,7 +353,7 @@ function updateGrade() {
   feltGrade = gears.effectiveGrade(terrain + effects);
   if (lastSentGrade === null || Math.abs(feltGrade - lastSentGrade) >= 0.1) {
     lastSentGrade = feltGrade;
-    devices.sendGrade(feltGrade);
+    devices.sendGrade(feltGrade, terrain + effects);
   }
   return terrain;
 }

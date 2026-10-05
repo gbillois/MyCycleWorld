@@ -114,6 +114,13 @@ export class KeyEmitter {
     } else this.down.set(code, n - 1);
   }
 
+  // Relâche toutes les touches tenues (manette déconnectée ou perdue).
+  releaseAll() {
+    const codes = [...this.down.keys()];
+    this.down.clear();
+    for (const code of codes) this.fire('keyup', code);
+  }
+
   // Branche une manette : ses boutons deviennent des touches.
   attach(controller) {
     controller.addEventListener('buttondown', (e) => this.buttonDown(e.detail));

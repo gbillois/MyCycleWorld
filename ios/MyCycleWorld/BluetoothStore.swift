@@ -81,6 +81,8 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
     @Published var terrain = 0.0
     @Published var targetWatts = 150.0
     @Published var targetResistance = 10.0
+    /// Appuis et relâchements des boutons Zwift, pour le jeu (voir GameView).
+    let buttonEvents = PassthroughSubject<ButtonEvent, Never>()
     private var central: CBCentralManager?
     private var connections: [UUID: Connection] = [:]
     private var trainerID: UUID?
@@ -292,6 +294,10 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
     func peripheralIsReady(toSendWriteWithoutResponse peripheral: CBPeripheral) {
         if let c = connections[peripheral.identifier] { pumpZwift(c) }
     }
+    /// Fait vibrer toutes les manettes Zwift connectées (peau de banane dans le jeu).
+    func vibrateControllers() {
+        for (id, c) in connections where c.role == .controller { vibrate(id) }
+    }
     func vibrate(_ id: UUID) {
         guard let c = connections[id], c.peripheral.state == .connected, let char = c.chars[UUIDs.rx] else { return }
         writeZwift(ZwiftProtocol.vibrate, to: c, char: char)
@@ -367,7 +373,10 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
             let f = try ZwiftProtocol.fields(Array(b.dropFirst()))
             if let n = (f.last(where: { $0.number == 2 }) ?? f.last(where: { $0.number == 1 }))?.value, n <= 100 { c.battery = Int(n); refresh() }; return
         }
-        if b.first == 0xfe { c.buttons = []; c.state = "Contrôle manette perdu"; log(c.state); refresh(); return }
+        if b.first == 0xfe {
+            for button in c.buttons.sorted() { buttonEvents.send(ButtonEvent(button: button, down: false)) }
+            c.buttons = []; c.state = "Contrôle manette perdu"; log(c.state); refresh(); return
+        }
         guard let buttons = try ZwiftProtocol.buttons(b) else {
             if let type = b.first, type != 0x15, c.seenUnknownTypes.insert(type).inserted {
                 let sample = b.prefix(24).map { String(format: "%02x", $0) }.joined(separator: " ")
@@ -377,10 +386,13 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         }
         c.state = "Boutons reçus"; c.connectionTimer?.invalidate()
         let down = buttons.pressed.subtracting(c.buttons)
+        let up = c.buttons.subtracting(buttons.pressed)
         if c.buttons != buttons.pressed { log("\(c.name) : \(buttons.pressed.sorted().joined(separator: ", "))") }
         c.buttons = buttons.pressed
+        for button in up.sorted() { buttonEvents.send(ButtonEvent(button: button, down: false)) }
         for button in down.sorted() {
             lastAction = button
+            buttonEvents.send(ButtonEvent(button: button, down: true))
             if ["R_SHIFT", "R_SHIFT2"].contains(button) { shift(1) }
             if ["L_SHIFT", "L_SHIFT2"].contains(button) { shift(-1) }
         }

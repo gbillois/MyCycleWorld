@@ -369,3 +369,7 @@ body.touch .hud-hint { display: none; }
 @media (orientation: portrait) {
   body.touch .banner { top: 46%; }
 }
+
+/* Dans l'appli iOS, les appareils se connectent dans l'onglet « Appareils » : on garde seulement leur état. */
+body.native .device .btn, body.native .links { display: none; }
+body.native .device { grid-template-columns: minmax(0, 1fr); }

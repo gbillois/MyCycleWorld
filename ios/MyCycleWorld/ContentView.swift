@@ -5,6 +5,7 @@ struct ContentView: View {
     @EnvironmentObject private var store: BluetoothStore
     var body: some View {
         TabView {
+            GameView().tabItem { Label("Jeu", systemImage: "flag.checkered") }
             DashboardView().tabItem { Label("Cockpit", systemImage: "gauge.with.dots.needle.67percent") }
             DevicesView().tabItem { Label("Appareils", systemImage: "antenna.radiowaves.left.and.right") }
             LogView().tabItem { Label("Diagnostic", systemImage: "waveform.path.ecg") }

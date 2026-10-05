@@ -37,4 +37,4 @@ Le code de ce dépôt est une implémentation originale (aucun code copié). Pou
 
 ## Application native iPhone / iPad
 
-Le port SwiftUI + CoreBluetooth se trouve dans [`ios/`](ios/README.md). Ouvrir `ios/MyCycleWorld.xcodeproj` dans Xcode. Le cockpit inclut un mode démo et le guide de livraison TestFlight est dans le README iOS.
+Le port SwiftUI + CoreBluetooth se trouve dans [`ios/`](ios/README.md). Ouvrir `ios/MyCycleWorld.xcodeproj` dans Xcode. L'onglet **Jeu** affiche le jeu web branché sur le Bluetooth natif de l'appli ; le cockpit inclut un mode démo et le guide de livraison TestFlight est dans le README iOS.

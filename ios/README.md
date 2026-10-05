@@ -4,6 +4,18 @@ Application native **SwiftUI + CoreBluetooth**, iOS/iPadOS 17 minimum. Aucune d�
 
 Ouvrir `MyCycleWorld.xcodeproj`, choisir le scheme **MyCycleWorld**, puis un iPhone/iPad ou un simulateur. Le Bluetooth doit être testé sur un appareil physique ; le **mode démo** permet de tester le cockpit sur simulateur. L’argument de lancement `--demo` l’active directement.
 
+## Onglet Jeu
+
+L'onglet **Jeu** affiche le jeu web (`game/`) dans une WebView et le branche sur le Bluetooth de l'appli : les mesures du trainer, de la ceinture et des manettes viennent du cockpit natif, jamais de Web Bluetooth (absent des WebView iOS). On connecte donc les appareils dans l'onglet **Appareils**, puis on joue.
+
+- Le jeu est chargé depuis le site publié (`https://gbillois.github.io/MyCycleWorld/game/`) : une mise à jour du jeu arrive dans l'appli sans nouveau build. Internet est nécessaire (le jeu charge aussi Three.js depuis un CDN). Sans connexion, un écran propose de réessayer.
+- Pont : `GameView.swift` (WebView, état envoyé 4 fois par seconde et à chaque changement de vitesse) et `Core/GameBridge.swift` (décodage des ordres, JSON de l'état, testé dans `Tests/GameBridgeTests.swift`). Côté web : `game/native.js`, protocole version 1 décrit en tête du fichier.
+- Le jeu envoie la **pente du terrain avant vitesses virtuelles** ; l'appli applique ses propres vitesses (les boutons latéraux des manettes passent par l'appli et la vitesse s'affiche dans le jeu). Les autres boutons des manettes deviennent des touches du jeu (◀ ▶ pour se déplacer, etc.).
+- « Jouer » prend le contrôle du trainer ; en pause, à l'accueil ou en quittant l'onglet, il repasse à plat. Si le contrôle est perdu en course, relancer « Jouer » ou utiliser « Prendre le contrôle » dans le cockpit.
+- Seule la page du jeu publiée peut envoyer des ordres au Bluetooth (origine vérifiée), et seuls cinq ordres sont acceptés, avec valeurs bornées.
+- Mode démo de l'appli : le jeu utilise les mesures simulées.
+- Limite connue : le jeu n'est pas embarqué dans l'appli, il faut donc du réseau au lancement.
+
 ## Fonctions portées
 
 - Recherche BLE au premier plan pendant 30 secondes, sélection explicite du rôle, déconnexion et reconnexion manuelle. Un trainer, une ceinture et plusieurs manettes simultanées.
@@ -72,6 +84,15 @@ Sources Apple : [envoi des builds](https://developer.apple.com/help/app-store-co
 Pour que chaque `push` sur `main` qui touche `ios/` parte tout seul sur TestFlight, voir [`XCODE_CLOUD.md`](XCODE_CLOUD.md) (réglage unique dans Xcode, dont le numéro de build à fixer avant le premier build cloud).
 
 ### Recette sur appareil réel
+
+Jeu (onglet Jeu) : voir en plus les contrôles ci-dessous.
+
+- Ouvrir l'onglet Jeu avec Internet coupé : l'écran d'erreur apparaît ; avec Internet, « Réessayer » charge le jeu.
+- Connecter trainer, ceinture et manettes dans Appareils, revenir dans Jeu : l'accueil affiche leur état.
+- Lancer une course : les watts, la cadence et le cardio du jeu suivent ceux du cockpit ; la résistance monte dans la côte et redescend à plat en pause.
+- Changer de vitesse avec un bouton latéral de manette et avec les boutons +/− du jeu : une seule vitesse à la fois, identique dans le jeu et dans le cockpit.
+- ◀ ▶ des manettes déplacent le cycliste ; une peau de banane touchée fait vibrer les manettes.
+- Couper une manette en course : le cycliste ne reste pas bloqué d'un côté.
 
 - Refuser puis autoriser le Bluetooth dans Réglages ; vérifier le message affiché et relancer la recherche.
 - Connecter le trainer, puis la ceinture et chaque manette. Vérifier watts/cadence/vitesse/cardio et l’absence de données figées après coupure.
