@@ -81,7 +81,7 @@ Sources Apple : [envoi des builds](https://developer.apple.com/help/app-store-co
 
 ### Livraison automatique
 
-Pour que chaque `push` sur `main` qui touche `ios/` parte tout seul sur TestFlight, voir [`XCODE_CLOUD.md`](XCODE_CLOUD.md) (réglage unique dans Xcode, dont le numéro de build à fixer avant le premier build cloud).
+Le workflow Xcode Cloud **main vers TestFlight** archive l'app à chaque `push` sur `main` et la distribue au groupe interne **MyCycleGroup**. Configuration et suivi : [`XCODE_CLOUD.md`](XCODE_CLOUD.md). Le délai dépend de la compilation et du traitement Apple.
 
 ### Recette sur appareil réel
 
