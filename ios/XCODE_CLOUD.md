@@ -13,19 +13,20 @@ Le workflow a été créé et enregistré dans Xcode le 5 octobre 2026. Sa confi
 | Environment | Xcode et macOS : Latest Release |
 | Start Conditions | Branch Changes, branche exacte `main`, tous les fichiers |
 | Auto-cancel Builds | Activé : un nouveau push remplace le build précédent en attente ou en cours |
+| Tests avant archive | `ios/ci_scripts/ci_post_clone.sh` exécute les 26 tests Swift ; un échec bloque l'archive |
 | Actions | Archive iOS, scheme partagé `MyCycleWorld`, TestFlight (Internal Testing Only) |
 | Post-Actions | TestFlight Internal Testing, groupe `MyCycleGroup` (2 membres lors de la configuration) |
 | Numérotation | Prochain build initial fixé à `100`, puis incrémentation automatique par Xcode Cloud |
 
 Le déclenchement couvre aussi les changements du site et de la documentation, conformément au choix « chaque push sur main ». Le jeu web est chargé depuis GitHub Pages ; son déploiement reste distinct de l'archive iOS.
 
-Vérifications locales du 5 octobre 2026 : compilation Release pour appareil iOS réussie sans signature, 26 tests Swift et 42 tests JavaScript réussis. La signature et la livraison doivent être vérifiées sur le premier build cloud.
+Validation du 5 octobre 2026 : compilation Release pour appareil iOS, 26 tests Swift et 42 tests JavaScript réussis. Le push `4c9f666` a déclenché automatiquement le build cloud **100**, avec archivage et distribution TestFlight réussis en environ 3 minutes. Le build **1.0 (100)** est disponible en statut **Testing** dans `MyCycleGroup`.
 
 ## État du dépôt (vérifié)
 
 - Scheme partagé `MyCycleWorld` (`ios/MyCycleWorld.xcodeproj/xcshareddata/xcschemes/`) : obligatoire pour Xcode Cloud.
 - Manifeste de liaison au produit Apple dans `ios/MyCycleWorld.xcodeproj/xcshareddata/xcodecloud/manifest.json` ; les actions et déclencheurs se modifient chez Apple.
-- Aucune dépendance externe (ni Swift Package, ni npm, ni Pods) : aucun script `ci_scripts` n'est nécessaire.
+- Aucune dépendance Swift externe ni Pods. Le package Swift local teste les protocoles et le pont du jeu ; le script `ci_post_clone.sh` l'exécute avant archivage, sans installer d'outil supplémentaire.
 - Signature automatique, équipe `JQ4Z5PXR5K`, Bundle ID `com.gbillois.MyCycleWorld`, iOS 17 minimum.
 - Le workflow utilise la dernière version stable de Xcode disponible chez Apple.
 - Aucun secret dans le dépôt (il est public) : la signature est gérée par Apple dans le cloud.
@@ -82,5 +83,5 @@ La disponibilité dans TestFlight dépend de la file d'attente Xcode Cloud, de l
 
 ## Si le projet change
 
-- Ajout d'un Swift Package, de npm ou de Pods : créer `ios/ci_scripts/ci_post_clone.sh` (au même niveau que le `.xcodeproj`, rendu exécutable avec `chmod +x`) pour installer les dépendances.
+- Ajout de dépendances externes : compléter `ios/ci_scripts/ci_post_clone.sh` (au même niveau que le `.xcodeproj`, exécutable) en conservant les tests avant archivage.
 - Envoi manuel de secours : `ios/testflight_upload.command` ou `ios/scripts/archive.sh` restent valables.

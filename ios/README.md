@@ -1,6 +1,6 @@
 # MyCycleWorld pour iPhone et iPad
 
-Application native **SwiftUI + CoreBluetooth**, iOS/iPadOS 17 minimum. Aucune dépendance externe, aucun serveur et aucune WebView. Le site web existant reste indépendant.
+Application **SwiftUI + CoreBluetooth**, iOS/iPadOS 17 minimum. Le cockpit et les connexions Bluetooth sont natifs ; l'onglet Jeu affiche le jeu 3D publié sur GitHub Pages dans une WebView reliée au Bluetooth natif. Aucun serveur applicatif ni dépendance Swift externe. Internet est nécessaire pour charger le jeu.
 
 Ouvrir `MyCycleWorld.xcodeproj`, choisir le scheme **MyCycleWorld**, puis un iPhone/iPad ou un simulateur. Le Bluetooth doit être testé sur un appareil physique ; le **mode démo** permet de tester le cockpit sur simulateur. L’argument de lancement `--demo` l’active directement.
 
@@ -43,7 +43,9 @@ xcodebuild -project ios/MyCycleWorld.xcodeproj -scheme MyCycleWorld \
   -derivedDataPath /tmp/mycycleworld-simulator CODE_SIGNING_ALLOWED=NO build
 ```
 
-Les 16 tests Swift couvrent la gestion des écritures Zwift quand le lien est occupé, l’identification des modèles, les trames de référence JS, paquets tronqués, varints malformés, cadence, vitesses, commandes FTMS et ordre des acquittements. Ils ne remplacent pas le test radio sur iPhone/iPad.
+Les 26 tests Swift couvrent les protocoles Bluetooth, les files de commandes et le pont du jeu (ordres, bornes, JSON et boutons). Les 42 tests JavaScript couvrent aussi le côté web du pont. Ils ne remplacent pas le test radio sur iPhone/iPad.
+
+Xcode Cloud exécute les tests Swift avec `ci_scripts/ci_post_clone.sh` avant chaque archive. Un échec bloque la livraison TestFlight. Pour reproduire cette étape localement : `./ios/ci_scripts/ci_post_clone.sh`.
 
 Les scripts `scripts/generate-project.py` et `scripts/generate-icon.swift` permettent de régénérer le projet et l’icône sans installation d’outils supplémentaires. Le `.xcodeproj` est déjà livré : aucune génération n’est nécessaire pour l’ouvrir. Si tu changes l’équipe ou le Bundle ID dans Xcode, adapte aussi le générateur et ExportOptions avant une régénération/export en ligne de commande.
 
