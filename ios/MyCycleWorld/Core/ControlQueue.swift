@@ -31,6 +31,13 @@ struct ControlQueue {
         pending = nil
         return (opcode, result)
     }
+    /// Abandons the in-flight command (no answer) but keeps the queued ones. A late response for another
+    /// opcode cannot complete the next command: responses are matched on the opcode.
+    mutating func abandon() {
+        pending = nil
+        writeAcknowledged = false
+        result = nil
+    }
     mutating func stop() { waiting = [[8, 1]] }
     mutating func clear() { self = ControlQueue() }
 }

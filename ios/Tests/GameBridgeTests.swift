@@ -59,6 +59,33 @@ final class GameBridgeTests: XCTestCase {
         XCTAssertEqual(trainer["controlled"] as? Bool, false)
         XCTAssertEqual(trainer["name"] as? String, "KICKR \"Core\"")
         XCTAssertNil(object["speed"], "une mesure absente n'est pas envoyée")
+        XCTAssertEqual(object["minor"] as? Int, 1)
+        XCTAssertNil(object["machineKind"], "champs machine facultatifs : absents quand inconnus")
+        XCTAssertNil(object["strokeRate"])
+    }
+
+    func testStateCarriesMachineFieldsForRowersAndEllipticals() throws {
+        var state = sampleState()
+        state.hardware = HardwareProfile.technogym.rawValue
+        state.machineKind = MachineKind.rower.rawValue
+        state.strokeRate = 26.5
+        state.strokeCount = 120
+        state.distance = 300
+        state.pace = 125
+        state.stepRate = 140
+        state.resistance = 8.5
+        let json = try XCTUnwrap(state.json())
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+        XCTAssertEqual(object["v"] as? Int, 1, "le protocole 1 reste compatible")
+        XCTAssertEqual(object["hardware"] as? String, "technogym")
+        XCTAssertEqual(object["machineKind"] as? String, "rower")
+        XCTAssertEqual(object["strokeRate"] as? Double, 26.5)
+        XCTAssertEqual(object["strokeCount"] as? Int, 120)
+        XCTAssertEqual(object["distance"] as? Int, 300)
+        XCTAssertEqual(object["pace"] as? Int, 125)
+        XCTAssertEqual(object["stepRate"] as? Int, 140)
+        XCTAssertEqual(object["resistance"] as? Double, 8.5)
+        XCTAssertEqual(object["power"] as? Int, 210)
     }
 
     func testStateWithNotANumberIsNotSent() {

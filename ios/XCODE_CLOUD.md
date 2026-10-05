@@ -13,7 +13,7 @@ Le workflow a été créé et enregistré dans Xcode le 5 octobre 2026. Sa confi
 | Environment | Xcode et macOS : Latest Release |
 | Start Conditions | Branch Changes, branche exacte `main`, tous les fichiers |
 | Auto-cancel Builds | Activé : un nouveau push remplace le build précédent en attente ou en cours |
-| Tests avant archive | `ios/ci_scripts/ci_post_clone.sh` exécute les 26 tests Swift ; un échec bloque l'archive |
+| Tests avant archive | `ios/ci_scripts/ci_post_clone.sh` exécute les tests Swift (48 depuis l’ajout des elliptiques et rameurs) ; un échec bloque l’archive |
 | Actions | Archive iOS, scheme partagé `MyCycleWorld`, TestFlight (Internal Testing Only) |
 | Post-Actions | TestFlight Internal Testing, groupe `MyCycleGroup` (2 membres lors de la configuration) |
 | Numérotation | Prochain build initial fixé à `100`, puis incrémentation automatique par Xcode Cloud |

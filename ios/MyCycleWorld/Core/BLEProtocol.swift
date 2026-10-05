@@ -14,6 +14,7 @@ struct ByteReader {
     mutating func u8() throws -> Int { Int(try take(1)[0]) }
     mutating func u16() throws -> Int { let b = try take(2); return Int(b[0]) | Int(b[1]) << 8 }
     mutating func i16() throws -> Int { Int(Int16(bitPattern: UInt16(try u16()))) }
+    mutating func u24() throws -> Int { let b = try take(3); return Int(b[0]) | Int(b[1]) << 8 | Int(b[2]) << 16 }
     mutating func varint() throws -> UInt64 {
         var value: UInt64 = 0
         for index in 0..<10 {
@@ -26,12 +27,32 @@ struct ByteReader {
     }
 }
 
+/// Mesures d'une machine FTMS (vélo, elliptique, rameur). Les champs absents du paquet restent nil.
 struct BikeReading: Equatable {
     var speed: Double?
     var cadence: Double?
     var power: Int?
     var heartRate: Int?
-    var resistance: Int?
+    /// Niveau de résistance (brut pour vélo et rameur, résolution 0,1 pour l'elliptique, comme le jeu web).
+    var resistance: Double?
+    /// Rameur : coups par minute (résolution 0,5) et nombre de coups.
+    var strokeRate: Double?
+    var strokeCount: Int?
+    /// Distance en mètres (24 bits).
+    var distance: Int?
+    /// Rameur : allure en secondes pour 500 m.
+    var pace: Int?
+    /// Elliptique : pas par minute.
+    var stepRate: Int?
+    var avgStrokeRate: Double?
+    var avgPace: Int?
+    var avgPower: Int?
+    var avgStepRate: Int?
+    var strideCount: Double?
+    var inclination: Double?
+    var elapsed: Int?
+    var remaining: Int?
+    var backward: Bool?
 }
 
 enum BLEProtocol {
@@ -43,8 +64,8 @@ enum BLEProtocol {
         if flags & 2 != 0 { _ = try r.take(2) }
         if flags & 4 != 0 { result.cadence = Double(try r.u16()) / 2 }
         if flags & 8 != 0 { _ = try r.take(2) }
-        if flags & 16 != 0 { _ = try r.take(3) }
-        if flags & 32 != 0 { result.resistance = try r.i16() }
+        if flags & 16 != 0 { result.distance = try r.u24() }
+        if flags & 32 != 0 { result.resistance = Double(try r.i16()) }
         if flags & 64 != 0 { result.power = try r.i16() }
         if flags & 128 != 0 { _ = try r.take(2) }
         if flags & 256 != 0 { _ = try r.take(5) }
@@ -53,6 +74,67 @@ enum BLEProtocol {
         if flags & 2048 != 0 { _ = try r.take(2) }
         if flags & 4096 != 0 { _ = try r.take(2) }
         return result
+    }
+    /// FTMS Rower Data (0x2AD1), décodé comme parseRowerData dans src/ble/trainer.js.
+    static func rower(_ bytes: [UInt8]) throws -> BikeReading {
+        var r = ByteReader(bytes)
+        let flags = try r.u16()
+        var result = BikeReading()
+        if flags & 1 == 0 {
+            result.strokeRate = Double(try r.u8()) / 2
+            result.strokeCount = try r.u16()
+        }
+        if flags & 2 != 0 { result.avgStrokeRate = Double(try r.u8()) / 2 }
+        if flags & 4 != 0 { result.distance = try r.u24() }
+        if flags & 8 != 0 { result.pace = try r.u16() }
+        if flags & 16 != 0 { result.avgPace = try r.u16() }
+        if flags & 32 != 0 { result.power = try r.i16() }
+        if flags & 64 != 0 { result.avgPower = try r.i16() }
+        if flags & 128 != 0 { result.resistance = Double(try r.i16()) }
+        if flags & 256 != 0 { _ = try r.take(5) }
+        if flags & 512 != 0 { result.heartRate = try r.u8() }
+        if flags & 1024 != 0 { _ = try r.take(1) }
+        if flags & 2048 != 0 { result.elapsed = try r.u16() }
+        if flags & 4096 != 0 { result.remaining = try r.u16() }
+        return result
+    }
+    /// FTMS Cross Trainer Data (0x2ACE) : les drapeaux tiennent sur 3 octets (parseCrossTrainerData côté web).
+    static func crossTrainer(_ bytes: [UInt8]) throws -> BikeReading {
+        var r = ByteReader(bytes)
+        let flags = try r.u24()
+        var result = BikeReading()
+        if flags & 1 == 0 { result.speed = Double(try r.u16()) / 100 }
+        if flags & 2 != 0 { _ = try r.take(2) }
+        if flags & 4 != 0 { result.distance = try r.u24() }
+        if flags & 8 != 0 {
+            result.stepRate = try r.u16()
+            result.avgStepRate = try r.u16()
+        }
+        if flags & 16 != 0 { result.strideCount = Double(try r.u16()) / 10 }
+        if flags & 32 != 0 { _ = try r.take(4) }
+        if flags & 64 != 0 { result.inclination = Double(try r.i16()) / 10; _ = try r.take(2) }
+        if flags & 128 != 0 { result.resistance = Double(try r.i16()) / 10 }
+        if flags & 256 != 0 { result.power = try r.i16() }
+        if flags & 512 != 0 { result.avgPower = try r.i16() }
+        if flags & 1024 != 0 { _ = try r.take(5) }
+        if flags & 2048 != 0 { result.heartRate = try r.u8() }
+        if flags & 4096 != 0 { _ = try r.take(1) }
+        if flags & 8192 != 0 { result.elapsed = try r.u16() }
+        if flags & 16384 != 0 { result.remaining = try r.u16() }
+        result.backward = flags & 32768 != 0
+        return result
+    }
+    /// Puissance estimée d'un rameur à partir de l'allure (formule Concept2 : W = 2,8 / (s/m)³).
+    static func rowerPower(pace500: Double) -> Double {
+        guard pace500.isFinite, pace500 > 0 else { return 0 }
+        return 2.8 / pow(pace500 / 500, 3)
+    }
+    /// Supported Resistance Level Range (0x2AD6) : minimum, maximum et pas, en dixièmes.
+    static func resistanceRange(_ bytes: [UInt8]) throws -> LevelRange {
+        var r = ByteReader(bytes)
+        let lo = try r.i16(), hi = try r.i16(), step = try r.u16()
+        guard lo <= hi else { throw PacketError.invalid }
+        return LevelRange(min: Double(lo) / 10, max: Double(hi) / 10, step: Double(step) / 10)
     }
     static func cyclingPower(_ bytes: [UInt8]) throws -> (power: Int, revs: Int?, time: Int?) {
         var r = ByteReader(bytes)
@@ -80,6 +162,10 @@ enum BLEProtocol {
     // FTMS Target Resistance Level is a signed 16-bit value in tenths.
     static func resistance(_ level: Double) -> [UInt8] {
         [0x04] + signed16(Int((min(3276.7, max(-3276.8, level.isFinite ? level : 0)) * 10).rounded()))
+    }
+    // Variante FTMS 1.0 sur un octet (dixièmes, de 0 à 25,5) : celle du jeu web et des rameurs/elliptiques.
+    static func resistance8(_ level: Double) -> [UInt8] {
+        [0x04, UInt8(max(0, min(255, ((level.isFinite ? level : 0) * 10).rounded())))]
     }
 }
 

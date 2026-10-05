@@ -39,4 +39,4 @@ Le code de ce dépôt est une implémentation originale (aucun code copié). Pou
 
 ## Application native iPhone / iPad
 
-Le port SwiftUI + CoreBluetooth se trouve dans [`ios/`](ios/README.md). Ouvrir `ios/MyCycleWorld.xcodeproj` dans Xcode. L'onglet **Jeu** affiche le jeu web branché sur le Bluetooth natif de l'appli ; le cockpit inclut un mode démo et le guide de livraison TestFlight est dans le README iOS.
+Le port SwiftUI + CoreBluetooth se trouve dans [`ios/`](ios/README.md). Ouvrir `ios/MyCycleWorld.xcodeproj` dans Xcode. L'onglet **Jeu** affiche le jeu web branché sur le Bluetooth natif de l'appli ; le cockpit inclut un mode démo et le guide de livraison TestFlight est dans le README iOS. L'onglet **Appareils** reprend les profils du jeu (Zwift, Technogym, BLE standard), décode aussi les elliptiques et rameurs FTMS (la pente du jeu y devient un niveau de résistance) et propose le test de connexion, la console Bluetooth partageable et un inspecteur BLE natif. Le pont (`game/native.js`, protocole 1 révision 1) transmet au jeu le type de machine, la cadence de coups, l'allure, la distance et le profil choisi.

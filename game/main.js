@@ -726,6 +726,7 @@ $('backHome').addEventListener('click', goHome);
 
 if (NATIVE) {
   $('nativeHint').hidden = false;
+  $('nativeHint').textContent = "Appli MyCycleWorld : choisis ton matériel et connecte ta machine dans l'onglet « Appareils » (test de connexion, console et inspecteur Bluetooth y sont aussi), puis reviens ici pour jouer. Pendant la course, l'appli pilote la pente d'un vélo ou la résistance d'un elliptique ou d'un rameur.";
 } else if (DEMO) {
   $('demoBanner').hidden = false;
   $('demoLink').textContent = 'Vrai Bluetooth';
@@ -761,6 +762,16 @@ for (const card of document.querySelectorAll('[data-connect]')) {
   });
 }
 applyHardware();
+// Appli iOS : le profil choisi dans l'onglet « Appareils » fait foi dès qu'il change.
+let nativeHw = null;
+if (NATIVE) {
+  devices.addEventListener('change', () => {
+    if (!devices.hardware || devices.hardware === nativeHw) return;
+    nativeHw = devices.hardware;
+    hwId = nativeHw;
+    applyHardware();
+  });
+}
 
 const demoKind = () => (DEMO && hwId === 'technogym' ? 'rower' : undefined);
 $('connectAny').addEventListener('click', () => connect('trainer', 'trainerStatus', () => devices.connectTrainer({ acceptAll: true, demoKind: demoKind() })));
