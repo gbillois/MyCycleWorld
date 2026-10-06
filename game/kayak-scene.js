@@ -5,7 +5,8 @@
 // Graphismes détaillés : shaders du décor (terrain, eau à courant, forêt avec niveaux de détail, herbe) ;
 // graphismes simples : mêmes formes, matières standard et arbres en cônes. Tout est généré (aucun fichier).
 import * as THREE from 'three';
-import { makeSky, disposeTree, terrainMaterial, fanGeometry, fanMaterial, mountainRingAround, fbm } from './scenery.js';
+import { makeSky, disposeTree, terrainMaterial, mountainRingAround, fbm } from './scenery.js';
+import { buildBankCrowd } from './people.js';
 import { MOODS, applyMood, installFog, makeSkyDome, makeEnvironment as makeSkyEnvironment, noiseTexture, makeBirds } from './atmosphere.js';
 import { Forest, deciduousGeometry, pineGeometry, bushGeometry, rockGeometry, windMaterial, leafAtlas, makeFieldMaps, makeGrassField, crispAlpha } from './nature.js';
 import { makeWater, waterNormalTexture } from './water.js';
@@ -643,20 +644,8 @@ function buildStartFinish(river, height, group, { cast, detailed, shared, qualit
       if (y - f.y > 6 || o.d < 3) continue;
       fans.push([x, y, z, Math.atan2(-f.rx * side, -f.rz * side), r()]);
     }
-    const shirts = ['#e0384b', '#2b6cff', '#ffd23f', '#3ccf7a', '#ffffff', '#ff7aa8', '#ff5a1f'].map(C);
-    const mat = fanMaterial(shared);
-    const m4 = new THREE.Matrix4();
-    const q = new THREE.Quaternion();
-    [fans.filter((x) => x[4] < 0.8), fans.filter((x) => x[4] >= 0.8)].forEach((list, k) => {
-      if (!list.length) return;
-      const fm = new THREE.InstancedMesh(fanGeometry(k === 1), mat, list.length);
-      list.forEach(([x, y, z, yaw, rk], i) => {
-        fm.setMatrixAt(i, m4.compose(new THREE.Vector3(x, y - 0.05, z), q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, yaw), new THREE.Vector3(1, 1, 1).multiplyScalar(0.95 + rk * 0.1)));
-        fm.setColorAt(i, shirts[Math.floor(rk * 977) % shirts.length]);
-      });
-      fm.castShadow = quality === 'high';
-      group.add(fm);
-    });
+    // Public animé (people.js) : drapeaux, pancartes, photos ; il s'agite au passage du kayak
+    buildBankCrowd(group, fans.map(([x, y, z, yaw, k]) => [x, y - 0.05, z, yaw, k]), quality);
   }
 }
 

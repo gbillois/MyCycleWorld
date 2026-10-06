@@ -15,6 +15,7 @@ import {
   Forest, deciduousGeometry, pineGeometry, bushGeometry, palmGeometry, rockGeometry, windMaterial, leafAtlas,
   makeFieldMaps, makeRoadMap, makeGrassField, crispAlpha } from './nature.js';
 import { makeWater } from './water.js';
+import { buildCourseCrowd } from './people.js';
 
 const smoothstep = (a, b, x) => {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
@@ -818,64 +819,6 @@ function buildRoad(track, anisotropy, shared, terrainMat) {
 
 // --- Bord de route : bornes, glissières et murets (montagne), spectateurs, barrières et drapeaux ---
 
-// Spectateur : jambes, buste et bras levés (teintés par instance), tête ; variante avec drapeau.
-export function fanGeometry(flag) {
-  const parts = [];
-  const tint = [];
-  const add = (g, color, t) => {
-    const geo = indexify(g.index ? g : g);
-    colored(geo, color);
-    parts.push(geo);
-    tint.push([geo.attributes.position.count, t]);
-  };
-  for (const x of [-0.09, 0.09]) add(new THREE.BoxGeometry(0.13, 0.84, 0.15).translate(x, 0.42, 0), '#2d3140', 0);
-  add(new THREE.BoxGeometry(0.1, 0.06, 0.24).translate(-0.09, 0.03, 0.04), '#1b1b1d', 0);
-  add(new THREE.BoxGeometry(0.1, 0.06, 0.24).translate(0.09, 0.03, 0.04), '#1b1b1d', 0);
-  add(new THREE.CylinderGeometry(0.2, 0.15, 0.6, 8).scale(1, 1, 0.62).translate(0, 1.13, 0), '#ffffff', 1);
-  add(new THREE.CylinderGeometry(0.05, 0.06, 0.08, 6).translate(0, 1.46, 0), '#e2b08a', 0);
-  add(new THREE.SphereGeometry(0.115, 10, 8).scale(0.92, 1.05, 1).translate(0, 1.59, 0), '#e2b08a', 0);
-  add(new THREE.SphereGeometry(0.122, 10, 5, 0, Math.PI * 2, 0, 1.25).translate(0, 1.62, -0.01), '#3a2a20', 0);
-  // Bras levés en V (ou bras droit qui tient un drapeau)
-  add(new THREE.CylinderGeometry(0.045, 0.04, 0.62, 5).translate(0, 0.31, 0).rotateZ(0.42).translate(-0.19, 1.36, 0), '#ffffff', 1);
-  add(new THREE.CylinderGeometry(0.045, 0.04, 0.62, 5).translate(0, 0.31, 0).rotateZ(flag ? -0.12 : -0.42).translate(0.19, 1.36, 0), '#ffffff', 1);
-  add(new THREE.SphereGeometry(0.045, 5, 4).translate(-0.44, 1.92, 0), '#e2b08a', 0);
-  add(new THREE.SphereGeometry(0.045, 5, 4).translate(flag ? 0.26 : 0.44, 1.92, 0), '#e2b08a', 0);
-  if (flag) {
-    add(new THREE.CylinderGeometry(0.012, 0.012, 1.2, 4).translate(0.27, 2.3, 0), '#d8d8d8', 0);
-    add(new THREE.PlaneGeometry(0.7, 0.45, 4, 1).translate(0.62, 2.62, 0), '#ffffff', 2);
-  }
-  const g = mergeGeometries(parts.map((x) => (x.index ? x : indexify(x))));
-  const t = new Float32Array(g.attributes.position.count);
-  let o = 0;
-  for (const [cnt, v] of tint) {
-    t.fill(v, o, o + cnt);
-    o += cnt;
-  }
-  g.setAttribute('aTint', new THREE.BufferAttribute(t, 1));
-  return g;
-}
-
-export function fanMaterial(shared) {
-  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, side: THREE.DoubleSide });
-  mat.onBeforeCompile = (sh) => {
-    sh.uniforms.uTime = shared.uTime;
-    sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute float aTint;\nuniform float uTime;')
-      .replace('#include <color_vertex>', `vColor = color;
-        #ifdef USE_INSTANCING_COLOR
-          // Maillot teinté (1), drapeau d'une autre couleur (2), peau et jambes non teintées (0).
-          vec3 flagCol = instanceColor.gbr;
-          vColor *= aTint > 1.5 ? flagCol : mix( vec3( 1.0 ), instanceColor.rgb, aTint );
-        #endif`)
-      .replace('#include <begin_vertex>', `#include <begin_vertex>
-        float fSeed = instanceMatrix[3][0] * 1.7 + instanceMatrix[3][2] * 2.3;
-        transformed.y += abs( sin( uTime * 5.5 + fSeed ) ) * 0.12 * step( 0.5, fract( fSeed * 0.37 ) );
-        transformed.x += step( 1.5, aTint ) * sin( uTime * 7.0 + position.x * 6.0 + fSeed ) * 0.06 * ( position.x - 0.27 );`);
-  };
-  mat.customProgramCacheKey = () => 'fans';
-  return mat;
-}
-
 function addRoadside(group, ctx, theme, quality, shared, anisotropy) {
   const { track, heightAt, lake, free } = ctx;
   const m4 = new THREE.Matrix4();
@@ -1092,8 +1035,7 @@ function addRoadside(group, ctx, theme, quality, shared, anisotropy) {
 
   // Spectateurs : le long des montées (comme sur le Tour) et serrés derrière les barrières du départ.
   const fans = [];
-  const SHIRTS = ['#e0384b', '#ffd23f', '#2b6cff', '#ffffff', '#3ccf7a', '#ff7a1a', '#f2f2f2', '#9b59ff', '#ff4fa0'].map(C);
-  const want = Math.round(200 * density * theme.fans);
+  const want = Math.round(320 * density * theme.fans); // figurants lointains très légers (people.js) : foule plus dense
   for (let tries = 0; tries < want * 20 && fans.length < want; tries++) {
     const s0 = r() * track.length;
     if (!asphaltAt(s0)) continue;
@@ -1123,18 +1065,9 @@ function addRoadside(group, ctx, theme, quality, shared, anisotropy) {
       }
     }
   }
-  const mat = fanMaterial(shared);
-  const split = [fans.filter((x) => x[4] < 0.8), fans.filter((x) => x[4] >= 0.8)];
-  split.forEach((list, k) => {
-    const mesh = new THREE.InstancedMesh(fanGeometry(k === 1), mat, list.length);
-    list.forEach(([x, y, z, yaw, rr], i) => {
-      mesh.setMatrixAt(i, m4.compose(v3.set(x, y - 0.03, z), q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, yaw), s3.setScalar(0.92 + rr * 0.16)));
-      mesh.setColorAt(i, SHIRTS[Math.floor(rr * 977) % SHIRTS.length]);
-    });
-    mesh.castShadow = quality === 'high';
-    mesh.receiveShadow = true;
-    group.add(mesh);
-  });
+  // Foule animée (people.js) : spectateurs du bord de route et du départ, plus les figurants du village,
+  // de la ferme, de la plage et du lac ; diable dans la montée la plus raide.
+  buildCourseCrowd(group, ctx, fans, quality);
   // Barrières Vauban habillées d'une bâche
   const tarp = canvasTexture(256, 64, (c, w, h) => {
     c.fillStyle = '#f4f4f2';

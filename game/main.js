@@ -8,6 +8,7 @@ import { COURSE_ORDER, courseById, SURFACES } from './courses.js';
 import { elevationGain } from '../src/core/profile.js';
 import { RiderModel, createItemBox, createBanana } from './models.js';
 import { DetailedRider } from './rider.js';
+import { updateCrowds } from './people.js';
 import { Race, ITEMS } from './race.js';
 import { Devices, explainError } from './devices.js';
 import { NativeDevices, isNativeApp } from './native.js';
@@ -317,6 +318,7 @@ function setupRace() {
     hud.flash(detail.lap === race.laps ? 'Dernier tour !' : `Tour ${detail.lap} / ${race.laps}`, 1500);
   });
   race.addEventListener('finish', ({ detail: r }) => {
+    models.get(r)?.celebrate?.(race.positionOf(r)); // bras levés pour le vainqueur, poing levé sur le podium
     if (!r.isPlayer) return;
     hud.flash(`Arrivée : ${ordinal(race.positionOf(r))} !`, 2500, 'good');
     endTimer = setTimeout(showEnd, 2200);
@@ -680,6 +682,7 @@ function setupRowing() {
   $('rProgress').innerHTML = '<div class="row-finish"></div><span class="rp-mark"></span>' + r.racers.map((x, i) => `<span class="dot${x.isPlayer ? ' me' : ''}" data-i="${i}" style="color:${x.color}"><svg aria-hidden="true"><use href="#i-boat"/></svg></span>`).join('');
   r.addEventListener('go', () => hud.flash('Partez !', 1100, 'good'));
   r.addEventListener('finish', ({ detail }) => {
+    rowing.boats.get(detail)?.celebrate?.(r.positionOf(detail));
     if (!detail.isPlayer) return;
     hud.flash(`Arrivée : ${ordinal(r.positionOf(detail))} !`, 2500, 'good');
     endTimer = setTimeout(showEnd, 2200);
@@ -1408,6 +1411,7 @@ function syncScene(dt) {
     }
     m.group.rotation.set(pitch, yaw, roll, 'YXZ');
     if (m.setMotion) m.setMotion(r.v, f.grade, r.power); // position aéro dans les descentes rapides
+    if (m.setRace) m.setRace(t, camera, race.distance - r.s); // regards, salut au départ, sprint final
     m.setCrank(r.crank);
     m.spinWheels((r.v * dt) / 0.34);
     // Un adversaire collé à la caméra masquerait la route : on le cache, ainsi que son étiquette.
@@ -1506,6 +1510,7 @@ function frame(nowMs) {
   lastFrame = nowMs;
   updateSim(dt);
   audio.update({ dt, mode, state, camera, track, race, rowing: rowing?.race, gear: gears.gear, player: mode === 'kayak' ? { speed: kayak?.race?.player?.v ?? 0 } : undefined });
+  updateCrowds(dt, camera); // foules et figurants animés (people.js)
   if (mode === 'kayak') {
     kayakSounds();
     kayak.frame(dt, nowMs, state, kayakInput(), kayakHud());
@@ -1581,6 +1586,8 @@ window.__mcw = {
   gfx: GFX,
   quality: QUALITY,
   renderer,
+  scene,
+  camera,
   get state() { return state; },
   get race() { return race; },
   tapDrive,
