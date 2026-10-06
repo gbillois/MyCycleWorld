@@ -102,8 +102,15 @@ export class Devices extends EventTarget {
   }
 
   // Pente envoyée au trainer (si pilotable). La limitation à 4 envois/s est faite par Trainer.
-  sendGrade(grade) {
-    if (this.trainer.connected && this.trainer.canControl) this.trainer.setGradeThrottled(grade);
+  // wind (météo, facultatif) : { speed (m/s, + = de face), grade (pente sans le vent, vitesses comprises) }.
+  // Vélo en mode simulation FTMS : le vent part dans le champ « vitesse du vent » de Set Indoor Bike
+  // Simulation (le trainer calcule lui-même la traînée). Elliptique ou rameur (résistance) : `grade`
+  // contient déjà la pente équivalente au vent.
+  sendGrade(grade, terrain, wind = null) {
+    if (!this.trainer.connected || !this.trainer.canControl) return;
+    const simulation = this.trainer.kind === 'bike' || this.trainer.kind === null;
+    if (wind && simulation) this.trainer.setGradeThrottled(wind.grade, wind.speed);
+    else this.trainer.setGradeThrottled(grade);
   }
 
   vibrate() {

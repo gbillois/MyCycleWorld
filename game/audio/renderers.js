@@ -59,6 +59,9 @@ export const RENDERERS = {
   sprintFail: (sr, r) => S.renderSprintFail(sr, r),
   whirlpool: (sr, r, o) => S.renderWhirlpool(sr, r, o),
   kayakSplash: (sr, r) => S.renderKayakSplash(sr, r),
+  // Météo : crépitement de pluie (boucle à 32 kHz) et tonnerre
+  rain: (sr, r, o) => at32(S.renderRain(32000, r, o)),
+  thunder: (sr, r, o) => at32(S.renderThunder(32000, r, o)),
   // Musique et réverbération
   drum: (sr, r, o) => S.renderDrum(sr, r, o),
   // Notes rendues à 32 kHz : timbre intact, un tiers de mémoire en moins (une note par hauteur et instrument)

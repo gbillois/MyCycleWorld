@@ -65,7 +65,7 @@ export class Hud {
   constructor(track) {
     this.root = $('hud');
     this.el = {};
-    for (const id of ['hPower', 'hPowerBox', 'hZone', 'hCadence', 'hHr', 'hSpeed', 'hSpeedArc', 'hGear', 'hGearBar', 'hGrade', 'hGradeBox', 'hSlope', 'hTerrain', 'hPos', 'hPosTotal', 'hLap', 'hTime', 'hItem', 'hItemLabel', 'hEffects', 'hHint', 'banner']) {
+    for (const id of ['hPower', 'hPowerBox', 'hZone', 'hCadence', 'hHr', 'hSpeed', 'hSpeedArc', 'hGear', 'hGearBar', 'hGrade', 'hGradeBox', 'hSlope', 'hTerrain', 'hPos', 'hPosTotal', 'hLap', 'hTime', 'hItem', 'hItemLabel', 'hEffects', 'hHint', 'banner', 'hWeather', 'hWxSky', 'hWxRainBox', 'hWxRain', 'hWxWind', 'hWxArrow', 'hWxText']) {
       this.el[id] = $(id);
     }
     this.cache = new Map(); // dernière valeur écrite par élément (évite de relire le DOM)
@@ -263,7 +263,10 @@ export class Hud {
     this.set('gradeLevel', level, (l) => (e.hGradeBox.dataset.g = l));
     const tilt = Math.round(Math.max(-12, Math.min(12, d.feltGrade)));
     this.set('tilt', tilt, (k) => (e.hSlope.style.transform = `scale(${k < 0 ? -1 : 1}, ${(0.18 + Math.abs(k) / 14).toFixed(2)})`));
-    this.set('hTerrain', `terrain ${fmtGrade(d.terrainGrade)} %`);
+    // Avec la météo, la part du vent dans la pente ressentie est indiquée à côté du terrain.
+    const wind = Math.abs(d.windGrade || 0) >= 0.15 ? ` · vent ${fmtGrade(d.windGrade)} %` : '';
+    this.set('hTerrain', `terrain ${fmtGrade(d.terrainGrade)} %${wind}`);
+    this.setWeather(d.weather);
     this.setPosition(d.position);
     this.set('hPosTotal', `/ ${d.total}`);
     this.set('hLap', `Tour ${d.lap} / ${d.laps}`);
@@ -286,6 +289,25 @@ export class Hud {
     else if (d.touch) hint = d.power < 5 && d.time > 0 ? (d.tap ? 'Tape l’écran pour pédaler (ou maintiens « Pédaler »)' : 'Maintiens « Pédaler » pour avancer') : '';
     else hint = d.power < 5 && d.time > 0 ? (d.tap ? 'Maintiens ↑ ou clique en rythme pour pédaler' : 'Maintiens ↑ pour pédaler') : 'Mode clavier : ↑ pédaler · ← → se déplacer';
     this.set('hHint', hint);
+  }
+
+  // Badge météo : ciel, intensité de la pluie, vent de face ou de dos et sa flèche (repère du coureur).
+  setWeather(w) {
+    const e = this.el;
+    if (!e.hWeather) return;
+    const on = !!w?.on;
+    this.set('wxOn', on, (v) => (e.hWeather.hidden = !v));
+    if (!on) return;
+    this.set('hWxSky', w.icon);
+    const rain = w.rain > 0.02 ? Math.round(w.rain * 20) * 5 : 0;
+    this.set('wxRain', rain, (r) => {
+      e.hWxRainBox.hidden = !r;
+      e.hWxRain.style.width = `${Math.max(10, r)}%`;
+      e.hWxRainBox.title = `Pluie ${r} %`;
+    });
+    this.set('wxKind', w.kind, (k) => (e.hWxWind.dataset.k = k));
+    this.set('hWxText', w.text);
+    this.set('wxArrow', Math.round(w.arrow / 5) * 5, (a) => (e.hWxArrow.style.transform = `rotate(${a}deg)`));
   }
 
   // Message au centre de l'écran. « Partez ! » a droit à son propre effet.

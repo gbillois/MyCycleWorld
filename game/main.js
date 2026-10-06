@@ -13,7 +13,7 @@ import { Devices, explainError } from './devices.js';
 import { NativeDevices, isNativeApp } from './native.js';
 import { Hud, formatTime, ordinal, ordinalHtml, renderResults } from './hud.js';
 import { VirtualGears, simulatedEffort } from '../src/core/gears.js';
-import { msToKmh } from '../src/core/physics.js';
+import { msToKmh, DEFAULTS } from '../src/core/physics.js';
 import { bluetoothAdvice } from '../src/core/platform.js';
 import { keepScreenOn } from '../src/core/wakelock.js';
 import { TouchControls, wantsTouch } from './touch.js';
@@ -32,6 +32,8 @@ import { createAudio } from './audio/index.js';
 import { KayakMode } from './kayak-mode.js';
 import { KAYAK_LEVELS, kayakCard, kayakPreview } from './kayak-menu.js';
 import { riverById } from './rivers.js';
+import { WeatherSystem } from './weather.js';
+import { weatherMode, forecast, WEATHER_LABELS, windGrade, ftmsWindSpeed } from '../src/core/weather.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -73,6 +75,12 @@ let steerPref = ['auto', 'on', 'off'].includes(storedPref(STEER_KEY)) ? storedPr
 const TAP_KEY = 'mycycleworld.tap';
 let tapEnabled = storedPref(TAP_KEY) !== 'off';
 const tapDrive = new TapDrive();
+// Météo (Options) : aléatoire par défaut, toujours beau, pluie, vent, ou désactivée (comportement d'origine).
+// ?weather= force le mode, ?seed= fixe le tirage (captures, tests).
+const WEATHER_KEY = 'mycycleworld.weather';
+let weatherPref = weatherMode(params.get('weather') || storedPref(WEATHER_KEY));
+const WEATHER_SEED = parseInt(params.get('seed'), 10);
+const weatherSeed = () => (Number.isFinite(WEATHER_SEED) ? WEATHER_SEED : (Math.random() * 4294967296) >>> 0);
 let playMachine = 'bike'; // bike | cross | row : machine choisie dans « Jouer »
 
 // Puissance simulée au clavier (sans home trainer). Au rameur : 180 W à 26 coups/min ; en kayak, Maj + ↑ = sprint.
@@ -135,23 +143,33 @@ if (DETAILED) {
   scene.add(simpleSun);
 }
 
+// Météo (weather.js) : vent, pluie, route mouillée ; bannières du HUD au début et à la fin des averses.
+const weather = new WeatherSystem({ scene, renderer, detailed: DETAILED, quality: QUALITY, onEvent: (type, d) => weatherBanner(type, d) });
+
 // Décor du circuit courant (reconstruit quand on change de circuit, sans recharger la page :
 // un rechargement couperait les connexions Bluetooth).
 function buildWorld() {
   if (DETAILED) {
     scenery = buildDetailedScenery(scene, track, { quality: QUALITY, renderer });
-    return;
+  } else {
+    const simple = buildScenery(scene, track);
+    scenery = {
+      ...simple,
+      update: (dt, cam) => simple.sky.position.copy(cam.position),
+      dispose: () => {
+        for (const root of [simple.group, simple.sky]) {
+          scene.remove(root);
+          disposeTree(root);
+        }
+      },
+    };
   }
-  const simple = buildScenery(scene, track);
-  scenery = {
-    ...simple,
-    update: (dt, cam) => simple.sky.position.copy(cam.position),
-    dispose: () => {
-      for (const root of [simple.group, simple.sky]) {
-        scene.remove(root);
-        disposeTree(root);
-      }
-    },
+  // La météo mémorise l'ambiance du décor ; avant de le défaire, elle la rétablit et libère ses particules.
+  weather.attach(scenery, track);
+  const dispose = scenery.dispose;
+  scenery.dispose = () => {
+    weather.detach();
+    dispose();
   };
 }
 buildWorld();
@@ -253,6 +271,7 @@ const raceObjects = new THREE.Group();
 scene.add(raceObjects);
 let lastSentGrade = null;
 let feltGrade = 0;
+let windGradeNow = 0; // part du vent dans la pente ressentie (%)
 let shake = 0;
 let endTimer = null;
 
@@ -264,6 +283,7 @@ const tmpFrame2 = {};
 // Crée une course (et ses objets 3D). Utilisé aussi pour l'aperçu de l'écran d'accueil.
 function setupRace() {
   if (mode === 'row') return setupRowing();
+  weather.stop(); // temps neutre à l'accueil ; la météo est tirée au départ (startRace)
   disposeTree(raceObjects); // coureurs, étiquettes et objets de la course précédente
   raceObjects.clear();
   bananaMeshes.clear();
@@ -355,10 +375,21 @@ function startRace() {
   clearTimeout(endTimer);
   document.activeElement?.blur?.();
   setupRace();
+  // Météo du jour, tirée selon le climat du circuit (null en mode « Désactivée » : course d'origine).
+  weather.start(track.course.theme, weatherPref, weatherSeed());
+  race.weather = weather.active ? weather : null;
   state = 'race';
   lastSentGrade = null;
   show(null);
   hud.flash('', 1);
+}
+
+// Bannières de la météo (début et fin d'averse, vent fort au départ).
+function weatherBanner(type, d) {
+  if (state !== 'race') return;
+  if (type === 'rain-start') hud.flash('🌧️ Il commence à pleuvoir : la route glisse', 2600, 'bad');
+  else if (type === 'rain-stop') hud.flash('🌤️ La pluie s’arrête, la route va sécher', 2000, 'good');
+  else if (type === 'windy') hud.flash(`💨 Vent fort, ${d.kmh} km/h : abrite-toi dans les roues !`, 2400);
 }
 
 function pause() {
@@ -496,6 +527,7 @@ function coursePreview(id) {
       <div class="pv-profile">${profileSvg(x, 'profile')}<span class="pv-alt">${x.alt} m</span></div>
       <dl class="pv-stats"><div><dt>${icon('i-route')}Longueur</dt><dd>${x.km} km</dd></div><div><dt>${icon('i-mountain')}Dénivelé</dt><dd>${x.gain} m</dd></div><div><dt>${icon('i-lap')}Tours</dt><dd>${x.laps}</dd></div><div><dt>${icon('i-slope')}Pente max</dt><dd>${x.maxGrade} %</dd></div></dl>
       <div class="pv-surf">${x.surfaces.map((s) => `<span>${s}</span>`).join('')}</div>
+      <div class="pv-weather" data-mode="${weatherPref}"><b>Météo ${WEATHER_LABELS[weatherPref].toLowerCase()}</b><span>${forecast(x.theme, weatherPref)}</span></div>
       <div class="pv-go"><span class="glyph"><span class="k-kbd">Entrée</span><span class="k-pad pad-a">A</span></span>Lancer la course</div>
     </div>
   </div>`;
@@ -513,7 +545,7 @@ function renderCourses() {
 // L'aperçu suit le niveau qui a le focus (flèches, manette) ou sous la souris.
 const previewOf = {};
 function showPreview(box, key, render) {
-  const k = `${key}|${playMachine}`;
+  const k = `${key}|${playMachine}|${weatherPref}`;
   if (previewOf[box] === k) return;
   previewOf[box] = k;
   $(box).innerHTML = render(key);
@@ -643,6 +675,8 @@ async function startRowing(distance = 500) {
     rowing = { world: buildRowingWorld(scene, { quality: QUALITY, renderer, detailed: DETAILED, distance }), race: null, boats: new Map(), distance };
   }
   setupRowing();
+  // Météo du bassin : du vent seulement (lac abrité, pas de pluie), effet doux sur les bateaux.
+  weather.start('lake', weatherPref, weatherSeed());
   state = 'race';
   lastSentGrade = null;
   show(null);
@@ -734,6 +768,9 @@ function rowCameraTarget(outPos, outLook) {
 function frameRowing(dt, nowMs) {
   const r = rowing.race;
   if (state === 'race' || state === 'end') {
+    // Bassin en ligne droite vers +z : le vent de dos est la composante z du vent (0 sans météo).
+    weather.step(dt, r.time, true);
+    r.tailwind = weather.active ? weather.now.speed * weather.now.dirZ : 0;
     r.update(dt, rowingInput());
     if (r.time < 0) hud.countdown(String(Math.ceil(-r.time)));
   }
@@ -796,7 +833,11 @@ function updateRowHud() {
   }
   else if (kind && kind !== 'rower') hint = `Machine connectée : ${MACHINE_LABELS[kind] || kind} (sa puissance fait avancer le bateau)`;
   set('rHint', hint);
-  const fx = p.offLane ? '<span class="badge grass">Hors couloir : les bouées freinent !</span>' : autoSteer() ? '<span class="badge auto">🧭 Pilote auto</span>' : '';
+  let fx = p.offLane ? '<span class="badge grass">Hors couloir : les bouées freinent !</span>' : autoSteer() ? '<span class="badge auto">🧭 Pilote auto</span>' : '';
+  if (weather.active) {
+    weather.observe(p, 0, 1); // bassin orienté vers +z
+    if (weather.hud.kind !== 'calm') fx += `<span class="badge wind ${weather.hud.kind}">💨 ${weather.hud.text}</span>`;
+  }
   if (updateRowHud.fx !== fx) $('rEffects').innerHTML = updateRowHud.fx = fx;
   touch?.setPedalVisible(!devices.trainerActive);
   touch?.setItemReady(false);
@@ -825,6 +866,7 @@ async function startKayak(id = 'gorges') {
   clearTimeout(endTimer);
   document.activeElement?.blur?.();
   const def = riverById(id);
+  weather.stop(); // pas de météo en kayak (la rivière a déjà son courant et ses rapides)
   if (mode !== 'kayak' || kayak.riverId !== def.id) {
     $('loadingText').textContent = `Chargement : ${def.name}…`;
     show('loading');
@@ -936,7 +978,7 @@ function refreshDevices() {
     trainer: !!t.connected,
     hr: !!devices.hr.connected,
     controllers: devices.connectedControllers.length,
-    gfxLabel: DETAILED ? 'graphismes détaillés' : 'graphisme simple',
+    gfxLabel: `${DETAILED ? 'graphismes détaillés' : 'graphisme simple'} · météo ${WEATHER_LABELS[weatherPref].toLowerCase()}`,
   });
   refreshHwTest();
   const verb = { rower: 'Rame', cross: 'Pédale sur l’elliptique' }[devices.machineKind] || 'Pédale';
@@ -1170,6 +1212,18 @@ for (const btn of document.querySelectorAll('.seg-btn[data-tap]')) {
   });
 }
 
+// Météo : aléatoire, toujours beau, pluie, vent ou désactivée (appliquée à la prochaine course).
+for (const btn of document.querySelectorAll('.seg-btn[data-weather]')) {
+  btn.setAttribute('aria-pressed', String(btn.dataset.weather === weatherPref));
+  btn.addEventListener('click', () => {
+    weatherPref = weatherMode(btn.dataset.weather);
+    savePref(WEATHER_KEY, weatherPref);
+    for (const b of document.querySelectorAll('.seg-btn[data-weather]')) b.setAttribute('aria-pressed', String(b === btn));
+    renderCourses(); // l'aperçu des circuits annonce la météo
+    refreshDevices();
+  });
+}
+
 for (const btn of document.querySelectorAll('.seg-btn[data-steer]')) {
   btn.setAttribute('aria-pressed', String(btn.dataset.steer === steerPref));
   btn.addEventListener('click', () => {
@@ -1338,10 +1392,16 @@ function updateGrade() {
   // Le sable (et un peu la passerelle) se ressent aussi dans les jambes : pente équivalente en plus.
   const surface = state === 'race' && !p.offRoad ? SURFACES[track.surfaceAt(p.s)]?.gradeExtra ?? 0 : 0;
   const effects = state === 'race' ? (p.turbo(t) ? TURBO_GRADE : 0) + (p.slipping(t) ? BANANA_GRADE : 0) + surface : 0;
-  feltGrade = gears.effectiveGrade(terrain + effects);
+  // Météo : vent de face (ou de dos) converti en pente équivalente, abri de l'aspiration compris. Il entre
+  // dans la pente ressentie et dans la pente envoyée aux machines pilotées en résistance et à l'appli iOS ;
+  // un vélo en simulation FTMS reçoit la pente sans le vent et le vent dans son champ dédié (devices.js).
+  const tail = race.weather && state === 'race' ? p.tailwind ?? 0 : 0;
+  windGradeNow = tail ? windGrade(p.v, tail, { cda: DEFAULTS.cda * p.draft }) : 0;
+  feltGrade = gears.effectiveGrade(terrain + effects + windGradeNow);
   if (lastSentGrade === null || Math.abs(feltGrade - lastSentGrade) >= 0.1) {
     lastSentGrade = feltGrade;
-    devices.sendGrade(feltGrade, terrain + effects);
+    if (race.weather) devices.sendGrade(feltGrade, terrain + effects + windGradeNow, { speed: ftmsWindSpeed(tail), grade: gears.effectiveGrade(terrain + effects) });
+    else devices.sendGrade(feltGrade, terrain + effects);
   }
   return terrain;
 }
@@ -1467,7 +1527,7 @@ function frame(nowMs) {
   const dt = Math.min(0.1, Math.max(0, (nowMs - lastFrame) / 1000));
   lastFrame = nowMs;
   updateSim(dt);
-  audio.update({ dt, mode, state, camera, track, race, rowing: rowing?.race, gear: gears.gear, player: mode === 'kayak' ? { speed: kayak?.race?.player?.v ?? 0 } : undefined });
+  audio.update({ dt, mode, state, camera, track, race, rowing: rowing?.race, gear: gears.gear, player: mode === 'kayak' ? { speed: kayak?.race?.player?.v ?? 0 } : undefined, weather: weather.audio });
   if (mode === 'kayak') {
     kayakSounds();
     kayak.frame(dt, nowMs, state, kayakInput(), kayakHud());
@@ -1485,6 +1545,7 @@ function frame(nowMs) {
     return;
   }
   if (state === 'race' || state === 'end') {
+    weather.step(dt, race.time, true); // vent et pluie de l'instant, avant la physique
     race.update(dt, playerInput());
     if (race.time < 0) hud.countdown(String(Math.ceil(-race.time)));
   }
@@ -1493,6 +1554,10 @@ function frame(nowMs) {
   updateCamera(dt, nowMs);
   updateSun();
   scenery.update(dt, camera);
+  if (state !== 'home') {
+    weather.observe(race.player);
+    weather.render(dt, camera, race);
+  }
 
   if (state !== 'home') {
     const p = race.player;
@@ -1508,6 +1573,8 @@ function frame(nowMs) {
         gearCount: gears.count,
         feltGrade,
         terrainGrade: terrain,
+        windGrade: windGradeNow,
+        weather: weather.hud,
         position: race.positionOf(p),
         total: race.racers.length,
         lap: race.lapOf(p),
@@ -1558,6 +1625,8 @@ window.__mcw = {
   loadCourse,
   get feltGrade() { return feltGrade; },
   audio,
+  weather,
+  get weatherPref() { return weatherPref; },
 };
 
 renderCourses();

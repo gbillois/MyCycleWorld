@@ -1,7 +1,7 @@
 // Effets du jeu, sons d'interface, sons du kayak, batterie et instruments de la musique, réponses
 // impulsionnelles de réverbération. Tout est calculé ici dans des Float32Array (module pur, testé dans
 // tests/audio.test.js), puis joué comme échantillon par le moteur.
-import { TAU, smoothstep, mtof, Filter, OnePole, Osc, arEnv, addDecaySine, mixInto, normalize, normalizeStereo, fadeEdges, dcBlock, panGains, white, pink, brown, softClip } from './dsp.js';
+import { TAU, smoothstep, mtof, Filter, OnePole, Osc, arEnv, addDecaySine, mixInto, normalize, normalizeStereo, fadeEdges, dcBlock, panGains, white, pink, brown, softClip, loopFilter } from './dsp.js';
 import { addBubble, renderSplash, renderBubbles } from './voices.js';
 import { range, logRange } from './random.js';
 
@@ -714,4 +714,80 @@ export function renderNoiseLoop(sr, r, { seconds = 6, color = 'pink' } = {}) {
   const len = secs(sr, seconds);
   const make = () => normalize(color === 'white' ? white(len, r) : color === 'brown' ? brown(len, r, true) : pink(len, r, true), 0.9);
   return { l: make(), r: make() };
+}
+
+// =====================================================================
+// Météo
+// =====================================================================
+// Crépitement de pluie en boucle stéréo (sans raccord) : milliers d'impacts brefs. kind 'leaves' : gouttes
+// sur les feuilles et les herbes (claquements secs, aigus) ; 'road' : impacts sur l'asphalte mouillé et
+// petites éclaboussures (plus mats, avec des bulles).
+export function renderRain(sr, r, { seconds = 4, kind = 'leaves' } = {}) {
+  const len = secs(sr, seconds);
+  const o = { l: new Float32Array(len), r: new Float32Array(len) };
+  const leaves = kind === 'leaves';
+  const n = Math.round((leaves ? 1100 : 1500) * seconds);
+  const imp = secs(sr, 0.006);
+  for (let k = 0; k < n; k++) {
+    const at = Math.floor(r() * len);
+    const pan = range(r, -1, 1);
+    const [gl, gr] = panGains(pan);
+    const amp = Math.pow(r(), 2.2) * (leaves ? 0.9 : 0.6);
+    const tau = (leaves ? range(r, 0.0006, 0.0018) : range(r, 0.0012, 0.004)) * sr;
+    for (let i = 0; i < imp * 3; i++) {
+      const v = (r() * 2 - 1) * amp * Math.exp(-i / tau);
+      const j = (at + i) % len;
+      o.l[j] += v * gl;
+      o.r[j] += v * gr;
+    }
+    if (!leaves && r() < 0.06) {
+      addBubble(r() < 0.5 ? o.l : o.r, sr, at, logRange(r, 1500, 4500), amp * 0.5, true);
+    }
+  }
+  // Timbre : feuilles claires (on coupe les graves), route plus sourde.
+  const hpF = leaves ? 1800 : 500;
+  const lpF = leaves ? 9000 : 5200;
+  loopFilter(o.l, new Filter('highpass', hpF, 0.6, sr), new Filter('lowpass', lpF, 0.6, sr));
+  loopFilter(o.r, new Filter('highpass', hpF, 0.6, sr), new Filter('lowpass', lpF, 0.6, sr));
+  normalizeStereo(o.l, o.r, 0.8);
+  return o;
+}
+
+// Tonnerre lointain : craquement (parfois), puis grondements qui roulent, plus graves et plus longs à mesure
+// que l'écho revient des collines. Durée 5 à 8 s.
+export function renderThunder(sr, r, { near = 0.5 } = {}) {
+  const dur = range(r, 5, 8);
+  const len = secs(sr, dur);
+  const o = { l: new Float32Array(len), r: new Float32Array(len) };
+  const base = brown(len, r);
+  const base2 = brown(len, r);
+  const lp = new Filter('lowpass', 180 + 500 * near, 0.7, sr);
+  const lp2 = new Filter('lowpass', 140 + 400 * near, 0.7, sr);
+  // Roulements : quelques bosses d'amplitude aux instants tirés au sort.
+  const rolls = [];
+  let t = range(r, 0.05, 0.3);
+  while (t < dur * 0.8) {
+    rolls.push([t, range(r, 0.4, 1), range(r, 0.3, 1.2)]);
+    t += range(r, 0.25, 1.4);
+  }
+  const crack = near > 0.4;
+  for (let i = 0; i < len; i++) {
+    const u = i / sr;
+    let env = 0;
+    for (const [t0, a, w] of rolls) {
+      const x = (u - t0) / w;
+      if (x > -1 && x < 4) env += a * (x < 0 ? (1 + x) * (1 + x) : Math.exp(-x * 1.2));
+    }
+    env *= Math.min(1, u / 0.04) * (1 - smoothstep(dur * 0.7, dur, u));
+    let vl = lp.process(base[i]) * env;
+    let vr = lp2.process(base2[i]) * env;
+    if (crack && u < 0.35) {
+      const c = (r() * 2 - 1) * Math.exp(-u / 0.06) * 0.7 * near;
+      vl += c;
+      vr += c * 0.8;
+    }
+    o.l[i] = vl;
+    o.r[i] = vr;
+  }
+  return finish(o, sr, 0.8);
 }

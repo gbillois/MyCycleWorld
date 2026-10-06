@@ -536,8 +536,12 @@ export class Trainer extends EventTarget {
   }
 
   // Version "jeu" : appelée souvent, n'envoie que la dernière valeur, au plus 4 fois/s.
-  setGradeThrottled(grade) {
+  // windSpeed (m/s, positif = vent de face) : champ « vitesse du vent » du mode simulation (météo du jeu) ;
+  // 0 par défaut, comme avant. Une machine pilotée en résistance ne s'en sert pas (le jeu lui envoie alors
+  // le vent déjà converti en pente).
+  setGradeThrottled(grade, windSpeed = 0) {
     this.simulation.grade = grade;
+    this.simulation.windSpeed = Number.isFinite(windSpeed) ? windSpeed : 0;
     if (this.gradePump) {
       this.gradeDirty = true;
       return;

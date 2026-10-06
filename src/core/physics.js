@@ -1,8 +1,9 @@
 // Physique du vélo, pure et testable (aucune dépendance au navigateur).
 //
 // Équation du mouvement le long de la route :
-//   m · dv/dt = P / v − (m·g·Crr·cos θ + m·g·sin θ + ½·ρ·CdA·v²)
-// avec θ = atan(pente / 100). Les vitesses sont en m/s, les puissances en W, les pentes en %.
+//   m · dv/dt = P / v − (m·g·Crr·cos θ + m·g·sin θ + ½·ρ·CdA·va·|va|)
+// avec θ = atan(pente / 100) et va = v − vent arrière (vitesse de l'air par rapport au coureur ; sans vent,
+// va = v). Les vitesses sont en m/s, les puissances en W, les pentes en %.
 
 export const DEFAULTS = Object.freeze({
   mass: 83, // kg, cycliste + vélo
@@ -32,10 +33,13 @@ export function gradeToAngle(gradePercent) {
 }
 
 // Somme des forces qui s'opposent à l'avancement (N). Négative en descente raide.
+// params.tailwind (m/s) : vent le long de la route, > 0 de dos (il pousse), < 0 de face (voir src/core/weather.js).
+// L'aspiration (cda réduit) s'applique aussi à la vitesse relative de l'air.
 export function resistiveForce(v, gradePercent, params = {}) {
-  const { mass, crr, cda, rho, g } = { ...DEFAULTS, ...params };
+  const { mass, crr, cda, rho, g, tailwind = 0 } = { ...DEFAULTS, ...params };
   const theta = gradeToAngle(gradePercent);
-  return mass * g * crr * Math.cos(theta) + mass * g * Math.sin(theta) + 0.5 * rho * cda * v * Math.abs(v);
+  const va = v - tailwind;
+  return mass * g * crr * Math.cos(theta) + mass * g * Math.sin(theta) + 0.5 * rho * cda * va * Math.abs(va);
 }
 
 // Force de propulsion (N) fournie par le cycliste.

@@ -1,5 +1,6 @@
 // Course d'aviron (module pur, testé dans tests/rowing.test.js) : bateaux en ligne droite sur un bassin,
 // vitesse tirée de la puissance comme sur un ergomètre (formule Concept2 : P = 2.8 · v³).
+import { boatWindFactor } from './weather.js';
 
 export const ROW = {
   k: 2.8, // W / (m/s)³
@@ -65,6 +66,7 @@ export class RowingRace extends EventTarget {
       });
     }
     this.player = this.racers.find((r) => r.isPlayer);
+    this.tailwind = 0; // vent le long du bassin (m/s, > 0 de dos), réglé par la météo du jeu
     this.started = false;
     this.finished = false;
   }
@@ -102,6 +104,7 @@ export class RowingRace extends EventTarget {
       r.offLane = Math.abs(r.lateral) > ROW.laneHalf;
       let target = this.time >= 0 ? boatSpeed(r.power) : 0;
       if (r.offLane) target *= 0.8; // les bouées freinent
+      if (this.tailwind) target *= boatWindFactor(this.tailwind); // vent : effet doux sur tous les bateaux
       if (r.finishTime !== null) target = Math.min(target, 1.2);
       r.v += (target - r.v) * (1 - Math.exp(-dt / ROW.tau));
       r.s += r.v * dt;
