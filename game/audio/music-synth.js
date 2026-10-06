@@ -484,11 +484,12 @@ export function renderMono(out, sr, events, p, r) {
         // La nouvelle attaque repart du niveau atteint (aucune marche, aucun clic)
         const from = e ? e.level : 0;
         e = new Env(sr, env, next.n, Math.min(from, 1));
-        if (!e || from < 0.05) lf = target;
+        // Note détachée : la hauteur saute (phase continue, aucun clic), avec la petite inflexion d'attaque
+        // des instruments à vent ; seules les notes liées glissent
+        lf = target;
         onset = i;
         scoop = p.scoop ?? 0;
         chiff = p.chiff ?? 0;
-        if (kind.startsWith('bass')) lf = target;
       } else {
         e.gate = e.i + next.n;
         e.rel = -1;

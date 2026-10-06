@@ -272,8 +272,9 @@ export class Music {
       this.keysLfo.connect(g(0.22)).connect(this.keysBus.pan);
       this.keysLfo.start();
     }
-    // Nappe : retrait sous la grosse caisse, puis chorus stéréo (deux retards modulés en opposition)
-    this.padBus = g(1);
+    // Nappe : retrait sous la grosse caisse, puis chorus stéréo (deux retards modulés en opposition) ;
+    // l'entrée à 0,87 compense l'énergie ajoutée par les deux voix du chorus (même niveau que hors ligne)
+    this.padBus = g(0.87);
     this.padDuck = g(1);
     this.padBus.connect(this.padDuck);
     const dry = this.e.stereoPanner(0) || g(0.7071);
@@ -286,7 +287,7 @@ export class Music {
       d.delayTime.value = 0.009;
       lfo.connect(g(0.0023 * sign)).connect(d.delayTime);
       const p = this.e.stereoPanner(pan) || g(0.5);
-      this.padDuck.connect(d).connect(g(0.5)).connect(p).connect(this.mix);
+      this.padDuck.connect(d).connect(g(0.4)).connect(p).connect(this.mix);
     }
   }
 
