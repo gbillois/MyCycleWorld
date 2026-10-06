@@ -471,6 +471,7 @@ class GameAudio {
       bank: e.bank ? { ...e.bank.stats, cached: e.bank.cache.size, mb: +(([...e.bank.cache.values()].reduce((n, b) => n + b.length * b.numberOfChannels * 4, 0) + [...e.bank.pools.values()].reduce((n, p) => n + p.items.reduce((m, b) => m + b.length * b.numberOfChannels * 4, 0), 0)) / 1048576).toFixed(1) } : null,
       scene: this.sceneKey,
       music: this.music?.songId ?? null,
+      score: this.music?.debug() ?? null,
       settings: { ...e.settings },
     };
   }

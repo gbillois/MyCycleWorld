@@ -5,9 +5,11 @@ import assert from 'node:assert/strict';
 import { DEFAULTS, BUSES, STORAGE_KEY, SETTINGS_VERSION, normalizeSettings, loadSettings, saveSettings, volumeToGain, busGain, stepVolume, percentLabel } from '../game/audio/settings.js';
 import { rng, hashSeed, nextDelay, EventClock, Wander, weighted } from '../game/audio/random.js';
 import { BIRDS, SCENE_BIRDS, birdSong, contour, songDuration, surfaceMix, tyreParams, freewheelRate, isCoasting, chainMeshRate, countdownStep, passEvent, breathing, musicIntensity, crowdExcitement } from '../game/audio/patterns.js';
-import { makeSong, stepEvents, planSteps, stepDuration, swingOffset, layerLevel, SCALES, MOODS } from '../game/audio/music-gen.js';
+import { makeSong, layerLevel, layerGains, planBars, nextSection, parseChord, voiceChord, tokens, scaleNote, songBytes, SCALES, MOODS, LAYERS, MUSIC_SR, SKIP_BRIDGE } from '../game/audio/music-gen.js';
+import { renderMusicPart, mixdown, PART_ORDER, LAYER_TARGET } from '../game/audio/music-render.js';
+import { moodFor, MUSIC_PARTS, MUSIC_BUDGET } from '../game/audio/music.js';
 import { soundSpots, rowingSpots, coastZ } from '../game/audio/spots.js';
-import { bandEnergy, goertzel, dominantFreq, peak, rms, pink, brown, Filter, addDecaySine } from '../game/audio/dsp.js';
+import { bandEnergy, goertzel, dominantFreq, peak, rms, pink, brown, Filter, addDecaySine, loudness } from '../game/audio/dsp.js';
 import { distanceCutoff } from '../game/audio/engine.js';
 import { SFX } from '../game/audio/index.js';
 import * as V from '../game/audio/voices.js';
@@ -207,58 +209,201 @@ test('souffle et musique suivent l’effort', () => {
 });
 
 // --- Musique ---
-test('musique : chaque niveau a sa tonalité et son tempo, reproductibles', () => {
-  const songs = ['meadow', 'alpine', 'coast', 'lake', 'river'].map((k) => makeSong(k, k));
-  const sig = songs.map((s) => `${s.root}/${s.bpm}/${s.mode}`);
-  assert.ok(new Set(sig).size >= 4, sig.join(' '));
-  assert.deepEqual(makeSong('alpine', 'alpine'), makeSong('alpine', 'alpine'));
+const RACE_MOODS = ['meadow', 'alpine', 'coast', 'lake', 'river', 'forest'];
+
+test('musique : accords en degrés romains et voicings conduits', () => {
+  assert.deepEqual(parseChord('IVmaj7').tones, [5, 9, 12, 16]);
+  assert.deepEqual(parseChord('vi7').tones, [9, 12, 16, 19]);
+  assert.deepEqual(parseChord('bVII').tones, [10, 14, 17]);
+  assert.deepEqual(parseChord('i9').tones, [0, 3, 7, 10, 14]);
+  assert.deepEqual(parseChord('V7sus4').tones, [7, 12, 14, 17]);
+  assert.equal(parseChord('I/3').bass, 4);
+  assert.throws(() => parseChord('X7'));
+  // Voicing dans la tessiture, notes de l'accord, peu de mouvement d'un accord au suivant
+  const c = voiceChord(parseChord('I').tones, 60, { voices: 4, range: [55, 76] });
+  assert.equal(c.length, 4);
+  for (const m of c) assert.ok(m >= 55 && m <= 76 && [0, 4, 7].includes(m % 12));
+  const f = voiceChord(parseChord('IV').tones, 60, { voices: 4, range: [55, 76] }, c);
+  const moved = f.reduce((n, m, i) => n + Math.abs(m - c[i]), 0);
+  assert.ok(moved <= 6, `conduite des voix : ${moved} demi-tons de mouvement`);
+  assert.deepEqual(tokens('1-3.5--').map((t) => [t.s, t.len, t.ch]), [[0, 2, '1'], [2, 1, '3'], [4, 3, '5']]);
+  assert.equal(scaleNote(SCALES.major, 60, 7), 72);
+  assert.equal(scaleNote(SCALES.major, 60, -1), 59);
+});
+
+test('musique : chaque niveau a son morceau, ses notes dans la gamme et ses accords sur les barres de mesure', () => {
+  const songs = [...RACE_MOODS, 'menu'].map((k) => makeSong(k));
+  assert.ok(new Set(songs.map((s) => `${s.key}/${Math.round(s.bpm)}/${s.mode}`)).size >= 6);
+  assert.deepEqual(makeSong('alpine'), makeSong('alpine'), 'reproductible');
+  assert.equal(makeSong('inconnu').mood, 'meadow');
+  assert.ok(makeSong('menu').bpm < 90, 'musique du menu plus calme');
   for (const s of songs) {
-    const mood = MOODS[s.mood];
-    assert.ok(s.bpm >= mood.bpm[0] && s.bpm <= mood.bpm[1]);
-    assert.equal(s.bars.length, 16);
-    // Toutes les notes des accords appartiennent à la gamme
-    const pcs = new Set(SCALES[s.mode].map((x) => (x + s.root) % 12));
-    for (const bar of s.bars) for (const n of bar.notes) assert.ok(pcs.has(((n % 12) + 12) % 12), `${n} hors gamme`);
+    assert.ok(Number.isInteger(s.barLen) && Math.abs(s.barSec - 240 / s.bpm) < 1e-9, `${s.mood} : mesure entière en échantillons`);
+    assert.ok(Math.abs(s.bpm - MOODS[s.mood].bpm) < 0.01);
+    const pcs = new Set(s.scale.map((x) => (x + s.key) % 12));
+    const inScale = (m) => pcs.has(((m % 12) + 12) % 12);
+    let strong = 0;
+    let strongOk = 0;
+    for (const name of s.form) {
+      const sec = s.sections[name];
+      for (const layer of LAYERS) {
+        assert.equal(sec.layers[layer].length, sec.bars);
+        sec.layers[layer].forEach((id, b) => {
+          if (!id) return;
+          const cell = s.cells[id];
+          for (const e of cell.events) {
+            // Rien avant la barre de mesure, rien après la fin de la cellule
+            assert.ok(e.t >= 0 && e.t < cell.bars * 16 + 0.5, `${s.mood} ${id} : note à ${e.t}`);
+            const notes = e.notes || (e.m !== undefined ? [e.m] : []);
+            for (const m of notes) assert.ok(inScale(m), `${s.mood} ${name} ${layer} : ${m} hors gamme`);
+            // Nappe, claviers : uniquement les notes de l'accord de la mesure où la note commence
+            const chord = parseChord(sec.prog[b + Math.floor(e.t / 16)]);
+            const tones = new Set(chord.tones.map((t) => (t + s.key) % 12));
+            if (layer === 'pad' || layer === 'keys') for (const m of notes) assert.ok(tones.has(m % 12), `${s.mood} ${name} ${layer} : ${m} hors accord ${sec.prog[b]}`);
+            // Mélodie : aux temps forts (1 et 3), une note de l'accord le plus souvent
+            if (layer === 'lead' && Math.abs(e.t - 8 * Math.round(e.t / 8)) < 0.2) {
+              strong++;
+              if (tones.has(e.m % 12)) strongOk++;
+            }
+          }
+        });
+      }
+    }
+    if (strong) assert.ok(strongOk / strong >= 0.6, `${s.mood} : mélodie sur les notes de l'accord aux temps forts (${strongOk}/${strong})`);
   }
-  const menu = makeSong('meadow', 'menu');
-  assert.ok(menu.bpm < 90, 'musique du menu plus calme');
 });
 
-test('musique : les couches s’ajoutent avec l’intensité', () => {
-  const s = makeSong('lake', 'lake');
-  const kinds = (x) => {
-    const set = new Set();
-    for (let i = 0; i < 64; i++) for (const e of stepEvents(s, i, x)) set.add(e.type === 'drum' ? e.kind : e.type);
-    return set;
-  };
-  const calm = kinds(0.5);
-  const full = kinds(3);
-  assert.ok(calm.has('chord') && !calm.has('kick') && !calm.has('hat'));
-  assert.ok(full.has('kick') && full.has('bass') && full.has('note'));
+test('musique : couches selon l’intensité, forme et horloge des mesures', () => {
+  const s = makeSong('lake');
+  const at = (x) => layerGains(s, x);
+  // Compte à rebours : nappe et claviers ; effort normal : basse, groove ; turbo : tout
+  assert.ok(at(0.6).pad > 0.9 && at(0.6).keys > 0.5 && at(0.6).bass === 0 && at(0.6).drums === 0);
+  assert.ok(at(1.8).bass === 1 && at(1.8).groove > 0.9 && at(1.8).drums === 0);
+  assert.ok(at(3).drums === 1 && at(3).lead === 1 && at(3).pad < 1);
   assert.equal(layerLevel(0, 'pad'), 1);
-  assert.equal(layerLevel(1, 'kick'), 0);
-  assert.equal(layerLevel(3, 'kick'), 1);
-});
-
-test('musique : programmation en avance sans doublon ni retard rattrapé d’un coup', () => {
-  const dur = stepDuration(120);
-  assert.equal(dur, 0.125);
+  // Les gains ne sautent jamais : un pas d'intensité de 0,05 ne fait bouger aucune couche de plus de 0,2
+  for (let x = 0; x < 3; x += 0.05) for (const l of LAYERS) assert.ok(Math.abs(at(x + 0.05)[l] - at(x)[l]) < 0.2);
+  // Forme : intro une fois, puis A B A2 B2 C en boucle ; pont sauté quand l'effort est fort
+  const iC = s.form.indexOf('C');
+  assert.equal(nextSection(s, iC - 1, 1), iC);
+  assert.equal(s.form[nextSection(s, iC - 1, SKIP_BRIDGE + 0.2)], 'A');
+  assert.equal(s.form[nextSection(s, s.form.length - 1, 1)], 'A');
+  // Menu : tout joue à l'accueil (intensité 1), pas de batterie
+  const menu = makeSong('menu');
+  const g = layerGains(menu, 1);
+  assert.ok(g.keys === 1 && g.bass === 1 && g.lead > 0.5 && g.drums === 0);
+  // Horloge : des mesures régulières, aucune en double ; après une suspension, recalage sans rafale
   let next = 1;
   const all = [];
-  for (let now = 0.95; now < 3; now += 0.025) {
-    const res = planSteps(now, next, dur, 0.1);
-    for (const t of res.times) {
-      assert.ok(t >= now - 1e-9 && t < now + 0.1 + 1e-9, 'dans la fenêtre de 100 ms');
-      all.push(t);
-    }
+  for (let now = 0.9; now < 12; now += 0.05) {
+    const res = planBars(now, next, s.barSec, 0.6);
+    all.push(...res.times);
     next = res.next;
   }
-  for (let i = 1; i < all.length; i++) assert.ok(Math.abs(all[i] - all[i - 1] - dur) < 1e-9, 'pas réguliers, aucun doublon');
-  // Après une suspension de 5 s : recalage, pas de rafale de notes
-  const late = planSteps(10, 5, dur, 0.1);
-  assert.ok(late.times.length <= 1 && late.times[0] >= 10);
-  assert.equal(swingOffset(1, 0.1, 0.1), 0.010000000000000002);
-  assert.equal(swingOffset(2, 0.1, 0.1), 0);
+  for (let i = 1; i < all.length; i++) assert.ok(Math.abs(all[i] - all[i - 1] - s.barSec) < 1e-9);
+  const late = planBars(30, 5, s.barSec, 0.6);
+  assert.ok(late.resync && late.times.length <= 1 && late.times[0] >= 30);
+  // Décors : chaque thème de circuit a son ambiance, le menu la sienne
+  assert.equal(moodFor('forest'), 'forest');
+  assert.equal(moodFor('river'), 'river');
+  assert.equal(moodFor('alpine', 'menu'), 'menu');
+  assert.equal(moodFor('inconnu'), 'meadow');
+  assert.deepEqual(MUSIC_PARTS.filter((p) => p !== 'verb').sort(), [...PART_ORDER].sort());
+});
+
+// Rendu complet de chaque morceau (une seule fois pour les tests suivants)
+const rendered = new Map();
+async function renderAll(mood) {
+  if (rendered.has(mood)) return rendered.get(mood);
+  const song = makeSong(mood);
+  const cells = new Map();
+  const parts = {};
+  let bytes = 0;
+  const t0 = performance.now();
+  for (const part of [...PART_ORDER, 'verb']) {
+    const res = await renderMusicPart(48000, { mood, part });
+    parts[part] = res;
+    for (const c of res.channels) bytes += c.length * 4;
+    if (part !== 'verb') for (const c of res.meta.cells) cells.set(c.id, { l: res.channels[c.ch], r: c.n > 1 ? res.channels[c.ch + 1] : null });
+  }
+  const out = { song, cells, parts, bytes, ms: performance.now() - t0 };
+  rendered.set(mood, out);
+  return out;
+}
+
+test('musique : rendu hors ligne propre (pas de valeur invalide, bords sans clic, mémoire et temps contenus)', async () => {
+  let total = 0;
+  for (const mood of [...RACE_MOODS, 'menu']) {
+    const { song, cells, parts, bytes, ms } = await renderAll(mood);
+    total += ms;
+    assert.ok(bytes <= 32 * 1048576, `${mood} : ${(bytes / 1048576).toFixed(1)} Mo de cellules`);
+    assert.ok(Math.abs(bytes - songBytes(song) - parts.verb.channels[0].length * 8) < 1024, 'estimation de la mémoire juste');
+    assert.ok(ms < 6000, `${mood} : rendu en ${ms.toFixed(0)} ms`);
+    assert.equal(cells.size, Object.keys(song.cells).length, `${mood} : toutes les cellules rendues`);
+    for (const [id, c] of cells) {
+      for (const ch of c.r ? [c.l, c.r] : [c.l]) {
+        let bad = 0;
+        let sum = 0;
+        for (let i = 0; i < ch.length; i++) {
+          if (!Number.isFinite(ch[i])) bad++;
+          sum += ch[i];
+        }
+        assert.equal(bad, 0, `${mood} ${id} : valeur invalide`);
+        assert.ok(peak(ch) <= 0.72, `${mood} ${id} : crête ${peak(ch)}`);
+        // La cellule démarre sur la barre en partant du silence (attaques adoucies) et finit à zéro
+        assert.ok(Math.abs(ch[0]) < 0.02, `${mood} ${id} : début ${ch[0]}`);
+        assert.ok(Math.abs(ch[ch.length - 1]) < 1e-4, `${mood} ${id} : fin ${ch[ch.length - 1]}`);
+        assert.ok(Math.abs(sum / ch.length) < 0.003, `${mood} ${id} : composante continue`);
+      }
+    }
+    // Réverbération : énergie unitaire, aucun grave (la basse reste nette)
+    const ir = parts.verb.channels[0];
+    let e = 0;
+    for (const x of ir) e += x * x;
+    assert.ok(Math.abs(e - 1) < 0.01);
+    assert.ok(bandEnergy(ir, 48000, 40, 100) < bandEnergy(ir, 48000, 500, 2000) * 0.1);
+  }
+  // Mémoire : le lecteur ne garde que ce qui tient dans le budget de l'iPad (un morceau de course et, s'il
+  // reste de la place, celui du menu) ; le plus gros morceau y tient largement, le menu est léger
+  const sizes = [...RACE_MOODS, 'menu'].map((m) => rendered.get(m).bytes);
+  assert.ok(Math.max(...sizes) < MUSIC_BUDGET * 0.82);
+  assert.ok(rendered.get('menu').bytes < 20 * 1048576, 'menu léger');
+  assert.ok(total < 20000, `rendu de tous les morceaux : ${total.toFixed(0)} ms`);
+});
+
+test('musique : mélange sans saturation ni aigus, sonie égale d’un niveau à l’autre, raccords invisibles', async () => {
+  const lufs = [];
+  for (const mood of [...RACE_MOODS, 'menu']) {
+    const { song, cells } = await renderAll(mood);
+    const bars = song.form.reduce((n, k) => n + song.sections[k].bars, 0) + 4;
+    const x = mood === 'menu' ? 1 : 3;
+    const m = mixdown(song, cells, { intensity: x, bars });
+    const pk = Math.max(peak(m.l), peak(m.r));
+    assert.ok(pk < 0.75, `${mood} : crête ${pk.toFixed(2)} (marge pour la réverbération)`);
+    // Peu d'énergie au-dessus de 6 kHz : rien de perçant pendant 40 minutes
+    const air = 10 * Math.log10(bandEnergy(m.l, MUSIC_SR, 6000, 14000, 24) / bandEnergy(m.l, MUSIC_SR, 200, 2000, 24));
+    assert.ok(air < -18, `${mood} : 6-14 kHz à ${air.toFixed(1)} dB du médium`);
+    // Raccords : aux barres de mesure (où les cellules s'enchaînent), pas de saut plus fort qu'ailleurs
+    let inside = 0;
+    for (let i = 1; i < m.length; i++) inside = Math.max(inside, Math.abs(m.l[i] - m.l[i - 1]));
+    let seam = 0;
+    for (let b = 1; b < bars; b++) for (let i = b * song.barLen - 32; i < b * song.barLen + 32; i++) seam = Math.max(seam, Math.abs(m.l[i] - m.l[i - 1]));
+    assert.ok(seam <= inside, `${mood} : raccord ${seam} contre ${inside}`);
+    let dc = 0;
+    for (let i = 0; i < m.length; i++) dc += m.l[i];
+    assert.ok(Math.abs(dc / m.length) < 1e-3);
+    if (mood !== 'menu') {
+      const mm = mixdown(song, cells, { intensity: 2.2, bars });
+      lufs.push([mood, loudness(mm.l, mm.r, MUSIC_SR, 0, mm.length)]);
+    }
+  }
+  const mean = lufs.reduce((n, [, l]) => n + l, 0) / lufs.length;
+  for (const [mood, l] of lufs) assert.ok(Math.abs(l - mean) < 1.5, `${mood} : ${l.toFixed(1)} LUFS (moyenne ${mean.toFixed(1)})`);
+  // Chaque couche est égalisée à sa sonie cible sur sa section de référence
+  const { song, cells } = await renderAll('coast');
+  const B = song.form.indexOf('B');
+  const lead = mixdown(song, cells, { intensity: 3, bars: 8, from: B, weights: { lead: 1 } });
+  assert.ok(Math.abs(loudness(lead.l, lead.r, MUSIC_SR, 0, lead.length) - LAYER_TARGET.lead) < 1, 'mélodie à sa sonie cible');
 });
 
 // --- Emplacements des sources ---
@@ -401,9 +546,9 @@ test('foule : voix à formants en stéréo, applaudissements', async () => {
 });
 
 test('effets : départ, objets, kayak, tous calculés sans valeur invalide ni saturation', async () => {
-  const quick = Object.keys(RENDERERS).filter((n) => !['crowd', 'applause', 'water', 'insects', 'lapping', 'impulse', 'noise', 'church', 'fanfare', 'sting', 'song'].includes(n));
+  const quick = Object.keys(RENDERERS).filter((n) => !['crowd', 'applause', 'water', 'insects', 'lapping', 'impulse', 'noise', 'church', 'fanfare', 'sting', 'song', 'music'].includes(n));
   for (const name of quick) {
-    const opts = name === 'drum' ? { kind: 'snare' } : name === 'note' ? { instrument: 'pluck', midi: 60 } : name === 'ui' ? { kind: 'confirm' } : {};
+    const opts = name === 'ui' ? { kind: 'confirm' } : {};
     const { channels, sampleRate } = await renderSound(name, SR, 1, opts);
     assert.ok([SR, 32000, 22050].includes(sampleRate), `${name} : ${sampleRate} Hz`);
     for (const c of channels) {
@@ -432,9 +577,9 @@ const relBand = (buf, sr, f0, f1) => 10 * Math.log10(bandEnergy(buf, sr, f0, f1,
 
 test('qualité : chaque effet commence et finit en douceur, sans composante continue', async () => {
   // Les nappes jouées en boucle (eau, pluie…) se raccordent sans fondu : elles sont exclues.
-  const names = Object.keys(RENDERERS).filter((n) => !['crowd', 'applause', 'impulse', 'noise', 'water', 'lapping', 'insects', 'crunch', 'rain'].includes(n));
+  const names = Object.keys(RENDERERS).filter((n) => !['crowd', 'applause', 'impulse', 'noise', 'water', 'lapping', 'insects', 'crunch', 'rain', 'music'].includes(n));
   for (const name of names) {
-    const opts = name === 'drum' ? { kind: 'snare' } : name === 'note' ? { instrument: 'synth', midi: 64 } : name === 'ui' ? { kind: 'tick' } : name === 'song' ? { species: 'robin' } : name === 'church' ? { nominal: 440, dur: 3 } : {};
+    const opts = name === 'ui' ? { kind: 'tick' } : name === 'song' ? { species: 'robin' } : name === 'church' ? { nominal: 440, dur: 3 } : {};
     const { channels } = await renderSound(name, SR, 3, opts);
     for (const c of channels) {
       const edge = Math.max(Math.abs(c[0]), Math.abs(c[c.length - 1]));
@@ -489,10 +634,10 @@ test('qualité : distance, musique posée, effets plus doux que les anciens rég
     prev = f;
   }
   assert.ok(distanceCutoff(10) > 15000 && distanceCutoff(60) < 8000);
-  // Effort normal : nappe, basse et arpège, sans batterie ; batterie entière au turbo
+  // Effort normal : nappe, claviers, basse et groove léger, sans la batterie ; batterie entière au turbo
   const x = musicIntensity({ time: 10, power: 250, speed: 9 });
-  assert.ok(layerLevel(x, 'kick') === 0 && layerLevel(x, 'arp') > 0.9, `intensité ${x}`);
-  assert.equal(layerLevel(musicIntensity({ time: 10, power: 50, turbo: true }), 'kick'), 1);
+  assert.ok(layerLevel(x, 'drums') === 0 && layerLevel(x, 'keys') > 0.9 && layerLevel(x, 'groove') > 0.5, `intensité ${x}`);
+  assert.equal(layerLevel(musicIntensity({ time: 10, power: 50, turbo: true }), 'drums'), 1);
   // Aucun effet amplifié, la musique se met en retrait sous les effets importants
   for (const [k, def] of Object.entries(SFX)) assert.ok((def.gain ?? 0.6) <= 1, `${k} : gain ${def.gain}`);
   assert.ok(SFX.pickup.duck && SFX.lap.duck && !SFX.gear.duck);

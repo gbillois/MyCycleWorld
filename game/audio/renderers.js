@@ -4,6 +4,7 @@ import * as V from './voices.js';
 import * as S from './sounds.js';
 import { birdSong } from './patterns.js';
 import { rng } from './random.js';
+import { renderMusicPart } from './music-render.js';
 
 const at32 = (data) => ({ sampleRate: 32000, data });
 
@@ -69,10 +70,8 @@ export const RENDERERS = {
   crash: (sr, r) => S.renderCrash(sr, r),
   squelch: (sr, r) => S.renderSquelch(sr, r),
   woodpecker: (sr, r) => at32(S.renderWoodpecker(32000, r)),
-  // Musique et réverbération
-  drum: (sr, r, o) => S.renderDrum(sr, r, o),
-  // Notes rendues à 32 kHz : timbre intact, un tiers de mémoire en moins (une note par hauteur et instrument)
-  note: (sr, r, o) => at32(S.renderNote(32000, r, o)),
+  // Musique : une couche d'un morceau (cellules à 32 kHz) ou sa réverbération ; réverbération des décors
+  music: (sr, r, o, env) => renderMusicPart(sr, o, env),
   impulse: (sr, r, o) => S.renderImpulse(sr, r, o.preset),
   noise: (sr, r, o) => at32(S.renderNoiseLoop(32000, r, o)),
 };
@@ -82,6 +81,7 @@ export async function renderSound(name, sr, seed, opts = {}, env = {}) {
   const fn = RENDERERS[name];
   if (!fn) throw new Error(`son inconnu : ${name}`);
   let out = await fn(sr, rng(seed), opts, env);
+  if (out && Array.isArray(out.channels)) return out; // déjà prêt (couches de la musique, avec leur description)
   let rate = sr;
   if (out && out.sampleRate && out.data) {
     rate = out.sampleRate;

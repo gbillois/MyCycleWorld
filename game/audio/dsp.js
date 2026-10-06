@@ -76,6 +76,20 @@ export function biquadCoefs(type, freq, q, sr, gainDb = 0) {
       b0 = 1 + alpha * A; b1 = -2 * c; b2 = 1 - alpha * A; a0 = 1 + alpha / A; a1 = -2 * c; a2 = 1 - alpha / A;
       break;
     }
+    case 'highshelf':
+    case 'lowshelf': {
+      // Étagères (RBJ) : q sert de pente (0,707 = pente douce)
+      const A = Math.pow(10, gainDb / 40);
+      const sq = 2 * Math.sqrt(A) * alpha;
+      const k = type === 'highshelf' ? -1 : 1;
+      b0 = A * ((A + 1) - k * (A - 1) * c + sq);
+      b1 = 2 * k * A * ((A - 1) - k * (A + 1) * c);
+      b2 = A * ((A + 1) - k * (A - 1) * c - sq);
+      a0 = (A + 1) + k * (A - 1) * c + sq;
+      a1 = -2 * k * ((A - 1) + k * (A + 1) * c);
+      a2 = (A + 1) + k * (A - 1) * c - sq;
+      break;
+    }
     default: // lowpass
       b0 = (1 - c) / 2; b1 = 1 - c; b2 = (1 - c) / 2; a0 = 1 + alpha; a1 = -2 * c; a2 = 1 - alpha;
   }
@@ -343,4 +357,22 @@ export function dominantFreq(buf, sr, start, len, fmin = 200, fmax = 10000, step
     }
   }
   return bf;
+}
+
+// Sonie intégrée approchée (LUFS, pondération K de l'UIT-R BS.1770, sans fenêtre de silence) d'un son
+// mono ou stéréo. Sert à égaliser la musique d'un niveau à l'autre et à vérifier le mélange.
+export function loudness(l, r = null, sr = 48000, start = 0, end = l.length) {
+  let total = 0;
+  for (const ch of r ? [l, r] : [l]) {
+    const shelf = new Filter('highshelf', 1681, 0.707, sr, 4);
+    const hp = new Filter('highpass', 38, 0.5, sr);
+    let s = 0;
+    for (let i = start; i < end; i++) {
+      const y = hp.process(shelf.process(ch[i]));
+      s += y * y;
+    }
+    total += s / Math.max(1, end - start);
+  }
+  if (!r) total *= 2; // mono joué au centre : même sonie qu'un stéréo identique des deux côtés
+  return -0.691 + 10 * Math.log10(total + 1e-20);
 }
