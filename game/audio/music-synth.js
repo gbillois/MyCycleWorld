@@ -468,6 +468,8 @@ export function renderMono(out, sr, events, p, r) {
   let vibPh = r() * TAU;
   const tailN = Math.round(tailOf(env.r) * sr);
   const start = events[0].t;
+  let f = mtof(events[0].m);
+  let dt = f / sr;
   const last = events[events.length - 1];
   const end = Math.min(len, last.t + last.n + tailN);
   let k = 0;
@@ -498,10 +500,13 @@ export function renderMono(out, sr, events, p, r) {
     lf = target + (lf - target) * glide;
     scoop *= 0.9985;
     const since = (i - onset) / sr;
-    const vd = vibDepth * clamp((since - 0.22) / 0.35, 0, 1);
     vibPh += vibRate;
-    const f = Math.pow(2, lf - scoop / 12 + (vd * Math.sin(vibPh)) / 1200);
-    const dt = f / sr;
+    // Hauteur recalculée toutes les 16 échantillons (glissés et vibrato restent lisses, 16 fois moins de calcul)
+    if (((i - start) & 15) === 0) {
+      const vd = vibDepth * clamp((since - 0.22) / 0.35, 0, 1);
+      f = Math.pow(2, lf - scoop / 12 + (vd * Math.sin(vibPh)) / 1200);
+      dt = f / sr;
+    }
     const lev = e.next();
     let y = 0;
     switch (kind) {

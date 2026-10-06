@@ -434,7 +434,7 @@ export function planBars(now, nextTime, barSec, lookahead = 0.5, maxBars = 4) {
 
 // Mémoire d'un morceau rendu (octets) : somme des cellules (32 kHz, Float32, mono ou stéréo).
 export const STEREO_LAYERS = { pad: false, keys: false, bass: false, groove: true, drums: true, lead: false };
-export const LAYER_TAILS = { pad: 1.0, keys: 0.5, bass: 0.3, groove: 0.5, drums: 0.8, lead: 0.6 };
+export const LAYER_TAILS = { pad: 0.9, keys: 0.42, bass: 0.25, groove: 0.5, drums: 0.8, lead: 0.6 };
 export function cellLength(song, cell) {
   return cell.bars * song.barLen + Math.round(LAYER_TAILS[cell.layer] * song.sr);
 }

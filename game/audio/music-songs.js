@@ -14,6 +14,7 @@
 //   batterie     : une ligne par instrument : x fort, X accent, o moyen, g fantôme, 1..9 nuance, '.' rien.
 //
 // Forme : intro (une fois), puis A B A2 B2 C en boucle (C, le pont sans batterie, est sauté si l'effort est fort).
+// Mélodies : contre-chant au second couplet (A2), thème au refrain (B), thème et seconde voix au dernier refrain (B2).
 // Couches (suivent l'intensité de la course) : pad (nappe), keys (claviers, guitare, arpèges), bass,
 // groove (grosse caisse et petites percussions), drums (caisse claire, charleston, breaks), lead (mélodie).
 
@@ -23,7 +24,7 @@ const RACE_SECTIONS = {
   intro: { prog: 'intro', keys: 'intro' },
   A: { prog: 'A', keys: 'A', bass: 'A', groove: 'A', drums: 'A', fill: true },
   B: { prog: 'B', keys: 'B', bass: 'B', groove: 'B', drums: 'B', lead: 'B', crash: true, fill: true },
-  A2: { prog: 'A', keys: 'A2', bass: 'A', groove: 'A', drums: 'A2', fill: true },
+  A2: { prog: 'A', keys: 'A2', bass: 'A', groove: 'A', drums: 'A2', lead: 'A2', fill: true },
   B2: { prog: 'B', keys: 'B2', bass: 'B', groove: 'B', drums: 'B', lead: 'B', harmony: true, crash: true, fill: true },
   C: { prog: 'C', keys: 'C', bass: 'C', groove: 'C', grooveFrom: 4, build: true },
 };
@@ -61,6 +62,7 @@ export const SONGS = {
       build: { snare: '3.3.4.4.55667789', riser: 'x...............' },
     },
     lead: {
+      A2: ['....e-f-1---e---', '2---1-g-e-------', '....f-1-3---1---', '1-2-1-f---------', '....e-f-1---e---', '2---1-g-e-------', '....f-2-1---f---', 'g-------e-------'],
       B: ['3--21-2-3---5---', '2-----g-e-------', '2--1g-1-2---3---', '1-----g-f-------', '5-6-5-3-1-2-3---', '4-----3-2---g---', '2-1-------------', '------..........'],
     },
     inst: {
@@ -84,7 +86,7 @@ export const SONGS = {
       intro: ['Isus2', 'Isus2', 'IVadd9', 'IVadd9'],
       A: ['vi7', 'IVadd9', 'I', 'V', 'vi7', 'IVadd9', 'I', 'Vsus4'],
       B: ['I', 'V', 'vi', 'iii', 'IV', 'I', 'IV', 'V'],
-      C: ['IVmaj7', 'IVmaj7', 'I', 'I', 'vi7', 'vi7', 'Vsus4', 'V'],
+      C: ['IVadd9', 'IVadd9', 'I', 'V', 'vi7', 'IVadd9', 'Vsus4', 'V'],
     },
     keys: {
       intro: [{ inst: 'celesta', p: '1---3---5---3---' }],
@@ -108,6 +110,7 @@ export const SONGS = {
       build: { taiko: '3...4...5...6.78', snare: '........3.4.5.67', riser: 'x...............' },
     },
     lead: {
+      A2: ['6-------5---3---', '4-----------....', '5-------3-------', '2-------5-------', '6-------8---6---', '8-------6---4---', '5-------3---1---', '2-----------....'],
       B: ['1-----5-8-------', '7---6---5-------', '6-----5-3-------', '3-----5-7-------', '8-------6---4---', '5---6-5-3-------', '4---6---8---6---', '7-----------....'],
     },
     inst: {
@@ -149,10 +152,11 @@ export const SONGS = {
       A: { clap: '....x.......x...', ohat: '..x...x...x...x.' },
       A2: { clap: '....x.......x...', ohat: '..x...x...x...x.', bongo: '.......o.....o.o' },
       B: { clap: '....x.......x...', ohat: '..x...x...x...x.', tamb: '....x.......x...' },
-      fill: { clap: '....x...x.x.xxxx', ohat: '..x...x.........' },
+      fill: { clap: '....x...x.x.xxxx', ohat: '..x...x.........', riser: 'x...............' },
       build: { snare: '3.3.4.4.5555667X', riser: 'x...............' },
     },
     lead: {
+      A2: ['........6--5--3-', '1-------........', '........3--2--1-', '2-------........', '........6--5--6-', '8-------6-------', '5--3--2-1-------', '2-------........'],
       B: ['3--3--5-6-5-3---', '2--2--3-2-------', '3--3--5-6-8-6---', '5-----3-1-------', '3--3--5-6-5-3---', '2--2--3-5---3-2-', '6--5--3-5-------', '3-----2-1-------'],
     },
     inst: {
@@ -176,14 +180,14 @@ export const SONGS = {
       intro: ['i9', 'i9', 'IV9', 'IV9'],
       A: ['i9', 'IV9', 'i9', 'IV9', 'bIIImaj7', 'IV', 'i9', 'v7'],
       B: ['bIIImaj7', 'IV', 'v7', 'i9', 'bIIImaj7', 'IV', 'bVII', 'i'],
-      C: ['i9', 'i9', 'bVIImaj7', 'bVIImaj7', 'bIIImaj7', 'bIIImaj7', 'IV', 'IV'],
+      C: ['i9', 'i9', 'IV9', 'IV9', 'bVIImaj7', 'bVIImaj7', 'bIIImaj7', 'IV'],
     },
     keys: {
       intro: [{ inst: 'ep', p: 'C---------------' }],
       A: [{ inst: 'ep', p: 'C-------..C-----' }, { inst: 'pluck', p: '1.3.2.3.1.3.2.3.' }],
       A2: [{ inst: 'ep', p: 'C-------..C-----' }, { inst: 'pluck', p: '1.3.2.3.1.3.2.3.' }],
       B: [{ inst: 'ep', p: 'C-------..C---C-' }, { inst: 'pluck', p: '1325132513251325' }],
-      B2: [{ inst: 'ep', p: 'C-------..C---C-' }, { inst: 'pluck', p: '1352135213521352' }],
+      B2: [{ inst: 'ep', p: 'C-------..C---C-' }, { inst: 'pluck', p: '1325132513251325' }],
       C: [{ inst: 'ep', p: 'C---------------' }],
     },
     bass: { A: 'R-------R---R---', B: 'R-----R-R---R-A-', C: 'R---------------' },
@@ -196,10 +200,11 @@ export const SONGS = {
       A: { snap: '....x.......x...', hat: 'o.g.o.g.o.g.o.g.' },
       A2: { snap: '....x.......x...', hat: 'o.goo.g.o.goo.g.' },
       B: { clap: '....x.......x...', hat: 'o.g.o.g.o.g.o.g.' },
-      fill: { clap: '....x.......x...', hat: 'o.g.o.g.o.g.....', tomM: '............o...', tomL: '..............o.' },
+      fill: { clap: '....x.......x...', hat: 'o.g.o.g.o.g.....', tomM: '............o...', tomL: '..............o.', riser: 'o...............' },
       build: { snare: '..2...3...4.5.67', riser: 'x...............' },
     },
     lead: {
+      A2: ['1-----------....', '........6---5---', '3-----------....', '........4---2---', '5-----3---------', '4-----6---------', '5---3---1-------', '5-----------....'],
       B: ['5-------3---2---', '1-----2-4-------', '5-------7---5---', '3-----2-1-------', '5---6-5-3-------', '4-----5-6-------', '7-------4---2---', '1-----------....'],
     },
     inst: {
@@ -243,10 +248,11 @@ export const SONGS = {
       A: { snare: '....x.......x...', hat: 'x.o.x.o.x.o.x.o.' },
       A2: { snare: '....x.......x.g.', hat: 'x.o.x.o.x.o.x.oo' },
       B: { snare: '....x.......x...', hat: 'x.o.x.o.x.o.x.o.', ohat: '..............x.' },
-      fill: { snare: '....x...........', hat: 'x.o.x.o.........', tomH: '........x.x.....', tomM: '............x.x.', tomL: '.............x.x' },
+      fill: { snare: '....x...........', hat: 'x.o.x.o.........', tomH: '........x.x.....', tomM: '............x.x.', tomL: '.............x.x', riser: 'o...............' },
       build: { snare: '4.4.4.4.55556789', riser: 'x...............' },
     },
     lead: {
+      A2: ['1-1-3-1-5-3-1---', 'g-g-2-g-4-2-g---', 'f-f-1-f-3-1-f---', 'g-g-2-g-4-2-4---', '1-1-3-1-5-3-1---', 'g-g-2-g-4-2-g---', 'f-f-1-f-3-1-3---', 'e---g---2---5---'],
       B: ['8-8-7-8---5-3---', '7-7-6-7---4-2---', '3-3-2-3---5-8---', '7-------5---3---', '8-8-7-8---5-3---', '7-7-6-7---4-2---', '5-5-4-5---7-9---', '8-----------....'],
     },
     inst: {
@@ -292,6 +298,7 @@ export const SONGS = {
       build: { snare: '...3...4..5.6789', riser: 'x...............' },
     },
     lead: {
+      A2: ['1--3--5-3-------', '4--6--8-6-------', '5--3--1-3-------', '4-------6-------', '3--5--7-5-------', '4--6--8-9-8-6---', '5-------3---1---', '7-----------....'],
       B: ['5--43-5-7---5---', '4--32-1-2---4---', '6--54-6-8---6---', '5-----4-3-------', '5--43-5-7---5---', '4--32-1-2---4---', '6--54-6-8---9---', '8-----------....'],
     },
     inst: {

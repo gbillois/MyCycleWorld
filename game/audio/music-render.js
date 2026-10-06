@@ -9,7 +9,7 @@ import { rng, hashSeed } from './random.js';
 
 // Sonie de chaque couche seule sur sa section de référence (LUFS) : fixe l'équilibre du mélange.
 // La mélodie passe devant, la batterie reste feutrée, la nappe et la basse portent l'ensemble.
-export const LAYER_TARGET = { pad: -25, keys: -25.5, bass: -25.5, groove: -28, drums: -28, lead: -23 };
+export const LAYER_TARGET = { pad: -25, keys: -25.5, bass: -25.5, groove: -27, drums: -27, lead: -23 };
 // Ordre de rendu : ce qui joue dès l'intro d'abord.
 export const PART_ORDER = ['pad', 'keys', 'bass', 'groove', 'lead', 'drums'];
 
