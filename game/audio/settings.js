@@ -14,7 +14,8 @@ export const BUS_LABELS = {
   ui: 'Interface',
 };
 
-export const DEFAULTS = Object.freeze({ master: 80, music: 50, ambience: 70, sfx: 80, ui: 60, muted: false });
+// windNoise : souffle du vent de la vitesse dans les oreilles (désactivé par défaut, réglable dans Options).
+export const DEFAULTS = Object.freeze({ master: 80, music: 50, ambience: 70, sfx: 80, ui: 60, muted: false, windNoise: false });
 
 const clampPercent = (v, fallback) => {
   const n = Number(v);
@@ -28,6 +29,7 @@ export function normalizeSettings(raw) {
   const out = {};
   for (const bus of BUSES) out[bus] = clampPercent(src[bus], DEFAULTS[bus]);
   out.muted = src.muted === true;
+  out.windNoise = src.windNoise === true;
   return out;
 }
 

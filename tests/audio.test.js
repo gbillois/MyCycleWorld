@@ -22,7 +22,7 @@ const memStorage = () => {
 // --- Réglages ---
 test('réglages : valeurs par défaut demandées', () => {
   assert.deepEqual(BUSES, ['master', 'music', 'ambience', 'sfx', 'ui']);
-  assert.deepEqual({ ...DEFAULTS }, { master: 80, music: 50, ambience: 70, sfx: 80, ui: 60, muted: false });
+  assert.deepEqual({ ...DEFAULTS }, { master: 80, music: 50, ambience: 70, sfx: 80, ui: 60, muted: false, windNoise: false });
   assert.deepEqual(loadSettings(memStorage()), { ...DEFAULTS });
 });
 

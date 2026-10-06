@@ -236,6 +236,13 @@ export class AudioEngine extends EventTarget {
     this.dispatchEvent(new Event('settings'));
   }
 
+  // Souffle du vent de la vitesse : activé ou non (Options > Son).
+  setWindNoise(on) {
+    this.settings = normalizeSettings({ ...this.settings, windNoise: !!on });
+    saveSettings(this.settings, this.storage);
+    this.dispatchEvent(new Event('settings'));
+  }
+
   setMuted(muted) {
     this.settings = normalizeSettings({ ...this.settings, muted: !!muted });
     saveSettings(this.settings, this.storage);

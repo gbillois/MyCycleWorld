@@ -1483,3 +1483,10 @@ body.touch #kayakHud .k-challenge { left: calc(74px + var(--sl)); } /* à droite
 .tap-ripple { position: fixed; z-index: 40; width: 64px; height: 64px; margin: -32px 0 0 -32px; border-radius: 50%; border: 3px solid rgba(255, 210, 63, 0.9); pointer-events: none; animation: tap-ripple 0.55s ease-out forwards; }
 @keyframes tap-ripple { from { transform: scale(0.3); opacity: 1; } to { transform: scale(1.4); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .tap-ripple { animation-duration: 0.2s; } }
+
+/* Réglages rapides dans l'écran Pause */
+.pause-options { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--border); text-align: left; max-height: 46vh; overflow-y: auto; }
+.pause-options .sec-title { margin: 8px 0 4px; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.pause-options .opt-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 6px 0; }
+.pause-options .opt-label { min-width: 110px; }
+.pause-options .vol { flex: 1; min-width: 160px; }

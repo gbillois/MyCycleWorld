@@ -6,6 +6,7 @@ export function bindVolumeControls(root, engine, preview = () => {}) {
   if (!root?.querySelectorAll) return () => {};
   const sliders = [...root.querySelectorAll('input[type="range"][data-vol]')];
   const mutes = [...root.querySelectorAll('[data-mute]')];
+  const winds = [...root.querySelectorAll('[data-windnoise]')];
   const note = root.querySelector('#soundNote');
   let lastPreview = 0;
 
@@ -17,11 +18,11 @@ export function bindVolumeControls(root, engine, preview = () => {}) {
       if (document.activeElement !== el || el.value !== String(s[bus])) el.value = String(s[bus]);
       el.style.setProperty('--fill', `${s[bus]}%`);
       el.setAttribute('aria-valuetext', percentLabel(s[bus]));
-      const out = root.querySelector(`[data-vol-out="${bus}"]`);
-      if (out) out.textContent = percentLabel(s[bus]);
+      for (const out of root.querySelectorAll(`[data-vol-out="${bus}"]`)) out.textContent = percentLabel(s[bus]);
       el.closest('.opt-row')?.classList.toggle('muted', s.muted);
     }
     for (const b of mutes) b.setAttribute('aria-pressed', String((b.dataset.mute === 'off') === s.muted));
+    for (const b of winds) b.setAttribute('aria-pressed', String((b.dataset.windnoise === 'on') === !!s.windNoise));
   };
 
   for (const el of sliders) {
@@ -46,9 +47,15 @@ export function bindVolumeControls(root, engine, preview = () => {}) {
       refresh();
     });
   }
+  for (const b of winds) {
+    b.addEventListener('click', () => {
+      engine.setWindNoise?.(b.dataset.windnoise === 'on');
+      refresh();
+    });
+  }
   engine.addEventListener('settings', refresh);
   if (!engine.available) {
-    for (const el of [...sliders, ...mutes]) el.disabled = true;
+    for (const el of [...sliders, ...mutes, ...winds]) el.disabled = true;
     if (note) {
       note.hidden = false;
       note.textContent = 'Le son n’est pas disponible dans ce navigateur.';

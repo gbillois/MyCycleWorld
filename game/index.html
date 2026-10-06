@@ -203,6 +203,13 @@
             </div>
             <span class="opt-hint" id="soundHint">Tout est synthétisé en direct : oiseaux, vent, vagues, cloches, foule et musique changent à chaque partie. Au clavier, la touche M coupe ou rétablit le son.</span>
           </div>
+          <div class="opt-row">
+            <span class="opt-label">Souffle du vent</span>
+            <div class="seg" role="group" aria-label="Souffle du vent de la vitesse">
+              <button type="button" class="seg-btn" data-windnoise="on">Activé</button>
+              <button type="button" class="seg-btn" data-windnoise="off">Désactivé</button>
+            </div>
+          </div>
           <div class="opt-row vol-row">
             <label class="opt-label" for="volMaster">Volume général</label>
             <div class="vol"><input type="range" id="volMaster" min="0" max="100" step="5" value="80" data-vol="master"><output data-vol-out="master" for="volMaster">80 %</output></div>
@@ -429,6 +436,44 @@
       <p class="muted">La course est arrêtée. Le home trainer repasse sur du plat.</p>
       <button class="btn play" id="resume"><span>Reprendre</span><span class="glyph"><span class="k-kbd">Entrée</span><span class="k-pad pad-a">A</span></span></button>
       <button class="btn" id="quit"><span>Quitter la course</span></button>
+      <!-- Réglages rapides sans quitter la course (mêmes réglages que dans Options) -->
+      <div class="pause-options" aria-label="Réglages">
+        <h3 class="sec-title">Son</h3>
+        <div class="opt-row">
+          <span class="opt-label">Son</span>
+          <div class="seg" role="group" aria-label="Son">
+            <button type="button" class="seg-btn" data-mute="on">Activé</button>
+            <button type="button" class="seg-btn" data-mute="off">Coupé</button>
+          </div>
+        </div>
+        <div class="opt-row">
+          <span class="opt-label">Souffle du vent</span>
+          <div class="seg" role="group" aria-label="Souffle du vent de la vitesse">
+            <button type="button" class="seg-btn" data-windnoise="on">Activé</button>
+            <button type="button" class="seg-btn" data-windnoise="off">Désactivé</button>
+          </div>
+        </div>
+        <div class="opt-row vol-row"><span class="opt-label">Général</span><div class="vol"><input type="range" min="0" max="100" step="5" value="80" data-vol="master" aria-label="Volume général"><output data-vol-out="master">80 %</output></div></div>
+        <div class="opt-row vol-row"><span class="opt-label">Musique</span><div class="vol"><input type="range" min="0" max="100" step="5" value="50" data-vol="music" aria-label="Musique"><output data-vol-out="music">50 %</output></div></div>
+        <div class="opt-row vol-row"><span class="opt-label">Ambiance</span><div class="vol"><input type="range" min="0" max="100" step="5" value="70" data-vol="ambience" aria-label="Ambiance"><output data-vol-out="ambience">70 %</output></div></div>
+        <div class="opt-row vol-row"><span class="opt-label">Effets</span><div class="vol"><input type="range" min="0" max="100" step="5" value="80" data-vol="sfx" aria-label="Effets"><output data-vol-out="sfx">80 %</output></div></div>
+        <h3 class="sec-title">Jeu</h3>
+        <div class="opt-row">
+          <span class="opt-label">Tapoter pour pédaler</span>
+          <div class="seg" role="group" aria-label="Tapoter pour pédaler">
+            <button type="button" class="seg-btn" data-tap="on">Activé</button>
+            <button type="button" class="seg-btn" data-tap="off">Désactivé</button>
+          </div>
+        </div>
+        <div class="opt-row">
+          <span class="opt-label">Direction</span>
+          <div class="seg" role="group" aria-label="Direction">
+            <button type="button" class="seg-btn" data-steer="auto">Selon le matériel</button>
+            <button type="button" class="seg-btn" data-steer="on">Auto</button>
+            <button type="button" class="seg-btn" data-steer="off">Manuelle</button>
+          </div>
+        </div>
+      </div>
       <div class="prompts mini" aria-hidden="true">
         <span class="prompt"><span class="glyph nav"><span class="k-kbd">↑↓</span><span class="k-pad dpad"><i></i></span></span>Choisir</span>
         <span class="prompt"><span class="glyph"><span class="k-kbd">Échap</span><span class="k-pad pad-b">B</span></span>Reprendre</span>

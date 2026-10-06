@@ -186,7 +186,7 @@ export class BikeSounds {
     T(this.mesh.frequency, Math.max(5, chainMeshRate(p.cadence)), 0.1);
     T(this.crank.frequency, Math.max(0.5, (p.cadence / 60) * 2), 0.2);
     // Vent : niveau en v², brillance avec la vitesse
-    const k = Math.min(1.3, p.speed / 14);
+    const k = Math.min(1.3, p.speed / 14) * (this.e.settings?.windNoise ? 1 : 0);
     T(g.wind.gain, k * k * TRIM.wind, 0.15);
     T(this.windLp.frequency, 250 + p.speed * 110, 0.2);
     T(g.whistle.gain, Math.max(0, k - 0.6) * TRIM.whistle, 0.2);

@@ -1166,7 +1166,7 @@ for (const btn of document.querySelectorAll('.seg-btn[data-tap]')) {
     tapEnabled = btn.dataset.tap === 'on';
     savePref(TAP_KEY, tapEnabled ? 'on' : 'off');
     tapDrive.reset();
-    for (const b of document.querySelectorAll('.seg-btn[data-tap]')) b.setAttribute('aria-pressed', String(b === btn));
+    for (const b of document.querySelectorAll('.seg-btn[data-tap]')) b.setAttribute('aria-pressed', String(b.dataset.tap === btn.dataset.tap)); // Options et Pause
   });
 }
 
@@ -1175,7 +1175,7 @@ for (const btn of document.querySelectorAll('.seg-btn[data-steer]')) {
   btn.addEventListener('click', () => {
     steerPref = btn.dataset.steer;
     savePref(STEER_KEY, steerPref);
-    for (const b of document.querySelectorAll('.seg-btn[data-steer]')) b.setAttribute('aria-pressed', String(b === btn));
+    for (const b of document.querySelectorAll('.seg-btn[data-steer]')) b.setAttribute('aria-pressed', String(b.dataset.steer === btn.dataset.steer)); // Options et Pause
   });
 }
 
