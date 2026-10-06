@@ -5,6 +5,8 @@ import { hashSeed } from './random.js';
 import { renderSound } from './renderers.js';
 
 const HEAVY = new Set(['crowd', 'applause', 'water', 'insects', 'impulse', 'noise', 'lapping', 'crunch', 'church', 'fanfare', 'sting']);
+// La musique a son propre travailleur : ses couches (une à deux secondes de calcul) ne retardent aucun effet.
+const MUSIC = new Set(['music']);
 
 const keyOf = (name, opts) => `${name}${opts && Object.keys(opts).length ? JSON.stringify(opts) : ''}`;
 
@@ -69,6 +71,11 @@ export class Bank {
     return p;
   }
 
+  // Résultat brut, non mis en cache ni converti : { sampleRate, channels, meta } (couches de la musique).
+  raw(name, opts = {}, prio = 1) {
+    return this.request(name, opts, hashSeed(keyOf(name, opts)), prio, true);
+  }
+
   // Variante neuve, non mise en cache (graine au hasard).
   fresh(name, opts = {}, prio = 0) {
     return this.request(name, opts, (Math.random() * 4294967296) >>> 0, prio);
@@ -97,10 +104,11 @@ export class Bank {
     return b;
   }
 
-  request(name, opts, seed, prio) {
+  request(name, opts, seed, prio, raw = false) {
     return new Promise((resolve, reject) => {
-      const lane = HEAVY.has(name) ? this.lanes.heavy : this.lanes.quick;
-      const job = { id: this.nextId++, name, opts, seed, prio, resolve, reject, t: performance.now() };
+      if (MUSIC.has(name) && !this.lanes.music) this.lanes.music = this.lane('music');
+      const lane = MUSIC.has(name) ? this.lanes.music : HEAVY.has(name) ? this.lanes.heavy : this.lanes.quick;
+      const job = { id: this.nextId++, name, opts, seed, prio, resolve, reject, raw, t: performance.now() };
       // Priorité : les sons urgents (interface, départ) passent devant les variantes d'ambiance.
       let i = lane.queue.length;
       while (i > 0 && lane.queue[i - 1].prio < prio) i--;
@@ -133,7 +141,11 @@ export class Bank {
     if (!job || job.id !== data.id) return;
     lane.busy = null;
     if (data.error) job.reject(new Error(data.error));
-    else {
+    else if (job.raw) {
+      this.stats.rendered++;
+      this.stats.ms += performance.now() - job.t;
+      job.resolve({ sampleRate: data.sampleRate, channels: data.channels, meta: data.meta });
+    } else {
       try {
         const ch = data.channels;
         const buf = this.ctx.createBuffer(ch.length, ch[0].length, data.sampleRate);

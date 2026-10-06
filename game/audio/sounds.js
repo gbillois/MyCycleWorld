@@ -1,4 +1,4 @@
-// Effets du jeu, sons d'interface, sons du kayak, batterie et instruments de la musique, réponses
+// Effets du jeu, sons d'interface, sons du kayak, instruments des jingles, réponses
 // impulsionnelles de réverbération. Tout est calculé ici dans des Float32Array (module pur, testé dans
 // tests/audio.test.js), puis joué comme échantillon par le moteur.
 // Esthétique : timbres ronds et chauds (sinus, triangles, dents de scie filtrées bas), attaques douces de
@@ -539,118 +539,7 @@ export function renderKayakSplash(sr, r) {
 }
 
 // =====================================================================
-// Batterie de la musique : kit feutré (grosse caisse ronde, caisse claire au balai, maracas douces).
-// Aucun oscillateur carré métallique : les cymbales sont du bruit filtré, attaque de 1 à 2 ms.
-// =====================================================================
-export function renderDrum(sr, r, { kind = 'kick' } = {}) {
-  let len;
-  let out;
-  const att = (ms) => Math.round((sr * ms) / 1000);
-  switch (kind) {
-    case 'kick': {
-      len = secs(sr, 0.45);
-      out = new Float32Array(len);
-      let ph = 0;
-      const a = att(1.5);
-      for (let i = 0; i < len; i++) {
-        const t = i / sr;
-        ph += (50 + 60 * Math.exp(-t / 0.03)) / sr;
-        out[i] = Math.sin(TAU * ph) * Math.exp(-t / 0.25) * rise(i, a);
-      }
-      break;
-    }
-    case 'snare': {
-      len = secs(sr, 0.3);
-      out = new Float32Array(len);
-      const bp = new Filter('bandpass', 1800, 0.7, sr);
-      const lp = new Filter('lowpass', 5000, 0.6, sr);
-      const a = att(1.5);
-      for (let i = 0; i < len; i++) {
-        const t = i / sr;
-        out[i] = (Math.sin(TAU * 190 * t) * Math.exp(-t / 0.04) * 0.5 + lp.process(bp.process(r() * 2 - 1)) * Math.exp(-t / 0.07) * 1.4) * rise(i, a);
-      }
-      break;
-    }
-    case 'clap': {
-      len = secs(sr, 0.3);
-      out = new Float32Array(len);
-      const bp = new Filter('bandpass', 1150, 1.1, sr);
-      const lp = new Filter('lowpass', 4000, 0.6, sr);
-      for (let i = 0; i < len; i++) {
-        const t = i / sr;
-        let e = 0;
-        for (const at of [0, 0.009, 0.019]) if (t >= at) e = Math.max(e, smoothstep(0, 0.0015, t - at) * Math.exp(-(t - at) / 0.006));
-        if (t >= 0.025) e = Math.max(e, 0.55 * Math.exp(-(t - 0.025) / 0.06));
-        out[i] = lp.process(bp.process(r() * 2 - 1)) * e * 2.5;
-      }
-      break;
-    }
-    case 'hat':
-    case 'openhat': {
-      // Charleston feutré : bruit filtré autour de 6,5 kHz, plafonné à 9 kHz
-      const tau = kind === 'hat' ? 0.018 : 0.09;
-      len = secs(sr, kind === 'hat' ? 0.1 : 0.4);
-      out = new Float32Array(len);
-      const bp = new Filter('bandpass', 6500, 1, sr);
-      const lp = new Filter('lowpass', 9000, 0.6, sr);
-      for (let i = 0; i < len; i++) {
-        const t = i / sr;
-        out[i] = lp.process(bp.process(r() * 2 - 1)) * smoothstep(0, 0.0015, t) * Math.exp(-t / tau);
-      }
-      break;
-    }
-    case 'shaker': {
-      len = secs(sr, 0.14);
-      out = new Float32Array(len);
-      const bp = new Filter('bandpass', 5500, 1.2, sr);
-      const lp = new Filter('lowpass', 8000, 0.6, sr);
-      for (let i = 0; i < len; i++) {
-        const t = i / sr;
-        out[i] = lp.process(bp.process(r() * 2 - 1)) * smoothstep(0, 0.015, t) * Math.exp(-t / 0.04);
-      }
-      break;
-    }
-    case 'rim': {
-      // Bloc de bois
-      len = secs(sr, 0.1);
-      out = new Float32Array(len);
-      const a = att(1);
-      for (let i = 0; i < len; i++) {
-        const t = i / sr;
-        out[i] = (Math.sin(TAU * 900 * t) + 0.4 * Math.sin(TAU * 1430 * t) * Math.exp(-t / 0.012)) * Math.exp(-t / 0.025) * rise(i, a);
-      }
-      break;
-    }
-    case 'conga': {
-      len = secs(sr, 0.35);
-      out = new Float32Array(len);
-      let ph = 0;
-      const bp = new Filter('bandpass', 1500, 1, sr);
-      const a = att(1.5);
-      for (let i = 0; i < len; i++) {
-        const t = i / sr;
-        ph += (300 + 30 * Math.exp(-t / 0.02)) / sr;
-        out[i] = (Math.sin(TAU * ph) * Math.exp(-t / 0.15) + bp.process(r() * 2 - 1) * Math.exp(-t / 0.008) * 0.3) * rise(i, a);
-      }
-      break;
-    }
-    default: {
-      // Balai sur caisse claire (musique du menu)
-      len = secs(sr, 0.25);
-      out = new Float32Array(len);
-      const lp = new Filter('lowpass', 3500, 0.7, sr);
-      const hp = new Filter('highpass', 800, 0.7, sr);
-      for (let i = 0; i < len; i++) {
-        const u = i / len;
-        out[i] = hp.process(lp.process(r() * 2 - 1)) * Math.sin(Math.PI * Math.min(1, u * 1.6)) ** 2;
-      }
-    }
-  }
-  return fadeEdges(normalize(dcBlock(out, sr), 0.85), sr, 2);
-}
-
-// =====================================================================
-// Notes d'instruments (une par hauteur, gardées en cache par le moteur), toutes adoucies dans l'aigu.
+// Notes d'instruments pour les jingles (la musique a ses propres instruments, music-synth.js), adoucies dans l'aigu.
 //   pluck : guitare nylon (Karplus-Strong) ; marimba ; bell : kalimba / célesta ;
 //   keys : piano électrique (synthèse FM douce) ; synth : pluck électronique feutré
 // =====================================================================

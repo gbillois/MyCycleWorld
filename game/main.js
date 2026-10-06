@@ -233,6 +233,17 @@ const audio = createAudio({ quality: QUALITY, touch: TOUCH });
 
 // Sons du mode kayak : abonnement aux événements de chaque nouvelle course, coups de pagaie au rythme du joueur.
 const kayakAudio = { race: null, half: 0, count: 0 };
+// Kayak : vitesse (eau sous la coque) et effort, temps et distance restante (intensité de la musique).
+const kayakPlayerOut = { speed: 0, power: 0, time: 0, remaining: Infinity };
+function kayakPlayerAudio() {
+  const r = kayak?.race;
+  const p = r?.player;
+  kayakPlayerOut.speed = p?.v ?? 0;
+  kayakPlayerOut.power = p?.power ?? 0;
+  kayakPlayerOut.time = r?.time ?? 0;
+  kayakPlayerOut.remaining = p && kayak?.river ? Math.max(0, kayak.river.finish - p.s) : Infinity;
+  return kayakPlayerOut;
+}
 function kayakSounds() {
   const r = kayak?.race;
   if (!r) return;
@@ -1737,7 +1748,7 @@ function frame(nowMs) {
   const dt = Math.min(0.1, Math.max(0, (nowMs - lastFrame) / 1000));
   lastFrame = nowMs;
   updateSim(dt);
-  audio.update({ dt, mode, state, camera, track, race, rowing: rowing?.race, gear: gears.gear, player: mode === 'kayak' ? { speed: kayak?.race?.player?.v ?? 0 } : undefined, weather: weather.audio });
+  audio.update({ dt, mode, state, camera, track, race, rowing: rowing?.race, gear: gears.gear, player: mode === 'kayak' ? kayakPlayerAudio() : undefined, weather: weather.audio });
   updateCrowds(dt, camera); // foules et figurants animés (people.js)
   helmetFx.group.visible = mode === 'bike';
   if (mode === 'kayak') {

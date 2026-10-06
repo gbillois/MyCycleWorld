@@ -6,7 +6,7 @@ self.onmessage = async (e) => {
   const { id, name, sr, seed, opts } = e.data;
   try {
     const res = await renderSound(name, sr, seed, opts, { yieldFn: null });
-    self.postMessage({ id, sampleRate: res.sampleRate, channels: res.channels }, res.channels.map((c) => c.buffer));
+    self.postMessage({ id, sampleRate: res.sampleRate, channels: res.channels, meta: res.meta }, res.channels.map((c) => c.buffer));
   } catch (err) {
     self.postMessage({ id, error: String(err && err.message ? err.message : err) });
   }

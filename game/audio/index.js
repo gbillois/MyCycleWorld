@@ -227,7 +227,12 @@ class GameAudio {
     }
     if (mode === 'row' && race) this.updateRow(dt, race, riding, state);
     else this.row.setActive(false);
-    if (mode === 'kayak' && info.player) this.hull.update(dt, state === 'race' ? info.player.speed || 0 : 0);
+    if (mode === 'kayak' && info.player) {
+      this.hull.update(dt, state === 'race' ? info.player.speed || 0 : 0);
+      // Musique du kayak : effort à la pagaie, vitesse, sprint final (même loi que le vélo et le rameur)
+      const k = info.player;
+      if (state === 'race') this.music.setIntensity(musicIntensity({ state, time: k.time ?? 10, power: k.power || 0, speed: (k.speed || 0) * 2.5, ref: 160, remaining: Number.isFinite(k.remaining) ? k.remaining * 2 : Infinity }));
+    }
     else if (this.hull.ready) this.hull.update(dt, 0);
 
     if (info.gear !== undefined) {
@@ -539,6 +544,7 @@ class GameAudio {
       bank: e.bank ? { ...e.bank.stats, cached: e.bank.cache.size, mb: +(([...e.bank.cache.values()].reduce((n, b) => n + b.length * b.numberOfChannels * 4, 0) + [...e.bank.pools.values()].reduce((n, p) => n + p.items.reduce((m, b) => m + b.length * b.numberOfChannels * 4, 0), 0)) / 1048576).toFixed(1) } : null,
       scene: this.sceneKey,
       music: this.music?.songId ?? null,
+      score: this.music?.debug() ?? null,
       settings: { ...e.settings },
     };
   }
