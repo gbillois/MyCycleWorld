@@ -13,6 +13,7 @@ import {
   Parts, PBR, sweep, keep, pbrLut, hash, shade, contrast, SKINS, B, BODY, bindPositions, bodyGeometry, bodyMaterial,
   makeBody, ik2, orient, defaultQuality, poseHeadGear, HairSwing,
 } from './figure.js';
+import { mtbBike, mtbKit } from './mtb-bike.js';
 
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
 const UP = V(0, 1, 0);
@@ -567,8 +568,12 @@ const smooth01 = (a, b, x) => {
 // Fenêtre douce : 0 avant a, 1 entre b et c, 0 après d
 const win = (t, a, b, c, d) => smooth01(a, b, t) * (1 - smooth01(c, d, t));
 
+// Géométrie du vélo transmise au VTT (mtb-bike.js), qui se monte aux mêmes points.
+const GEO = { BB, REAR, FRONT, HT_BOT, AXIS, ST_DIR, SADDLE, STEM_TOP, CLAMP, STEER_INV, WHEEL_R };
+
 export class DetailedRider {
-  constructor({ jersey = '#ff5a1f', bike = '#2b6cff', helmet = '#ffffff', name = '', quality = defaultQuality() } = {}) {
+  // style : 'road' (vélo de route) ou 'mtb' (VTT, tenue de VTT : circuit en forêt).
+  constructor({ jersey = '#ff5a1f', bike = '#2b6cff', helmet = '#ffffff', name = '', quality = defaultQuality(), style = 'road' } = {}) {
     const q = QS[quality] ? quality : 'high';
     this.quality = q;
     const g = new THREE.Group();
@@ -578,25 +583,27 @@ export class DetailedRider {
     this.seed = seed;
     const accent = helmet === '#ffffff' || helmet === jersey ? (bike === '#16181d' ? '#ffffff' : bike) : helmet;
     this.colors = { jersey, bike, helmet, accent };
+    const mtb = style === 'mtb' ? mtbBike(GEO, { bike, jersey, quality: q }) : null;
+    this.style = mtb ? 'mtb' : 'road';
 
     // Vélo (dans un groupe qui peut se balancer sous le coureur en danseuse)
     this.bike = new THREE.Group();
     g.add(this.bike);
     this.frameMat = frameMaterial(bike, accent, q);
-    this.frame = new THREE.Mesh(frameGeometry(bike, jersey, helmet, q), this.frameMat);
+    this.frame = new THREE.Mesh(mtb ? mtb.frame : frameGeometry(bike, jersey, helmet, q), this.frameMat);
     this.bike.add(this.frame);
     this.steer = new THREE.Group();
     this.steer.position.copy(HT_BOT);
     this.steer.quaternion.copy(STEER_Q);
     this.bike.add(this.steer);
-    this.steerMesh = new THREE.Mesh(steerGeometry(bike, accent, q), this.frameMat);
+    this.steerMesh = new THREE.Mesh(mtb ? mtb.steer : steerGeometry(bike, accent, q), this.frameMat);
     this.steer.add(this.steerMesh);
     const wMat = wheelMaterial(q);
     this.rearKind = seed % 3 === 1 ? 'disc' : 'spoke';
-    this.frontWheel = new THREE.Mesh(wheelGeometry('spoke', false, q), wMat);
+    this.frontWheel = new THREE.Mesh(mtb ? mtb.wheel(false) : wheelGeometry('spoke', false, q), wMat);
     this.frontWheel.position.copy(FRONT).applyMatrix4(STEER_INV);
     this.steer.add(this.frontWheel);
-    this.rearWheel = new THREE.Mesh(wheelGeometry(this.rearKind, true, q), wMat);
+    this.rearWheel = new THREE.Mesh(mtb ? mtb.wheel(true) : wheelGeometry(this.rearKind, true, q), wMat);
     this.rearWheel.position.copy(REAR);
     this.bike.add(this.rearWheel);
     this.crankset = new THREE.Mesh(crankGeometry(q), wMat);
@@ -616,6 +623,10 @@ export class DetailedRider {
     this.body = body.mesh;
     this.bones = body.bones;
     g.add(this.body);
+    if (mtb) {
+      this.kit = mtbKit(body.mesh, { helmet, jersey, quality: q }); // casque à visière et short ample
+      g.add(this.kit);
+    }
 
     // Ombre « pastille », utilisée seulement sans ombres portées
     const br = blobResources();
@@ -629,9 +640,10 @@ export class DetailedRider {
       g.add(this.label);
     }
     // Points d'appui des mains (poignets) dans le repère de la direction : cocottes, bas du cintre, haut du cintre
-    this.wristLocal = [-1, 1].map((s) => V(s * 0.198, CLAMP.y + 0.05, CLAMP.z + 0.035).applyMatrix4(STEER_INV));
-    this.dropLocal = [-1, 1].map((s) => DROP(s).applyMatrix4(STEER_INV));
-    this.topLocal = [-1, 1].map((s) => TOP(s).applyMatrix4(STEER_INV));
+    // (VTT : cintre plat, les mains restent sur les poignées)
+    this.wristLocal = mtb ? mtb.wrists : [-1, 1].map((s) => V(s * 0.198, CLAMP.y + 0.05, CLAMP.z + 0.035).applyMatrix4(STEER_INV));
+    this.dropLocal = mtb ? mtb.wrists : [-1, 1].map((s) => DROP(s).applyMatrix4(STEER_INV));
+    this.topLocal = mtb ? mtb.wrists : [-1, 1].map((s) => TOP(s).applyMatrix4(STEER_INV));
     this.standing = 0;
     this.crankAngle = 0;
     this.steerAngle = 0;
@@ -744,6 +756,7 @@ export class DetailedRider {
     const q = low ? 'low' : this.quality;
     const { jersey, bike, helmet, accent } = this.colors;
     this.body.geometry = bodyGeometry('cyclist', q);
+    if (this.style === 'mtb') return; // VTT : cadre, cintre et roues propres (mtb-bike.js), sans niveaux de détail
     this.frame.geometry = frameGeometry(bike, jersey, helmet, q);
     this.steerMesh.geometry = steerGeometry(bike, accent, q);
     this.crankset.geometry = crankGeometry(q);
@@ -753,7 +766,7 @@ export class DetailedRider {
 
   // Disque flou des rayons au-dessus de ~31 km/h
   updateWheels(blur) {
-    if (blur === this.blurOn) return;
+    if (blur === this.blurOn || this.style === 'mtb') return;
     this.blurOn = blur;
     const q = this.lod ? 'low' : this.quality;
     this.frontWheel.geometry = wheelGeometry(blur ? 'blur' : 'spoke', false, q);

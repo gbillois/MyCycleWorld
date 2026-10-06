@@ -21,6 +21,15 @@ const fmt = (v, digits = 0) => (v === null || v === undefined || !Number.isFinit
 const fmtGrade = (g) => `${g > 0.05 ? '+' : ''}${g.toFixed(1).replace('-0.0', '0.0')}`;
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
+// Revêtements du sentier de VTT (circuit en forêt).
+const TRAIL_BADGES = {
+  roots: '<span class="badge wood">Racines : ça secoue</span>',
+  rock: '<span class="badge sand">Pierrier : pédalage plus dur</span>',
+  gravel: '<span class="badge sand">Gravier</span>',
+  mud: '<span class="badge sand">Boue : ça colle !</span>',
+  creek: '<span class="badge draft">Gué : on traverse le ruisseau</span>',
+};
+
 // Zones de puissance (repères pour un FTP d'environ 200 W) : couleur du compteur de watts.
 const ZONES = [110, 150, 180, 210, 240];
 export const powerZone = (w) => (w === null || w === undefined || !Number.isFinite(w) || w < 1 ? 0 : 1 + ZONES.filter((z) => w >= z).length);
@@ -146,7 +155,7 @@ export class Hud {
     // Passerelle et sable en couleur, comme sur les cartes du menu.
     const t = this.track;
     const every = Math.max(1, Math.round(t.count / Math.max(1, this.path.pts.length - 1)));
-    const colors = { sand: '#f2cf7a', boardwalk: '#c08a55' };
+    const colors = { sand: '#f2cf7a', boardwalk: '#c08a55', roots: '#a0703f', rock: '#c9c3b6', gravel: '#e0d6bf', mud: '#7a5230', creek: '#5cc3ff' };
     for (let i = 1; i < pts.length; i++) {
       const col = colors[t.surf?.[Math.min(t.count, i * every)]];
       if (!col) continue;
@@ -280,9 +289,10 @@ export class Hud {
     if (d.autoSteer) badges.push('<span class="badge auto">🧭 Pilote auto</span>');
     if (d.gearAdvice === 'down') badges.push('<span class="badge grass">Trop dur : passe une vitesse plus petite (−)</span>');
     else if (d.gearAdvice === 'up') badges.push('<span class="badge draft">Tu mouilles : passe une vitesse plus grande (+)</span>');
-    if (d.offRoad) badges.push('<span class="badge grass">Dans l’herbe !</span>');
+    if (d.offRoad) badges.push(d.trail ? '<span class="badge grass">Hors du sentier : attention à la chute !</span>' : '<span class="badge grass">Dans l’herbe !</span>');
     else if (d.surface === 'sand') badges.push('<span class="badge sand">Sable : pédalage plus dur</span>');
-    else if (d.surface === 'boardwalk') badges.push('<span class="badge wood">Passerelle en bois</span>');
+    else if (d.surface === 'boardwalk') badges.push(`<span class="badge wood">${d.trail ? 'North Shore : passerelle en bois' : 'Passerelle en bois'}</span>`);
+    else if (TRAIL_BADGES[d.surface]) badges.push(TRAIL_BADGES[d.surface]);
     this.set('hEffects', badges.join(''), (html) => (e.hEffects.innerHTML = html));
     let hint = '';
     if (!d.keyboard) hint = '';

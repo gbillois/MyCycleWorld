@@ -63,6 +63,12 @@ export const RENDERERS = {
   // Météo : crépitement de pluie (boucle à 32 kHz) et tonnerre
   rain: (sr, r, o) => at32(S.renderRain(32000, r, o)),
   thunder: (sr, r, o) => at32(S.renderThunder(32000, r, o)),
+  // VTT
+  jumpChime: (sr, r) => S.renderJumpChime(sr, r),
+  land: (sr, r) => S.renderLand(sr, r),
+  crash: (sr, r) => S.renderCrash(sr, r),
+  squelch: (sr, r) => S.renderSquelch(sr, r),
+  woodpecker: (sr, r) => at32(S.renderWoodpecker(32000, r)),
   // Musique et réverbération
   drum: (sr, r, o) => S.renderDrum(sr, r, o),
   // Notes rendues à 32 kHz : timbre intact, un tiers de mémoire en moins (une note par hauteur et instrument)

@@ -47,6 +47,13 @@ export const SFX = {
   'sprint-fail': { r: 'sprintFail', gain: 0.8 },
   whirlpool: { r: 'whirlpool', o: (x) => ({ dur: Math.max(1, Math.min(6, Math.round(x.duration || 2.5))) }), gain: 0.8, wet: 0.3 },
   'kayak-splash': { r: 'kayakSplash', gain: 0.8, pool: true },
+  // VTT (circuit en forêt) : saut, saut réussi, réception, chute, boue
+  jump: { r: 'whoosh', o: { dir: 1, dur: 0.55 }, gain: 0.6 },
+  'jump-perfect': { r: 'jumpChime', gain: 0.7, wet: 0.2, duck: true },
+  land: { r: 'land', gain: 0.85, pool: true },
+  crash: { r: 'crash', gain: 0.9, priority: 3 },
+  mud: { r: 'squelch', gain: 0.65, pool: true },
+  woodpecker: { r: 'woodpecker', gain: 0.45, pool: true, bus: 'ambience', wet: 0.4 },
   // Nature, utilisables par d'autres modes
   cow: { r: 'cow', gain: 0.7, pool: true, bus: 'ambience' },
   sheep: { r: 'sheep', gain: 0.6, pool: true, bus: 'ambience' },

@@ -8,7 +8,7 @@ import { tyreParams, freewheelRate, isCoasting, chainMeshRate, breathing, PLANK_
 
 const TAU = Math.PI * 2;
 // Réglage du mélange (mesuré hors ligne, réglages par défaut : vélo à 32 km/h sur asphalte ≈ -28 LUFS en sortie)
-const TRIM = { hiss: 1.7, rumble: 0.95, crunch: 1, wood: 1.5, sand: 1.4, free: 0.65, chain: 0.23, wind: 0.375, windAir: 0.12, windRumble: 0.35, breath: 0.18, turbo: 0.26, plank: 0.55 };
+const TRIM = { hiss: 1.7, rumble: 0.95, crunch: 1, wood: 1.5, sand: 1.4, water: 1.2, free: 0.65, chain: 0.23, wind: 0.375, windAir: 0.12, windRumble: 0.35, breath: 0.18, turbo: 0.26, plank: 0.55 };
 
 const node = (c, type, f, q = 0.707) => biquad(c, type, f, q);
 function gain(c, v = 0) {
@@ -17,6 +17,7 @@ function gain(c, v = 0) {
   return g;
 }
 const NEED = [['noise', { color: 'pink', seconds: 6 }], ['noise', { color: 'brown', seconds: 6 }]];
+const WADE = { seconds: 4, rate: 260, fmin: 250, fmax: 1800, noise: 0.6, noiseLp: 2200 }; // eau brassée (gué)
 
 // =====================================================================
 // Vélo
@@ -33,7 +34,7 @@ export class BikeSounds {
   async build() {
     if (this.building) return this.building;
     const b = this.e.bank;
-    this.building = Promise.all([...NEED, ['crunch', { seconds: 2 }]].map(([n, o]) => b.load(n, o, 1))).then(() => this.make()).catch(() => {});
+    this.building = Promise.all([...NEED, ['crunch', { seconds: 2 }], ['water', WADE]].map(([n, o]) => b.load(n, o, 1))).then(() => this.make()).catch(() => {});
     for (const f of [170, 200, 230, 260]) b.load('tok', { f }).catch(() => {});
     b.pool('breath', {}, 3);
     return this.building;
@@ -66,6 +67,14 @@ export class BikeSounds {
     brown.connect(node(c, 'bandpass', 165, 2)).connect((g.wood = gain(c))).connect(out);
     // Sable : souffle mou, sans aigus
     pinkA.connect(node(c, 'bandpass', 650, 0.7)).connect(node(c, 'lowpass', 1800, 0.6)).connect((g.sand = gain(c))).connect(out);
+    // Gué et boue : eau brassée par les roues (boucle de bulles et d'éclaboussures)
+    const wade = c.createBufferSource();
+    wade.buffer = e.bank.get('water', WADE);
+    wade.loop = true;
+    wade.start();
+    this.sources.push(wade);
+    this.wadeSrc = wade;
+    wade.connect(node(c, 'highpass', 250, 0.6)).connect((g.water = gain(c))).connect(out);
     // Roue libre : train d'impulsions qui fait sonner deux filtres résonants (« tic-tic » feutré, assez grave)
     const N = 2048;
     const real = new Float32Array(N + 1);
@@ -123,7 +132,7 @@ export class BikeSounds {
     this.turboTone.start();
     // Couches intermittentes débranchées tant qu'elles se taisent : leurs filtres ne coûtent alors rien.
     this.gates = {};
-    for (const k of ['crunch', 'wood', 'sand', 'free', 'chain', 'turbo']) {
+    for (const k of ['crunch', 'wood', 'sand', 'water', 'free', 'chain', 'turbo']) {
       g[k].disconnect();
       this.gates[k] = { on: false, idle: 0, node: g[k] };
     }
@@ -192,6 +201,8 @@ export class BikeSounds {
     T(this.crunchSrc.playbackRate, tp.crunchRate, 0.2);
     T(g.wood.gain, tp.wood * TRIM.wood, 0.12);
     T(g.sand.gain, tp.sand * TRIM.sand, 0.15);
+    T(g.water.gain, tp.water * TRIM.water, 0.15);
+    T(this.wadeSrc.playbackRate, 0.8 + Math.min(0.7, p.speed / 10), 0.3);
     // Roue libre quand on arrête de pédaler
     const coast = isCoasting(p.cadence, p.power, p.speed);
     // Le train d'impulsions non normalisé donne des clics de hauteur ∝ 1/f : gain ∝ f pour des clics égaux
@@ -232,6 +243,7 @@ export class BikeSounds {
     gate('crunch', tp.crunch > 0.001 || p.slip);
     gate('wood', tp.wood > 0.001);
     gate('sand', tp.sand > 0.001);
+    gate('water', tp.water > 0.001);
     gate('free', coast);
     gate('chain', pedal > 0);
     gate('turbo', p.turbo);

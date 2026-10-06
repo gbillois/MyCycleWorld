@@ -2,13 +2,23 @@
 //   control  : points de passage du tracé (m), boucle fermée
 //   profile  : pente (%) selon la fraction du tour ; les descentes sont ajustées pour que la boucle se referme
 //   surfaces : revêtements particuliers [début, fin, type] (fractions du tour), le reste est en asphalte
-//   theme    : décor (meadow = prairie, alpine = montagne, coast = bord de mer)
+//              (ou baseSurface s'il est donné : la terre d'un sentier de VTT)
+//   theme    : décor (meadow = prairie, alpine = montagne, coast = bord de mer, forest = forêt, VTT)
+//   roadHalf : demi-largeur de la route (m, 4 par défaut ; un sentier de VTT est bien plus étroit)
+//   mtb      : règles du VTT (src/core/mtb.js) : sauts [fraction de la lèvre, hauteur (m), longueur de rampe (m)]
 
 export const SURFACES = {
   asphalt: { label: 'Asphalte', crr: 0.004, gradeExtra: 0 },
   boardwalk: { label: 'Passerelle en bois', crr: 0.006, gradeExtra: 0.2 },
   // Le sable freine beaucoup : en jeu (résistance au roulement) et dans les jambes (pente équivalente au trainer).
   sand: { label: 'Sable', crr: 0.03, gradeExtra: 2.6 },
+  // Sentier de VTT : terre tassée, racines, pierrier, gravier, boue et gué dans le ruisseau.
+  dirt: { label: 'Terre', crr: 0.009, gradeExtra: 0.4 },
+  roots: { label: 'Racines', crr: 0.014, gradeExtra: 1 },
+  rock: { label: 'Pierrier', crr: 0.022, gradeExtra: 1.8 },
+  gravel: { label: 'Gravier', crr: 0.012, gradeExtra: 0.8 },
+  mud: { label: 'Boue', crr: 0.032, gradeExtra: 2.8 },
+  creek: { label: 'Ruisseau', crr: 0.038, gradeExtra: 3 },
 };
 
 // Tracé décrit comme au volant, pour les routes de montagne pleines de lacets :
@@ -117,7 +127,52 @@ export const COURSES = {
   },
 };
 
-export const COURSE_ORDER = ['vallee', 'col', 'plage'];
+// Forêt des Crêtes : sentier de VTT tracé « au volant » (voir road()), quatre rangées reliées par des épingles,
+// remontée en lacets serrés sur le côté gauche, environ 1,6 km.
+COURSES.foret = {
+  id: 'foret',
+  name: 'Forêt des Crêtes',
+  tagline: 'Sentier de VTT : virages serrés, sauts, racines, pierrier et gué',
+  theme: 'forest',
+  laps: 3,
+  roadHalf: 2,
+  baseSurface: 'dirt',
+  control: road([0, 0], 0, [
+    // Départ, montée en S
+    45, [14, 40], 16, [14, -80], 16, [14, 40], 30, [11, -55], 12, [11, 55], 35,
+    // Épingle de la crête, puis descente : virages relevés et sauts sur les droites
+    [10, 90], 24, [10, 90], 35, [12, -60], 15, [12, 60], 42, [11, 60], 12, [11, -60], 25, [12, -50], 12, [12, 50], 40,
+    // Épingle à gauche, fond du vallon : gué dans le ruisseau puis pierrier
+    [10, -90], 24, [10, -90], 20, [10, -45], 10, [10, 45], 15, [12, 50], 15, [12, -50], 45, [12, -50], 15, [12, 50], 25,
+    [11, 55], 12, [11, -55], 32,
+    // Épingle à droite : boue, passerelle en bois (North Shore), gravier
+    [10, 90], 24, [10, 90], 40, [12, -45], 15, [12, 90], 15, [12, -45], 45, [12, 45], 15, [12, -45], 25, [11, -50], 12,
+    [11, 50], 35,
+    // Remontée en lacets serrés, dernier saut et arrivée
+    [12, 90], 20, [8, -90], 40, [8, 180], 40, [8, -180], 40, [8, 90], 33.2, [12, 90], 25, [12, -40], 14, [12, 40], 44,
+  ]),
+  profile: [
+    [0, 0], [0.03, 0], [0.06, 7], [0.12, 9], [0.14, 2], [0.17, 0], [0.19, -9], [0.33, -10.5], [0.36, -5], [0.39, -8],
+    [0.42, -5], [0.435, 0], [0.46, 0], [0.48, 2], [0.52, 4], [0.56, 3], [0.62, 2], [0.64, 0], [0.68, 0], [0.7, 5],
+    [0.76, 4], [0.79, 9], [0.92, 9], [0.93, -6], [0.955, -8], [0.97, 0], [1, 0],
+  ],
+  surfaces: [
+    [0.07, 0.1, 'roots'],
+    [0.438, 0.456, 'creek'],
+    [0.478, 0.506, 'rock'],
+    [0.578, 0.6, 'mud'],
+    [0.648, 0.672, 'boardwalk'],
+    [0.79, 0.81, 'roots'],
+    [0.87, 0.895, 'gravel'],
+  ],
+  mtb: {
+    // [fraction de la lèvre, hauteur (m), longueur de la rampe (m)]
+    jumps: [[0.188, 0.8, 5], [0.238, 0.9, 5.5], [0.323, 1, 6], [0.744, 0.75, 5], [0.947, 0.85, 5]],
+  },
+  features: { creek: { from: 0.438, to: 0.456 }, bridge: { from: 0.648, to: 0.672 } },
+};
+
+export const COURSE_ORDER = ['vallee', 'col', 'plage', 'foret'];
 
 export function courseById(id) {
   return COURSES[id] || COURSES.vallee;
@@ -126,5 +181,5 @@ export function courseById(id) {
 // Revêtement à une fraction u du tour (0..1).
 export function surfaceAtFraction(course, u) {
   for (const [a, b, type] of course.surfaces || []) if (u >= a && u < b) return type;
-  return 'asphalt';
+  return course.baseSurface || 'asphalt';
 }

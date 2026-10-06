@@ -109,9 +109,18 @@ export function soundSpots(track) {
     }
   }
 
+  // Forêt (VTT) : le ruisseau au gué et un peu en amont, des spectateurs à chaque saut.
+  const half = track.half ?? ROAD_HALF;
+  if (feats.creek) {
+    const sm = ((feats.creek.from + feats.creek.to) / 2) * L;
+    spots.creek = pt(track.frame(sm, 0), 0.2);
+    spots.creekFar = pt(track.frame(feats.creek.from * L - 8, half + 22), 0.5);
+  }
+  for (const [u] of course.mtb?.jumps || []) spots.crowds.push({ ...pt(track.frame(u * L + 3, half + 3), 1.5), s: u * L + 3, kind: 'climb' });
+
   // Spectateurs : derrière les barrières du départ, et le long des montées (comme sur le Tour).
-  spots.crowds.push({ ...pt(track.frame(-30, -(ROAD_HALF + 2.5)), 1.5), s: L - 30, kind: 'start' });
-  spots.crowds.push({ ...pt(track.frame(24, ROAD_HALF + 2.5), 1.5), s: 24, kind: 'start' });
+  spots.crowds.push({ ...pt(track.frame(-30, -(half + 2.5)), 1.5), s: L - 30, kind: 'start' });
+  spots.crowds.push({ ...pt(track.frame(24, half + 2.5), 1.5), s: 24, kind: 'start' });
   let runStart = null;
   let side = 1;
   for (let s = 0; s <= L; s += 10) {
@@ -122,7 +131,7 @@ export function soundSpots(track) {
       const n = Math.max(1, Math.round(len / 110));
       for (let k = 0; k < n; k++) {
         const sc = runStart + ((k + 0.5) / n) * len;
-        spots.crowds.push({ ...pt(track.frame(sc, side * (ROAD_HALF + 4)), 1.5), s: sc, kind: 'climb' });
+        spots.crowds.push({ ...pt(track.frame(sc, side * (half + 4)), 1.5), s: sc, kind: 'climb' });
         side = -side;
       }
       runStart = null;

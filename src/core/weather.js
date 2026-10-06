@@ -44,6 +44,8 @@ export const CLIMATES = {
   // Bassin d'aviron : lac abrité, vent faible à modéré, pas de pluie.
   lake: { rain: 0, wind: [0.5, 4], calm: 0.3, gust: 0.25, dir: null, spread: 0, veer: 0.2, cloud: 0.1, forecast: 'vent faible à modéré' },
   river: { rain: 0.2, wind: [0.5, 3], calm: 0.4, gust: 0.3, dir: null, spread: 0, veer: 0.2, cloud: 0.15, forecast: 'vent faible' },
+  // Forêt (VTT) : abritée du vent par les arbres, averses assez fréquentes (sentier boueux).
+  forest: { rain: 0.3, wind: [0.3, 2], calm: 0.5, gust: 0.2, dir: null, spread: 0, veer: 0.2, cloud: 0.2, forecast: 'abrité du vent, averses possibles' },
 };
 export const climateOf = (theme) => CLIMATES[theme] || CLIMATES.meadow;
 
@@ -71,7 +73,7 @@ function shower(r, t0, minDur, maxDur, minPeak) {
 
 /**
  * Tire la météo d'une course. Renvoie null en mode « Désactivée » (aucun effet, comportement d'origine).
- * mode : random | fair | rain | wind | off ; theme : meadow | alpine | coast | lake | river.
+ * mode : random | fair | rain | wind | off ; theme : meadow | alpine | coast | lake | river | forest.
  */
 export function rollWeather({ theme = 'meadow', mode = 'random', seed = 1 } = {}) {
   mode = weatherMode(mode);

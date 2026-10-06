@@ -13,8 +13,8 @@ const TAU = Math.PI * 2;
 
 // Niveau de chaque espèce (les petits passereaux portent moins loin que le coucou ou le chocard).
 const BIRD_GAIN = { blackbird: 0.42, greatTit: 0.3, chaffinch: 0.34, robin: 0.3, skylark: 0.24, swallow: 0.28, cuckoo: 0.45, chough: 0.36, marmot: 0.4, dipper: 0.3, reedWarbler: 0.3, coot: 0.38 };
-const SCENE_ANIMALS = { meadow: ['cow', 'sheep', 'horse', 'rooster', 'bee'], alpine: ['raptor'], coast: ['gull'], lake: ['duck'], river: [] };
-export const SCENE_REVERB = { meadow: 'meadow', alpine: 'alpine', coast: 'coast', lake: 'lake', river: 'river' };
+const SCENE_ANIMALS = { meadow: ['cow', 'sheep', 'horse', 'rooster', 'bee'], alpine: ['raptor'], coast: ['gull'], lake: ['duck'], river: [], forest: ['woodpecker'] };
+export const SCENE_REVERB = { meadow: 'meadow', alpine: 'alpine', coast: 'coast', lake: 'lake', river: 'river', forest: 'forest' };
 
 class Scene {
   constructor(engine, name, world, r) {
@@ -393,6 +393,30 @@ const SCENES = {
   },
 };
 
+// Forêt (circuit de VTT) : vent dans les feuilles, oiseaux du sous-bois, pic-vert, ruisseau près du gué.
+SCENES.forest = {
+  buffers: () => [['water', STREAM], ['insects', { kind: 'meadow', seconds: 8 }]],
+  build(s) {
+    s.wind({ level: 0.2, lo: 260, hi: 800 }); // à l'abri des arbres : vent assourdi
+    s.rustle(0.09, 2200); // feuillage qui frémit au-dessus
+    s.rustle(0.04, 4200);
+    s.bed('insects', { kind: 'meadow', seconds: 8 }, 0.035);
+    if (s.spots.creek) s.bed('water', STREAM, 1, { pos: s.spots.creek, ref: 9, rolloff: 1.1 });
+    if (s.spots.creekFar) s.bed('water', STREAM, 0.6, { pos: s.spots.creekFar, ref: 9, rolloff: 1.1, rate: 1.12 });
+  },
+  update(s, dt, info) {
+    if (s.clock('bird', 2.2).tick(dt, info.speed < 6 ? 1 : 0.75)) s.bird();
+    if (s.clock('woodpecker', 16, { min: 6 }).tick(dt)) {
+      const buf = s.e.bank.pool('woodpecker', {}, 3);
+      s.spawn(buf, { pos: s.around(range(s.r, 25, 80), range(s.r, 4, 12)), ref: 18, rolloff: 1, gain: range(s.r, 0.4, 0.7), wet: 0.45, radius: 200 });
+    }
+    if (s.clock('cuckoo', 45, { min: 20 }).tick(dt)) {
+      const buf = s.e.bank.pool('song', { species: 'cuckoo' }, 2);
+      s.spawn(buf, { pos: s.around(range(s.r, 120, 220), 10), ref: 60, rolloff: 1, gain: 0.45, wet: 0.55 });
+    }
+  },
+};
+
 const STREAM = { seconds: 6, rate: 320, fmin: 300, fmax: 2600, noise: 0.4, noiseLp: 1800 };
 const RAPIDS = { seconds: 6, rate: 650, fmin: 180, fmax: 3200, noise: 0.9, noiseLp: 2600 };
 
@@ -558,7 +582,7 @@ export class Ambience {
           const m = /^song\{"species":"(\w+)"\}$/.exec(k);
           if (m) return !birds.has(m[1]);
           const n = /^(\w+)/.exec(k)[1];
-          return ['cow', 'sheep', 'horse', 'rooster', 'bee', 'raptor', 'gull', 'duck'].includes(n) && !animals.has(n);
+          return ['cow', 'sheep', 'horse', 'rooster', 'bee', 'raptor', 'gull', 'duck', 'woodpecker'].includes(n) && !animals.has(n);
         });
       }, 3000);
     }

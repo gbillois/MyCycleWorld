@@ -636,7 +636,8 @@ export class Forest {
       const entry = {
         n, mats, cols, xz,
         close: make(sp.near, nearMat, sp.cast),
-        mid: make(sp.near, nearMat, false),
+        // Distance moyenne : géométrie allégée facultative (sp.mid), sinon la même que de près.
+        mid: make(sp.mid || sp.near, sp.mid ? sp.midMaterial || sp.material : nearMat, false),
         far: sp.impostor
           ? make(impostorGeometry(sp.impostor), (this.impostorMat ||= impostorMaterial()), false)
           : make(sp.far || sp.near, sp.material, false),
