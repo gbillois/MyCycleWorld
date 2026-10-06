@@ -130,6 +130,33 @@ struct TrainerFeed {
     private(set) var lastPacket: TimeInterval?
     private var updated: [String: TimeInterval] = [:]
     private var crank = CrankCadence()
+    private var strokeMark: (count: Int, time: TimeInterval)?
+    private var derivedStrokeRate: Double?
+
+    /// Cadence de coups de secours : certains rameurs (Skillrow notamment, vu par TrackMyIndoorWorkout)
+    /// n'envoient pas la cadence instantanée, ou l'envoient à 0. On prend la moyenne, sinon on la déduit
+    /// du compteur de coups.
+    mutating func strokeRate(_ d: BikeReading, now: TimeInterval) -> Double? {
+        if let count = d.strokeCount {
+            if let mark = strokeMark, count >= mark.count {
+                let dt = now - mark.time
+                if count > mark.count, dt >= 1.5 {
+                    let rate = Double(count - mark.count) / dt * 60
+                    derivedStrokeRate = derivedStrokeRate.map { $0 * 0.5 + rate * 0.5 } ?? rate
+                    strokeMark = (count, now)
+                } else if dt > 8 {
+                    derivedStrokeRate = 0 // plus aucun coup depuis 8 s
+                    strokeMark = (count, now)
+                }
+            } else {
+                strokeMark = (count, now)
+            }
+        }
+        if let s = d.strokeRate, s > 0 { return s }
+        if let a = d.avgStrokeRate, a > 0 { return a }
+        if let derived = derivedStrokeRate { return derived }
+        return d.strokeRate
+    }
 
     /// Paquet FTMS (vélo, elliptique ou rameur). Renvoie les changements de source, pour le journal.
     @discardableResult
@@ -149,7 +176,10 @@ struct TrainerFeed {
             set(\.stepRate, "stepRate", steps, "FTMS", now, &changes)
             set(\.cadence, "cadence", Double(steps) / 2, "FTMS", now, &changes)
         }
-        if let strokes = d.strokeRate {
+        if kind == .rower, let strokes = strokeRate(d, now: now) {
+            set(\.strokeRate, "strokeRate", strokes, "FTMS", now, &changes)
+            set(\.cadence, "cadence", strokes, "FTMS", now, &changes)
+        } else if let strokes = d.strokeRate {
             set(\.strokeRate, "strokeRate", strokes, "FTMS", now, &changes)
             set(\.cadence, "cadence", strokes, "FTMS", now, &changes)
         }

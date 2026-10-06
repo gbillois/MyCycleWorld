@@ -86,3 +86,13 @@ test('inspecteur BLE : liste de services saisie à la main, texte ASCII', async 
   assert.equal(asciiOf(Uint8Array.from([84, 71, 32, 49, 0])), 'TG 1');
   assert.equal(asciiOf(Uint8Array.from([1, 200])), null);
 });
+
+test('rameur : cadence de secours (moyenne, puis compteur de coups)', async () => {
+  const { Trainer } = await import('../src/ble/trainer.js');
+  const t = new Trainer({ requestDevice: async () => null });
+  t.onFtmsData({ strokeRate: 0, avgStrokeRate: 24, power: 150 }, 'rower');
+  assert.equal(t.data.strokeRate, 24);
+  const u = new Trainer({ requestDevice: async () => null });
+  [0, 2300, 4600, 6900].forEach((ms, i) => u.strokeRateFrom({ strokeCount: i }, ms));
+  assert.ok(Math.abs(u.strokeRateFrom({ strokeCount: 3 }, 6900) - 26) < 1.5);
+});

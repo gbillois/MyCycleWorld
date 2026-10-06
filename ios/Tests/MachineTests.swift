@@ -261,4 +261,23 @@ final class GATTTextTests: XCTestCase {
         XCTAssertNil(GATTText.ascii([]))
         XCTAssertEqual(GATTText.properties(read: true, write: false, writeWithoutResponse: false, notify: true, indicate: false), "read,notify")
     }
+
+    /// Rameur qui envoie une cadence à 0 (ou pas de cadence) : moyenne, sinon déduite du compteur de coups.
+    func testRowerStrokeRateFallbacks() {
+        var feed = TrainerFeed()
+        var avg = BikeReading()
+        avg.strokeRate = 0
+        avg.avgStrokeRate = 24
+        avg.power = 150
+        feed.ftms(avg, kind: .rower, now: 0)
+        XCTAssertEqual(feed.data.strokeRate, 24)
+        var counted = TrainerFeed()
+        for (i, t) in [0.0, 2.3, 4.6, 6.9].enumerated() {
+            var d = BikeReading()
+            d.strokeCount = i
+            d.power = 160
+            counted.ftms(d, kind: .rower, now: t)
+        }
+        XCTAssertEqual(counted.data.strokeRate ?? 0, 26, accuracy: 1.5)
+    }
 }

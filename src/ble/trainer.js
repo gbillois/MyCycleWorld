@@ -286,6 +286,8 @@ export class Trainer extends EventTarget {
   async setup() {
     this.kind = null;
     this.packets = 0;
+    this.strokeMark = null;
+    this.derivedStrokeRate = undefined;
     for (const k of Object.keys(this.data)) this.data[k] = null;
     this.sources = {};
     this.server = await connectGatt(this.device, SRC);
@@ -418,9 +420,11 @@ export class Trainer extends EventTarget {
       this.setValue('stepRate', d.stepRate, 'FTMS');
       this.setValue('cadence', d.stepRate / 2, 'FTMS');
     }
-    if (d.strokeRate !== undefined) {
-      this.setValue('strokeRate', d.strokeRate, 'FTMS');
-      this.setValue('cadence', d.strokeRate, 'FTMS');
+    // Cadence de coups de secours (Skillrow notamment) : moyenne, sinon déduite du compteur de coups.
+    const strokes = kind === 'rower' ? this.strokeRateFrom(d) : d.strokeRate;
+    if (strokes !== undefined) {
+      this.setValue('strokeRate', strokes, 'FTMS');
+      this.setValue('cadence', strokes, 'FTMS');
     }
     if (d.strokeCount !== undefined) this.setValue('strokeCount', d.strokeCount, 'FTMS');
     if (d.distance !== undefined) this.setValue('distance', d.distance, 'FTMS');
@@ -429,6 +433,27 @@ export class Trainer extends EventTarget {
     if (d.heartRate !== undefined && d.heartRate > 0) this.setValue('heartRate', d.heartRate, 'FTMS');
     if (d.resistance !== undefined) this.setValue('resistance', d.resistance, 'FTMS');
     this.emit('data', this.data);
+  }
+
+  strokeRateFrom(d, now = performance.now()) {
+    if (d.strokeCount !== undefined) {
+      const m = this.strokeMark;
+      if (m && d.strokeCount >= m.count) {
+        const dt = (now - m.time) / 1000;
+        if (d.strokeCount > m.count && dt >= 1.5) {
+          const rate = ((d.strokeCount - m.count) / dt) * 60;
+          this.derivedStrokeRate = this.derivedStrokeRate === undefined ? rate : this.derivedStrokeRate * 0.5 + rate * 0.5;
+          this.strokeMark = { count: d.strokeCount, time: now };
+        } else if (dt > 8) {
+          this.derivedStrokeRate = 0;
+          this.strokeMark = { count: d.strokeCount, time: now };
+        }
+      } else this.strokeMark = { count: d.strokeCount, time: now };
+    }
+    if (d.strokeRate > 0) return d.strokeRate;
+    if (d.avgStrokeRate > 0) return d.avgStrokeRate;
+    if (this.derivedStrokeRate !== undefined) return this.derivedStrokeRate;
+    return d.strokeRate;
   }
 
   onCpsData(d) {
