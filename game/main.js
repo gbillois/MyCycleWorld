@@ -326,6 +326,7 @@ function startRace() {
 function pause() {
   if (state !== 'race') return;
   state = 'paused';
+  lastSentGrade = null; // force l'envoi du plat, même si la dernière pente était presque nulle
   touch?.releaseAll();
   keys.clear();
   show('pause');
