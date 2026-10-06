@@ -60,6 +60,9 @@ private final class Connection {
 
 final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     private static let profileKey = "mycycleworld.hw"
+    /// Types mémorisés par machine (identifiant CoreBluetooth) : choisi à la main ou dernier détecté.
+    private static let chosenKindsKey = "mycycleworld.kind.chosen"
+    private static let seenKindsKey = "mycycleworld.kind.seen"
     static let pilotIdle = "Tester le pilotage"
 
     @Published private(set) var bluetoothState = "Bluetooth non démarré"
@@ -88,8 +91,12 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
     @Published private(set) var mode = "Simulation"
     /// Profil matériel (Zwift, Technogym, BLE standard) : filtre de la liste et textes de l'onglet Appareils.
     @Published private(set) var profile: HardwareProfile
-    /// Type de la machine connectée, d'après sa caractéristique de données.
+    /// Type de la machine connectée : celui choisi pour cette machine s'il y en a un, sinon celui détecté
+    /// d'après sa caractéristique de données (mémorisé par machine pour les connexions suivantes).
     @Published private(set) var machineKind: MachineKind?
+    /// Type détecté à la connexion, et type choisi à la main pour la machine connectée (nil = automatique).
+    @Published private(set) var detectedKind: MachineKind?
+    @Published private(set) var kindOverride: MachineKind?
     @Published private(set) var trainerServices: [String] = []
     @Published private(set) var trainerPackets = 0
     @Published private(set) var trainerLastPacket: Date?
@@ -117,6 +124,11 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
     private var lastResistanceLevel: Double?
     private var pilotResults: [UInt8] = []
     private var dataSampler = PacketSampler(first: 5, every: 200)
+    /// Caractéristiques hors standard : quelques paquets bruts de chacune, pour le journal.
+    private var otherSamplers: [String: PacketSampler] = [:]
+    /// Abonnement aux données de la machine : instant, et avertissement « aucune donnée » déjà donné.
+    private var subscribedAt: Date?
+    private var noDataWarned = false
     private var demoTick = 0
     private var demoDistance = 0.0
     private var requestScan = false
@@ -204,7 +216,14 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         if role == .heart, let old = heartID, old != id { disconnect(old) }
         c.cancelWrites(); c.seenUnknownTypes = []; c.deviceModel = nil; c.firmware = nil
         c.role = role; c.state = "Connexion…"; c.chars = [:]; c.buttons = []; c.handshakeSent = false; c.handshake = false
-        if role == .trainer { resetTrainer(); trainerID = id }
+        if role == .trainer {
+            resetTrainer(); trainerID = id
+            // Type mémorisé pour cette machine : connu du jeu dès la connexion.
+            kindOverride = savedKind(for: id, key: BluetoothStore.chosenKindsKey)
+            detectedKind = savedKind(for: id, key: BluetoothStore.seenKindsKey)
+            applyKind()
+            if let kind = machineKind { log("Type mémorisé pour cette machine : \(kind.label)\(kindOverride != nil ? " (choisi)" : "")") }
+        }
         if role == .heart { heartID = id; heartContact = nil; heart = nil; updateMetrics() }
         c.peripheral.delegate = self
         central?.connect(c.peripheral)
@@ -265,7 +284,7 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         let preferredZwift = services.contains(where: { $0.uuid == UUIDs.zwift2 }) ? UUIDs.zwift2 : UUIDs.zwift
         for service in services {
             if [UUIDs.zwift, UUIDs.zwift2].contains(service.uuid) && (c.role != .controller || service.uuid != preferredZwift) { continue }
-            if c.role == .trainer && !UUIDs.trainerServices.contains(service.uuid) { continue }
+            // Machine : tous les services, y compris propriétaires (Technogym) et capteurs vélo / course.
             peripheral.discoverCharacteristics(nil, for: service)
         }
         c.state = "Connecté"; refresh()
@@ -276,8 +295,11 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         for char in service.characteristics ?? [] {
             c.chars[char.uuid] = char
             let id = char.uuid.uuidString.uppercased()
-            let notify = c.role == .trainer ? ["2AD2", "2AD1", "2ACE", "2A63", "2ADA", "2AD9", "2A37"] : c.role == .heart ? ["2A37"] : [UUIDs.async.uuidString, UUIDs.tx.uuidString]
-            if notify.contains(id), char.properties.contains(.notify) || char.properties.contains(.indicate) { peripheral.setNotifyValue(true, for: char) }
+            let notify = c.role == .heart ? ["2A37"] : [UUIDs.async.uuidString, UUIDs.tx.uuidString]
+            let canNotify = char.properties.contains(.notify) || char.properties.contains(.indicate)
+            // Machine : abonnement à tout ce qui se notifie (données FTMS, capteurs, services propriétaires) :
+            // certaines consoles n'envoient leurs mesures que sur une partie de ces caractéristiques.
+            if canNotify, c.role == .trainer || notify.contains(id) { peripheral.setNotifyValue(true, for: char) }
             if ["2ACC", "2AD6", "2AD8", "2A19", "2A24", "2A26", "2A29"].contains(id), char.properties.contains(.read) { peripheral.readValue(for: char) }
         }
         if c.role == .controller, [UUIDs.zwift, UUIDs.zwift2].contains(service.uuid),
@@ -287,10 +309,12 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         tryHandshake(c)
         if c.role == .trainer && peripheral.identifier == trainerID {
             let kind = MachineKind.detect(characteristics: Set(c.chars.keys.map { $0.uuidString.uppercased() }))
-            if kind != machineKind {
-                machineKind = kind
-                if let kind { log("Type de machine : \(kind.label)\(kind == .power ? " (Cycling Power)" : " (FTMS)")") }
-                if kind == .treadmill { log("Tapis de course FTMS : non utilisable dans le jeu (pas de puissance).") }
+            if kind != detectedKind, let kind {
+                detectedKind = kind
+                log("Type de machine détecté : \(kind.label)\(kind == .power ? " (Cycling Power)" : " (FTMS)")")
+                if kind == .treadmill { log("Tapis de course : puissance estimée depuis la vitesse et la pente.") }
+                remember(kind, for: peripheral.identifier, key: BluetoothStore.seenKindsKey)
+                applyKind()
             }
             if service.uuid == UUIDs.ftms, c.chars[UUIDs.controlPoint] == nil {
                 controlStatus = "Machine connectée en lecture seule (pas de Control Point FTMS)."
@@ -308,6 +332,9 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         }
         if peripheral.identifier == trainerID && c.role == .trainer {
             log("Abonné : \(GATTText.name(characteristic.uuid.uuidString))")
+            if ["2AD2", "2AD1", "2ACE", "2ACD", "2A63", "2A53"].contains(characteristic.uuid.uuidString.uppercased()), subscribedAt == nil {
+                subscribedAt = Date()
+            }
         }
         if peripheral.identifier == trainerID && characteristic.uuid == UUIDs.controlPoint {
             controlReady = characteristic.isNotifying && characteristic.properties.contains(.write)
@@ -384,16 +411,22 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
             }
             guard peripheral.identifier == trainerID else { return }
             switch id {
-            case "2AD2", "2AD1", "2ACE":
+            case "2AD2", "2AD1", "2ACE", "2ACD":
                 if dataSampler.sample() { log("\(GATTText.plainName(id)) : \(GATTText.hex(b))") }
                 let kind: MachineKind
                 let d: BikeReading
                 switch id {
                 case "2AD1": kind = .rower; d = try BLEProtocol.rower(b)
                 case "2ACE": kind = .cross; d = try BLEProtocol.crossTrainer(b)
+                case "2ACD": kind = .treadmill; d = try BLEProtocol.treadmill(b)
                 default: kind = .bike; d = try BLEProtocol.indoorBike(b)
                 }
                 for change in feed.ftms(d, kind: kind, now: now.timeIntervalSinceReferenceDate) { log(change) }
+                packetReceived(now)
+            case "2A53":
+                if dataSampler.sample() { log("Running Speed and Cadence : \(GATTText.hex(b))") }
+                let d = try BLEProtocol.runningSpeed(b)
+                for change in feed.runningSpeed(speed: d.speed, cadence: d.cadence, now: now.timeIntervalSinceReferenceDate) { log(change) }
                 packetReceived(now)
             case "2A63":
                 if dataSampler.sample() { log("Cycling Power : \(GATTText.hex(b))") }
@@ -431,7 +464,13 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
                         controlStatus = "Trainer arrêté ou contrôle perdu. Reprends le contrôle manuellement."
                     }
                 }
-            default: break
+            default:
+                // Caractéristique hors standard (service propriétaire, capteur de vitesse et cadence…) :
+                // quelques paquets bruts dans le journal pour comprendre une machine qui n'envoie rien en FTMS.
+                guard !["2A19", "2A24", "2A26", "2A29", "2A37"].contains(id) else { break }
+                var sampler = otherSamplers[id] ?? PacketSampler(first: 4, every: 500)
+                if sampler.sample() { log("Données \(GATTText.name(characteristic.uuid.uuidString)) : \(GATTText.hex(b))") }
+                otherSamplers[id] = sampler
             }
         } catch { log("Paquet \(GATTText.name(id)) ignoré : tronqué ou invalide (\(b.count) octets : \(GATTText.hex(b))).") }
     }
@@ -679,12 +718,40 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         }
     }
 
+    /// Type choisi à la main pour la machine connectée (nil = automatique), mémorisé pour cette machine.
+    func setKindOverride(_ kind: MachineKind?) {
+        guard let id = trainerID else { return }
+        kindOverride = kind
+        remember(kind, for: id, key: BluetoothStore.chosenKindsKey)
+        log(kind.map { "Type de machine choisi : \($0.label) (mémorisé pour cette machine)" } ?? "Type de machine : automatique")
+        applyKind()
+    }
+    private func remember(_ kind: MachineKind?, for id: UUID, key: String) {
+        var saved = UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
+        saved[id.uuidString] = kind?.rawValue
+        UserDefaults.standard.set(saved, forKey: key)
+    }
+    private func savedKind(for id: UUID, key: String) -> MachineKind? {
+        let saved = UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
+        return saved[id.uuidString].flatMap(MachineKind.init(rawValue:))
+    }
+    /// Type utilisé par le jeu et la résistance : choisi, sinon détecté.
+    private func applyKind() {
+        let kind = kindOverride ?? detectedKind
+        if kind != machineKind { machineKind = kind }
+    }
+    /// Type de la machine (choisi, sinon dernier détecté) avant même la découverte des services.
+    func rememberedKind(for id: UUID) -> MachineKind? {
+        savedKind(for: id, key: BluetoothStore.chosenKindsKey) ?? savedKind(for: id, key: BluetoothStore.seenKindsKey)
+    }
+
     private func fail(_ c: Connection, _ message: String) { log("\(c.name) : \(message)"); disconnect(c.peripheral.identifier) }
     private func resetTrainer() {
         trainerID = nil; queue.clear(); commandTimer?.invalidate(); controlled = false; controlReady = false; readOnly = false
         simulationSupported = false; ergSupported = false; resistanceSupported = false
         feed = TrainerFeed(); dataSampler = PacketSampler(first: 5, every: 200)
-        machineKind = nil; trainerServices = []; trainerPackets = 0; trainerLastPacket = nil
+        machineKind = nil; detectedKind = nil; kindOverride = nil; trainerServices = []; trainerPackets = 0; trainerLastPacket = nil
+        otherSamplers = [:]; subscribedAt = nil; noDataWarned = false
         gradeResistance.reset(); encoder = ResistanceEncoder(); lastSent = nil; lastResistanceLevel = nil
         if pilotRunning { pilotTimer?.invalidate(); pilotRunning = false; pilotStatus = BluetoothStore.pilotIdle }
         if heartID == nil { heart = nil; heartContact = nil }
@@ -733,6 +800,11 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         } else {
             let now = Date()
             var changed = feed.expire(now: now.timeIntervalSinceReferenceDate)
+            if let at = subscribedAt, !noDataWarned, trainerPackets == 0, now.timeIntervalSince(at) > 8 {
+                noDataWarned = true
+                log("Connecté mais aucune donnée reçue depuis 8 s. Sur une machine Technogym, démarre une séance sur la console (Start, Quick Start ou Entraînement libre) puis pédale ou marche : la console n'envoie ses mesures que pendant un exercice. Si rien n'arrive, envoie ce journal.")
+                controlStatus = "Aucune donnée : démarre une séance sur la console de la machine."
+            }
             if let lastHeart, now.timeIntervalSince(lastHeart) > 5, heart != nil { heart = nil; heartContact = nil; changed = true }
             if changed { updateMetrics() }
         }

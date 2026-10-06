@@ -289,3 +289,42 @@ final class GATTTextTests: XCTestCase {
         XCTAssertEqual(counted.data.strokeRate ?? 0, 26, accuracy: 1.5)
     }
 }
+
+final class TreadmillTests: XCTestCase {
+    func testTreadmillData() throws {
+        // Drapeaux : distance (bit 2) et pente (bit 3) ; vitesse 10,50 km/h, 1 234 m, pente 2,0 %.
+        let d = try BLEProtocol.treadmill([0x0C, 0x00, 0x1A, 0x04, 0xD2, 0x04, 0x00, 0x14, 0x00, 0x0B, 0x00])
+        XCTAssertEqual(d.speed, 10.5)
+        XCTAssertEqual(d.distance, 1234)
+        XCTAssertEqual(d.inclination, 2)
+        XCTAssertNil(d.power)
+    }
+
+    func testRunningPowerEstimate() {
+        XCTAssertEqual(BLEProtocol.runningPower(speedKmh: 0), 0)
+        let flat = BLEProtocol.runningPower(speedKmh: 10)
+        XCTAssertEqual(flat, 216.7, accuracy: 1)
+        XCTAssertGreaterThan(BLEProtocol.runningPower(speedKmh: 10, grade: 5), flat)
+    }
+
+    func testFeedEstimatesTreadmillPowerAndCadence() throws {
+        var feed = TrainerFeed()
+        let d = try BLEProtocol.treadmill([0x00, 0x00, 0x1A, 0x04])
+        feed.ftms(d, kind: .treadmill, now: 1)
+        XCTAssertEqual(feed.data.speed, 10.5)
+        XCTAssertNotNil(feed.data.power)
+        XCTAssertGreaterThan(feed.data.power ?? 0, 150)
+        XCTAssertGreaterThan(feed.data.cadence ?? 0, 70)
+    }
+
+    func testRunningSpeedSensor() throws {
+        // RSC : vitesse 3,0 m/s (768/256), cadence 170 pas/min.
+        let r = try BLEProtocol.runningSpeed([0x00, 0x00, 0x03, 170])
+        XCTAssertEqual(r.speed, 10.8, accuracy: 0.01)
+        XCTAssertEqual(r.cadence, 170)
+        var feed = TrainerFeed()
+        feed.runningSpeed(speed: r.speed, cadence: r.cadence, now: 1)
+        XCTAssertEqual(feed.data.cadence, 85)
+        XCTAssertNotNil(feed.data.power)
+    }
+}

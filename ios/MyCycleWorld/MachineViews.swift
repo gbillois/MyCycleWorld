@@ -32,6 +32,15 @@ struct ConnectionTestSection: View {
                 }
                 .padding(.vertical, 4)
             }
+            if store.trainerRow != nil {
+                // Type de la machine : automatique (détecté) ou choisi, mémorisé pour cette machine.
+                Picker("Type de machine", selection: Binding(get: { store.kindOverride }, set: { store.setKindOverride($0) })) {
+                    Text(autoKindLabel).tag(MachineKind?.none)
+                    ForEach([MachineKind.bike, .cross, .rower, .treadmill], id: \.self) { kind in
+                        Text(kind.label).tag(Optional(kind))
+                    }
+                }
+            }
             Button { store.testPilot() } label: {
                 Label(store.pilotStatus, systemImage: "slider.horizontal.3")
             }
@@ -53,6 +62,12 @@ struct ConnectionTestSection: View {
         }
     }
 
+    /// « Automatique (Vélo) » : type détecté entre parenthèses.
+    private var autoKindLabel: String {
+        guard let kind = store.detectedKind else { return "Automatique" }
+        return "Automatique (" + kind.label + ")"
+    }
+
     private func rows(now: Date) -> [TestRow] {
         let name: String
         if let trainer = store.trainerRow {
@@ -65,7 +80,8 @@ struct ConnectionTestSection: View {
         var rows = [TestRow(label: "Machine", value: name)]
         rows.append(TestRow(label: "Connexion", value: "connectée", tone: .ok))
         if let kind = store.machineKind {
-            rows.append(TestRow(label: "Type", value: kind.label + (kind == .power ? " (Cycling Power)" : " (FTMS)"), tone: kind == .treadmill ? .bad : .ok))
+            let how = store.kindOverride != nil ? " (choisi)" : kind == .power ? " (Cycling Power)" : " (FTMS)"
+            rows.append(TestRow(label: "Type", value: kind.label + how + (kind == .treadmill ? " · puissance estimée" : ""), tone: .ok))
         } else {
             rows.append(TestRow(label: "Type", value: "inconnu (aucune donnée FTMS ni puissance)", tone: .bad))
         }
@@ -74,7 +90,7 @@ struct ConnectionTestSection: View {
             let age = max(0, now.timeIntervalSince(last))
             rows.append(TestRow(label: "Données", value: "\(store.trainerPackets) paquets, dernier il y a \(MachineText.age(age))", tone: age < 3 ? .ok : .bad))
         } else {
-            rows.append(TestRow(label: "Données", value: "aucune pour l’instant : démarre une séance ou tire la poignée", tone: .bad))
+            rows.append(TestRow(label: "Données", value: "aucune pour l’instant : démarre une séance sur la console (Start), puis pédale, marche ou tire la poignée", tone: .bad))
         }
         rows.append(TestRow(label: "Mesures", value: MachineText.measures(store.metrics)))
         rows.append(pilotRow)

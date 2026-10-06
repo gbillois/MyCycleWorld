@@ -169,6 +169,12 @@ struct TrainerFeed {
         if power == nil, kind == .rower, let pace = d.pace, pace > 0 {
             power = Int(BLEProtocol.rowerPower(pace500: Double(pace)).rounded())
         }
+        // Tapis de course : pas de puissance publiée, on l'estime depuis la vitesse et la pente ;
+        // cadence équivalente (pas/min ÷ 2) pour animer le coureur.
+        if kind == .treadmill, let v = d.speed {
+            if power == nil { power = Int(BLEProtocol.runningPower(speedKmh: v, grade: d.inclination ?? 0).rounded()) }
+            if d.cadence == nil, d.stepRate == nil { set(\.cadence, "cadence", v > 0.5 ? (150 + v * 2) / 2 : 0, "FTMS", now, &changes) }
+        }
         set(\.power, "power", power, "FTMS", now, &changes)
         set(\.cadence, "cadence", d.cadence, "FTMS", now, &changes)
         // Elliptique : une révolution = deux pas ; rameur : la « cadence » est la cadence de coups.
@@ -189,6 +195,19 @@ struct TrainerFeed {
         set(\.speed, "speed", d.speed, "FTMS", now, &changes)
         if let hr = d.heartRate, hr > 0 { set(\.heartRate, "heartRate", hr, "FTMS", now, &changes) }
         set(\.resistance, "resistance", d.resistance, "FTMS", now, &changes)
+        return changes
+    }
+
+    /// Capteur de course (RSC) : vitesse et cadence de pas, seulement si FTMS ne les donne pas.
+    @discardableResult
+    mutating func runningSpeed(speed: Double, cadence: Int, now: TimeInterval) -> [String] {
+        packets += 1
+        lastPacket = now
+        var changes: [String] = []
+        set(\.speed, "speed", speed, "RSC", now, &changes)
+        if sources["power"] != "FTMS" { set(\.power, "power", Int(BLEProtocol.runningPower(speedKmh: speed).rounded()), "RSC", now, &changes) }
+        if cadence > 0 { set(\.stepRate, "stepRate", cadence, "RSC", now, &changes) }
+        set(\.cadence, "cadence", speed > 0.5 ? Double(cadence > 0 ? cadence : Int(150 + speed * 2)) / 2 : 0, "RSC", now, &changes)
         return changes
     }
 

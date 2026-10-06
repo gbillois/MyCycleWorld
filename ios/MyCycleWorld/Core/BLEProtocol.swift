@@ -124,6 +124,44 @@ enum BLEProtocol {
         result.backward = flags & 32768 != 0
         return result
     }
+    /// FTMS Treadmill Data (0x2ACD) : vitesse (0,01 km/h), distance, pente (0,1 %), puissance si publiée.
+    static func treadmill(_ bytes: [UInt8]) throws -> BikeReading {
+        var r = ByteReader(bytes)
+        let flags = try r.u16()
+        var result = BikeReading()
+        if flags & 1 == 0 { result.speed = Double(try r.u16()) / 100 }
+        if flags & 2 != 0 { _ = try r.take(2) }
+        if flags & 4 != 0 { result.distance = try r.u24() }
+        if flags & 8 != 0 { result.inclination = Double(try r.i16()) / 10; _ = try r.take(2) }
+        if flags & 16 != 0 { _ = try r.take(4) }
+        if flags & 32 != 0 { _ = try r.take(1) }
+        if flags & 64 != 0 { _ = try r.take(1) }
+        if flags & 128 != 0 { _ = try r.take(5) }
+        if flags & 256 != 0 { result.heartRate = try r.u8() }
+        if flags & 512 != 0 { _ = try r.take(1) }
+        if flags & 1024 != 0 { result.elapsed = try r.u16() }
+        if flags & 2048 != 0 { result.remaining = try r.u16() }
+        if flags & 4096 != 0 {
+            _ = try r.take(2) // force sur la bande
+            let watts = try r.i16()
+            if watts > 0 { result.power = watts }
+        }
+        return result
+    }
+    /// Running Speed and Cadence Measurement (0x2A53) : vitesse (1/256 m/s) convertie en km/h, cadence (pas/min).
+    static func runningSpeed(_ bytes: [UInt8]) throws -> (speed: Double, cadence: Int) {
+        var r = ByteReader(bytes)
+        _ = try r.u8()
+        let speed = Double(try r.u16()) / 256 * 3.6
+        return (speed, try r.u8())
+    }
+    /// Puissance de course estimée (W) : coût de la course à plat (~1,04 J/kg/m) plus la montée, pour 75 kg.
+    static func runningPower(speedKmh: Double, grade: Double = 0, mass: Double = 75) -> Double {
+        guard speedKmh.isFinite, speedKmh > 0.5 else { return 0 }
+        let v = speedKmh / 3.6
+        let climb = max(-0.5, (grade.isFinite ? grade : 0) / 100) * 9.81
+        return max(0, mass * v * (1.04 + climb * 0.75))
+    }
     /// Puissance estimée d'un rameur à partir de l'allure (formule Concept2 : W = 2,8 / (s/m)³).
     static func rowerPower(pace500: Double) -> Double {
         guard pace500.isFinite, pace500 > 0 else { return 0 }
