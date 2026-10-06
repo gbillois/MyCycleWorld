@@ -118,8 +118,8 @@
           </button>
           <button type="button" class="machine-card m-row" data-machine="row" data-crumb="Rameur">
             <span class="mc-art"><svg class="mc-ico"><use href="#i-row"/></svg></span>
-            <span class="mc-text"><span class="c-name">Rameur</span><span class="c-tag">Course d'aviron sur le lac</span>
-            <span class="c-stats"><span>500 m ou 1 000 m</span><span>6 bateaux</span></span></span>
+            <span class="mc-text"><span class="c-name">Rameur</span><span class="c-tag">Aviron sur le lac ou kayak cross en rivière</span>
+            <span class="c-stats"><span>500 m ou 1 000 m</span><span>Kayak cross</span><span>6 bateaux</span></span></span>
           </button>
         </div>
       </div>
@@ -273,6 +273,7 @@
             <tr><td>Pédaler <small>sans home trainer</small></td><td><kbd>↑</kbd></td><td>le home trainer</td><td><span class="tk">Pédaler</span></td></tr>
             <tr><td>Tourner <small>le vélo s'incline puis change de ligne</small></td><td><kbd>←</kbd> <kbd>→</kbd></td><td><span class="pb">◀</span> <span class="pb">▶</span></td><td><span class="tk">◀</span> <span class="tk">▶</span></td></tr>
             <tr><td>Vitesse virtuelle <small>moins / plus</small></td><td><kbd>-</kbd> <kbd>=</kbd></td><td>boutons latéraux</td><td><span class="tk">−</span> <span class="tk">+</span></td></tr>
+            <tr><td>Sprinter <small>kayak, sans machine</small></td><td><kbd>Maj</kbd> + <kbd>↑</kbd></td><td>rame plus fort</td><td>tape plus vite</td></tr>
             <tr><td>Utiliser l'objet</td><td><kbd>Espace</kbd></td><td><span class="pb pad-z">Z</span></td><td><span class="tk">Objet</span></td></tr>
             <tr><td>Virage plus serré</td><td><kbd>Maj</kbd></td><td>levier gauche</td><td></td></tr>
             <tr><td>Pause / retour</td><td><kbd>Échap</kbd></td><td><span class="pb pad-b">B</span></td><td><span class="tk">❚❚</span></td></tr>
@@ -344,6 +345,47 @@
       </div>
     </div>
   </div>
+  <!-- Affichage tête haute du mode kayak -->
+  <div id="kayakHud" hidden>
+    <div class="hud-top-left hud-card">
+      <div class="pos"><span id="kPos">1er</span><small id="kTotal">/ 6</small></div>
+      <div class="hud-meta">
+        <div class="lap"><svg class="ico"><use href="#i-flag"/></svg><span id="kGates">Portes 0 / 0</span></div>
+        <div class="time"><svg class="ico"><use href="#i-clock"/></svg><span id="kTime">0:00.0</span><em class="k-pen" id="kPen"></em></div>
+      </div>
+    </div>
+    <div class="hud-item">
+      <div class="slot" id="kSlot"><span class="slot-roll" aria-hidden="true"><i>🚀</i><i>🌀</i><i>🛡️</i><i>🚀</i><i>🌀</i><i>🛡️</i><i>🚀</i><i>🌀</i></span><span id="kItem"></span></div>
+      <div class="slot-label" id="kItemLabel">aucun objet</div>
+    </div>
+    <div class="hud-map hud-card"><canvas id="kMap" class="minimap" aria-label="Mini-carte de la rivière"></canvas></div>
+    <div class="k-challenge" id="kChallenge" hidden>
+      <div class="kc-title" id="kcTitle"></div>
+      <div class="kc-sub" id="kcSub"></div>
+      <div class="kc-gauge" aria-hidden="true"><i id="kcFill"></i><b class="kc-mark m60"></b><b class="kc-mark m100"></b></div>
+      <div class="kc-state" id="kcState"></div>
+    </div>
+    <div class="hud-effects" id="kEffects"></div>
+    <div class="hud-dock">
+      <div class="hud-hint" id="kHint"></div>
+      <div class="hud-bottom">
+        <div class="hud-wing wl">
+          <div class="m"><svg class="ico"><use href="#i-bolt"/></svg><b id="kPower">--</b><i>W</i><span>Puissance</span></div>
+          <div class="m m-rate"><svg class="ico"><use href="#i-wave"/></svg><b id="kRate">--</b><i>/min</i><span>Coups</span></div>
+          <div class="m m-hr"><svg class="ico"><use href="#i-heart"/></svg><b id="kHr">--</b><i>bpm</i><span>Cardio</span></div>
+        </div>
+        <div class="m main">
+          <svg class="gauge" viewBox="0 0 120 120" aria-hidden="true"><circle class="g-track" cx="60" cy="60" r="52"/><circle class="g-val" id="kSpeedArc" cx="60" cy="60" r="52"/></svg>
+          <b id="kSpeed">0.0</b><i>km/h</i><span>Vitesse</span>
+        </div>
+        <div class="hud-wing wr">
+          <div class="m"><svg class="ico"><use href="#i-route"/></svg><b id="kLeft">0</b><i>m</i><span>Restants</span></div>
+          <div class="m m-pen"><svg class="ico"><use href="#i-clock"/></svg><b id="kPenalty">0</b><i>s</i><span>Pénalités</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="kFlash" aria-hidden="true"></div>
   <div id="banner" class="banner" aria-live="polite"></div>
 
   <section id="pause" class="screen dim" hidden>
@@ -396,6 +438,8 @@
         'Roule dans la roue d’un adversaire : l’aspiration rend le pédalage plus facile.',
         'Le sable de la Côte des Dunes freine beaucoup : change de vitesse virtuelle avant.',
         'Au rameur, garde une allure régulière : la puissance fait avancer le bateau.',
+        'Kayak cross : quand une porte sprint est annoncée, monte en puissance sur plusieurs coups.',
+        'Kayak cross : sous la passerelle basse, arrête de ramer et laisse glisser.',
         'Sans boutons sur ta machine ? Le pilote automatique tourne pour toi.',
         'Manettes Zwift Play : ▲ ▼ pour choisir, A pour valider, B pour revenir.',
       ];

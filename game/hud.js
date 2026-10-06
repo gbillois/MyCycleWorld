@@ -33,7 +33,7 @@ const SPEED_MAX = 60;
 // Position « 1er » : grand chiffre, suffixe en exposant.
 export const ordinalHtml = (n) => `<b>${n}</b><sup>${n === 1 ? 'er' : 'e'}</sup>`;
 
-// Écran d'arrivée : podium des trois premiers et tableau complet (vélo ou rameur).
+// Écran d'arrivée : podium des trois premiers et tableau complet (vélo, rameur ou kayak).
 // rows : [{ r: { name, color, isPlayer }, time, estimated }] déjà triés.
 export function renderResults(rows, { kind = 'bike', distance = 0 } = {}) {
   const best = rows[0]?.time ?? 0;
@@ -45,12 +45,16 @@ export function renderResults(rows, { kind = 'bike', distance = 0 } = {}) {
     })
     .join('');
   const split = (t) => formatSplit((t / distance) * 500);
-  const head = kind === 'row' ? '<tr><th>#</th><th>Rameur</th><th>Temps</th><th>Allure</th></tr>' : '<tr><th>#</th><th>Coureur</th><th>Temps</th><th>Écart</th></tr>';
+  const head = kind === 'row' ? '<tr><th>#</th><th>Rameur</th><th>Temps</th><th>Allure</th></tr>'
+    : kind === 'kayak' ? '<tr><th>#</th><th>Kayakiste</th><th>Temps <small>pénalités comprises</small></th><th>Pénalités</th></tr>'
+      : '<tr><th>#</th><th>Coureur</th><th>Temps</th><th>Écart</th></tr>';
+  // Kayak : pénalités (portes manquées, porte sprint trop juste) et nombre de portes manquées.
+  const pen = (r) => (r.penalty ? `+${r.penalty} s${r.missed ? ` <small>${r.missed} porte${r.missed > 1 ? 's' : ''}</small>` : ''}` : '<small>aucune</small>');
   const body = rows
     .map((x, i) => {
       const gap = i === 0 ? '' : `+${formatTime(x.time - best)}`;
-      const last = kind === 'row' ? `${split(x.time)} <small>/500 m</small>` : gap;
-      const time = `${x.estimated ? '≈ ' : ''}${formatTime(x.time)}${kind === 'row' && i ? ` <small>${gap}</small>` : ''}`;
+      const last = kind === 'row' ? `${split(x.time)} <small>/500 m</small>` : kind === 'kayak' ? pen(x.r) : gap;
+      const time = `${x.estimated ? '≈ ' : ''}${formatTime(x.time)}${(kind === 'row' || kind === 'kayak') && i ? ` <small>${gap}</small>` : ''}`;
       return `<tr class="${x.r.isPlayer ? 'me' : ''}${i < 3 ? ` top${i + 1}` : ''}"><td><span class="rk">${i + 1}</span></td><td><span class="dot" style="background:${x.r.color}"></span>${esc(x.r.name)}${x.r.isPlayer && x.r.name.toLowerCase() !== 'toi' ? ' <em class="you">toi</em>' : ''}</td><td>${time}</td><td>${last}</td></tr>`;
     })
     .join('');
