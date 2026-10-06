@@ -453,7 +453,7 @@ test('qualité : chaque effet commence et finit en douceur, sans composante cont
 });
 
 test('qualité : effets du jeu et interface ronds (peu d’énergie au-dessus de 6 kHz, rien de perçant)', async () => {
-  const soft = ['beep', 'horn', 'pickup', 'turbo', 'banana', 'skid', 'bump', 'whoosh', 'lap', 'finalLap', 'fanfare', 'gear', 'gateDing', 'gateBuzz', 'sprintWhoosh', 'sprintFail', 'kayakSplash', 'splash', 'paddle', 'drips', 'oarlock', 'breath'];
+  const soft = ['beep', 'horn', 'pickup', 'turbo', 'banana', 'skid', 'bump', 'whoosh', 'lap', 'finalLap', 'fanfare', 'gear', 'gateDing', 'gateBuzz', 'sprintWhoosh', 'sprintFail', 'kayakSplash', 'splash', 'paddle', 'drips', 'oarlock', 'breath', 'helmetHit', 'helmetHum', 'shieldBlock'];
   for (const name of soft) {
     const { channels, sampleRate } = await renderSound(name, SR, 5, {});
     const c = channels[0];
@@ -467,6 +467,26 @@ test('qualité : effets du jeu et interface ronds (peu d’énergie au-dessus de
   // Bip du compte à rebours : court, ne dure pas plus d'une demi-seconde audible
   const beep = S.renderBeep(SR, rng(1), { f: 660 });
   assert.ok(rms(beep, Math.round(SR * 0.45)) < rms(beep, 0, Math.round(SR * 0.1)) * 0.1);
+});
+
+test('casques : choc creux et grave, rebond court, ronronnement en boucle sans raccord, bouclier doux', async () => {
+  const hit = S.renderHelmetHit(SR, rng(1));
+  const tok = S.renderHelmetHit(SR, rng(1), { kind: 'bounce' });
+  assert.ok(tok.length < hit.length / 2, 'le rebond est bref');
+  assert.ok(bandEnergy(hit, SR, 50, 700) > bandEnergy(hit, SR, 2500, 8000) * 20, 'choc rond, pas de claquement aigu');
+  assert.ok(relBand(tok, SR, 6000, 15000) < -18, 'rebond sans aigu');
+  // Boucle : fréquences entières sur 1 s, donc le dernier échantillon rejoint le premier sans marche.
+  const hum = S.renderHelmetHum(SR);
+  assert.equal(hum.length, SR);
+  const step = Math.abs(hum[0] - hum[hum.length - 1]);
+  let maxStep = 0;
+  for (let i = 1; i < hum.length; i++) maxStep = Math.max(maxStep, Math.abs(hum[i] - hum[i - 1]));
+  assert.ok(step <= maxStep * 1.01, `raccord ${step.toFixed(4)} pour des pas de ${maxStep.toFixed(4)}`);
+  assert.ok(goertzel(hum, SR, 120) > goertzel(hum, SR, 1500) * 20, 'ronronnement grave');
+  const block = S.renderShieldBlock(SR, rng(2));
+  assert.ok(relBand(block.l, SR, 6000, 15000) < -18);
+  // Chaque effet de casque a son entrée dans la table des effets, sans gain amplifié.
+  for (const k of ['helmet-throw', 'helmet-hum', 'helmet-beep', 'helmet-hit', 'helmet-bounce', 'shield-block']) assert.ok(SFX[k] && SFX[k].gain <= 1, k);
 });
 
 test('qualité : nappes chaudes (bruits filtrés), insectes et gravier sans souffle aigu', async () => {

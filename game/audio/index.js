@@ -54,6 +54,14 @@ export const SFX = {
   crash: { r: 'crash', gain: 0.9, priority: 3 },
   mud: { r: 'squelch', gain: 0.65, pool: true },
   woodpecker: { r: 'woodpecker', gain: 0.45, pool: true, bus: 'ambience', wet: 0.4 },
+  // Casques lancés : lancer, ronronnement en vol (boucle placée sur le casque), bip du casque rouge, choc,
+  // rebond sur le bord, bouclier qui pare
+  'helmet-throw': { r: 'whoosh', o: { dir: 1, dur: 0.45 }, gain: 0.65 },
+  'helmet-hum': { r: 'helmetHum', gain: 0.45 },
+  'helmet-beep': { r: 'beep', o: { f: 988, dur: 0.12 }, gain: 0.35 },
+  'helmet-hit': { r: 'helmetHit', gain: 0.85, duck: true },
+  'helmet-bounce': { r: 'helmetHit', o: { kind: 'bounce' }, gain: 0.4 },
+  'shield-block': { r: 'shieldBlock', gain: 0.75, wet: 0.2 },
   // Nature, utilisables par d'autres modes
   cow: { r: 'cow', gain: 0.7, pool: true, bus: 'ambience' },
   sheep: { r: 'sheep', gain: 0.6, pool: true, bus: 'ambience' },
@@ -106,7 +114,7 @@ class GameAudio {
     this.weather = new WeatherSounds(e, (n, o) => this.sfx(n, o));
     const b = e.bank;
     for (const k of PRELOAD) b.load('ui', { kind: k }, 3).catch(() => {});
-    for (const n of ['beep', 'go', 'horn', 'pickup', 'turbo', 'banana', 'skid', 'bump', 'lap', 'final-lap', 'gear']) this.buffer(n, {}, 2);
+    for (const n of ['beep', 'go', 'horn', 'pickup', 'turbo', 'banana', 'skid', 'bump', 'lap', 'final-lap', 'gear', 'helmet-throw', 'helmet-hum', 'helmet-beep', 'helmet-hit', 'helmet-bounce', 'shield-block']) this.buffer(n, {}, 2);
     for (const dir of [1, -1]) this.buffer('whoosh', { dir }, 2);
     this.crowds.preload();
     for (const n of ['fanfare', 'win', 'podium', 'finish-other']) this.buffer(n, {}, 0);
@@ -215,6 +223,7 @@ class GameAudio {
     else {
       this.bike.setActive(false);
       this.rivals.setActive(false);
+      if (this.helmetVoices?.size) this.updateHelmets({ helmets: [] }, false);
     }
     if (mode === 'row' && race) this.updateRow(dt, race, riding, state);
     else this.row.setActive(false);
@@ -325,6 +334,7 @@ class GameAudio {
     }
     void L;
     this.rivals.update(dt, others);
+    this.updateHelmets(race, riding);
     // Foule : s'anime selon la distance au coureur (à l'accueil, simple brouhaha)
     let ppos = null;
     if (tr && state !== 'home') {
@@ -342,6 +352,45 @@ class GameAudio {
       this.music.setIntensity(1);
       this.music.setBrightness(0.55);
     }
+  }
+
+  // Casques en vol : ronronnement en boucle qui suit chaque casque proche (trois au plus) ; le casque rouge
+  // bipe de plus en plus vite en approchant de sa cible (plus fort quand il vise le joueur).
+  updateHelmets(race, riding) {
+    const list = race.helmets || [];
+    const voices = (this.helmetVoices ||= new Map());
+    for (const [h, v] of voices) {
+      if (riding && !h.done && list.includes(h)) continue;
+      v.stop(0.15);
+      voices.delete(h);
+    }
+    if (!riding) return;
+    const e = this.engine;
+    for (const h of list) {
+      if (h.done) continue;
+      const pos = this.helmetPos(race, h);
+      const d = e.distanceTo(pos);
+      const v = voices.get(h);
+      if (v) e.setPos(v.pan, pos);
+      else if (d < 60 && voices.size < 3) {
+        const buf = this.buffer('helmet-hum', {}, 2);
+        const voice = buf && e.play(buf, { bus: 'sfx', loop: true, pos, gain: SFX['helmet-hum'].gain, rate: h.kind === 'red' ? 1.12 : 1, fadeIn: 0.08, ref: 5, radius: 70, priority: 1 });
+        if (voice) voices.set(h, voice);
+      }
+      if (h.kind === 'red' && h.target && d < 50 && race.time >= (h.beepAt ?? 0)) {
+        h.beepAt = race.time + Math.max(0.11, Math.min(0.4, Math.abs(h.target.s - h.s) / 60));
+        this.sfx('helmet-beep', { pos, gain: h.target.isPlayer ? 1 : 0.6, priority: 1 });
+      }
+    }
+  }
+
+  helmetPos(race, h) {
+    const f = race.track.frame(h.s, h.lateral, (this.helmetFrame ||= {}));
+    const p = (h.audioPos ||= { x: 0, y: 0, z: 0 });
+    p.x = f.x;
+    p.y = f.y + 0.4;
+    p.z = f.z;
+    return p;
   }
 
   updateRow(dt, race, riding, state) {
@@ -396,6 +445,25 @@ class GameAudio {
           this.sfx('skid', { priority: 3 });
           this.sfx('bump', { gain: 0.8 });
         } else if (near(detail.racer, 35)) this.sfx('skid', { pos: this.posOf(race, detail.racer), gain: 0.5, priority: 1 });
+      },
+      'helmet-thrown': ({ detail: h }) => {
+        if (h.owner.isPlayer) this.sfx('helmet-throw');
+        else if (near(h.owner, 30)) this.sfx('helmet-throw', { pos: this.posOf(race, h.owner), gain: 0.5, priority: 1 });
+      },
+      'helmet-bounce': ({ detail: h }) => {
+        const pos = this.helmetPos(race, h);
+        if (this.engine.distanceTo(pos) < 35) this.sfx('helmet-bounce', { pos, priority: 1 });
+      },
+      'helmet-hit': ({ detail: d }) => {
+        if (d.racer.isPlayer) {
+          this.sfx('helmet-hit', { priority: 3 });
+          this.sfx('skid', { gain: 0.5 });
+        } else if (d.helmet.owner.isPlayer) this.sfx('helmet-hit', { gain: 0.7 });
+        else if (near(d.racer, 40)) this.sfx('helmet-hit', { pos: this.posOf(race, d.racer), gain: 0.6, priority: 1 });
+      },
+      'helmet-blocked': ({ detail: d }) => {
+        if (d.racer.isPlayer || d.helmet.owner.isPlayer) this.sfx('shield-block', { priority: 3 });
+        else if (near(d.racer, 40)) this.sfx('shield-block', { pos: this.posOf(race, d.racer), gain: 0.6, priority: 1 });
       },
       lap: ({ detail }) => {
         if (!detail.racer.isPlayer) return;

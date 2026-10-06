@@ -5,11 +5,16 @@ import { stepSteering, forwardSpeed, headingTowards } from '../src/core/steering
 import { ROAD_HALF, LATERAL_LIMIT, mod } from './track.js';
 import { SURFACES } from './courses.js';
 import { MtbRules } from '../src/core/mtb.js';
+import { HELMET, itemWeights, pickItem, nextAhead, launchHelmet, releaseTarget, stepHelmet, helmetExpired, canHitRacer, helmetTouches, helmetCrosses, helmetsClash, helmetPlan } from '../src/core/helmets.js';
 
+// svg : icône du HUD (symbole de game/index.html) à la place de l'émoji, dans la couleur color.
 export const ITEMS = {
   turbo: { label: 'Turbo', icon: '🚀' },
   banana: { label: 'Peau de banane', icon: '🍌' },
+  green: { label: 'Casque vert', icon: '🟢', svg: 'i-helmet', color: '#33d35f' },
+  red: { label: 'Casque rouge', icon: '🔴', svg: 'i-helmet', color: '#ff3b3b' },
 };
+export const HELMET_ITEMS = new Set(['green', 'red']);
 
 export const EFFECT_DURATION = 3; // turbo et glissade sur banane
 const TURBO_POWER = 380; // W "virtuels" ajoutés pendant le turbo
@@ -21,6 +26,9 @@ const BOX_ROWS = [0.05, 0.17, 0.29, 0.41, 0.53, 0.65, 0.77, 0.89];
 const BOX_CATCH = 1.3; // largeur de capture (m) : un peu plus que le rayon visuel de la boîte
 const BANANA_LIFETIME = 90;
 const COUNTDOWN = 3;
+// Les adversaires ne visent pas le joueur plus d'une fois toutes les 14 s (ni pendant les 8 premières).
+const AI_PLAYER_COOLDOWN = 14;
+const AI_FIRST_SHOT = 8;
 
 const AI_PROFILES = [
   { name: 'Lucie', color: '#e63946', helmet: '#ffd23f', bike: '#1d3557', power: 150 },
@@ -39,7 +47,10 @@ export class Racer {
     this.crank = Math.random() * Math.PI * 2;
     this.item = null;
     this.turboUntil = -Infinity;
-    this.slipUntil = -Infinity; // glissade sur banane
+    this.slipUntil = -Infinity; // glissade sur banane (ou après un casque)
+    this.hitAt = -Infinity; // touché par un casque : tête-à-queue
+    this.hitUntil = -Infinity;
+    this.shieldUntil = -Infinity; // bouclier (s'il existe) : encaisse un casque
     this.finishTime = null;
     this.draft = 1;
     // Direction (voir src/core/steering.js) : cap par rapport à la route, vitesse de lacet, inclinaison.
@@ -71,6 +82,10 @@ export class Race extends EventTarget {
     this.racers = [];
     this.bananas = [];
     this.bananaId = 0;
+    // Casques lancés (src/core/helmets.js) et dernier moment où un adversaire a visé le joueur.
+    this.helmets = [];
+    this.helmetId = 0;
+    this.playerTargetedAt = AI_FIRST_SHOT - AI_PLAYER_COOLDOWN;
     // Météo (game/weather.js) : { tailwindAt(s), crrFactor, steer } ; null = temps neutre (comportement d'origine).
     this.weather = null;
     // Demi-largeur de la route et écart latéral maximal de ce circuit (sentier de VTT étroit).
@@ -165,6 +180,7 @@ export class Race extends EventTarget {
     }
     this.handleBoxes();
     this.handleBananas();
+    this.handleHelmets(dt);
     this.bananas = this.bananas.filter((b) => {
       if (t < b.expiresAt) return true;
       this.emit('banana-removed', b);
@@ -215,7 +231,8 @@ export class Race extends EventTarget {
     return Math.max(-lim, Math.min(lim, target));
   }
 
-  // Objets en pilote automatique : turbo dans les montées (ou après 6 s), banane quand quelqu'un suit de près.
+  // Objets en pilote automatique : turbo dans les montées (ou après 6 s), banane quand quelqu'un suit de près,
+  // casque quand un coureur est aligné devant (ou derrière), casque rouge dès qu'une cible est à portée.
   autoItem(r) {
     if (!r.item || this.time < 0) return;
     const held = this.time - (r.itemSince ?? this.time);
@@ -224,7 +241,25 @@ export class Race extends EventTarget {
       const L = this.track.length;
       const chaser = this.racers.some((o) => o !== r && mod(r.s - o.s, L) < 14 && mod(r.s - o.s, L) > 2);
       if (chaser || held > 10) this.useItem(r);
+    } else if (HELMET_ITEMS.has(r.item) && this.time >= (r.planAt ?? 0)) {
+      r.planAt = this.time + 0.2; // décision réévaluée 5 fois par seconde
+      const plan = this.helmetPlanFor(r, held, 12);
+      if (plan) this.useItem(r, { back: plan === 'back' });
     }
+  }
+
+  // Quand lancer son casque (voir helmetPlan) ; les adversaires laissent souffler le joueur entre deux tirs.
+  helmetPlanFor(r, held, maxHold) {
+    return helmetPlan({
+      kind: r.item,
+      owner: r,
+      racers: this.racers,
+      length: this.track.length,
+      target: r.item === 'red' ? nextAhead(this.ranking(), r) : null,
+      held,
+      maxHold,
+      allowPlayer: r.isPlayer || this.time - this.playerTargetedAt >= AI_PLAYER_COOLDOWN,
+    });
   }
 
   driveAI(r, dt) {
@@ -246,8 +281,15 @@ export class Race extends EventTarget {
     }
     if (!(this.mtb && r.air)) stepSteering(r, { targetHeading: headingTowards(r.lateral, r.targetLateral) }, r.v, this.track.curvatureAt(r.s), dt, this.limit, this.weather?.steer);
 
-    // Utilisation des objets avec un petit délai.
-    if (r.item && r.useItemAt !== null && t >= r.useItemAt) this.useItem(r);
+    // Utilisation des objets avec un petit délai ; un casque attend une cible (helmetPlan).
+    if (r.item && r.useItemAt !== null && t >= r.useItemAt) {
+      if (!HELMET_ITEMS.has(r.item)) this.useItem(r);
+      else if (r.finishTime === null && t >= (r.planAt ?? 0)) {
+        r.planAt = t + 0.2;
+        const plan = this.helmetPlanFor(r, t - (r.itemSince ?? t), 14);
+        if (plan) this.useItem(r, { back: plan === 'back' });
+      }
+    }
   }
 
   move(r, dt) {
@@ -310,7 +352,7 @@ export class Race extends EventTarget {
         if (Math.abs(r.lateral - box.lateral) > BOX_CATCH || !this.crossed(r, box.s)) continue;
         box.respawnAt = t + BOX_RESPAWN;
         if (!r.item && r.finishTime === null) {
-          r.item = this.random() < 0.5 ? 'turbo' : 'banana';
+          r.item = pickItem(itemWeights(this.positionOf(r), this.racers.length), this.random());
           r.itemSince = t;
           if (!r.isPlayer) r.useItemAt = t + 1 + this.random() * 5;
           this.emit('pickup', { racer: r, item: r.item });
@@ -337,7 +379,81 @@ export class Race extends EventTarget {
     }
   }
 
-  useItem(r) {
+  // Casques en vol : rebonds, coureurs touchés, bananes emportées, casques qui se croisent, fin de course.
+  handleHelmets(dt) {
+    const list = this.helmets;
+    if (!list.length) return;
+    const t = this.time;
+    const L = this.track.length;
+    const ctx = (this.helmetCtx ||= { wall: this.half - HELMET.wallMargin, curvatureAt: (s) => this.track.curvatureAt(s) });
+    for (const h of list) {
+      if (h.done) continue;
+      if (h.target && h.target.finishTime !== null) releaseTarget(h);
+      if (stepHelmet(h, dt, ctx) === 'bounce') this.emit('helmet-bounce', h);
+      let banana = null;
+      for (const x of this.bananas) if (helmetCrosses(h, x.s, x.lateral, L)) banana = x;
+      if (banana) {
+        this.bananas.splice(this.bananas.indexOf(banana), 1);
+        this.emit('banana-removed', banana);
+        this.removeHelmet(h, 'banana');
+        continue;
+      }
+      let victim = null;
+      for (const r of this.racers) {
+        if (this.canHelmetHit(h, r) && helmetTouches(h, r, L)) {
+          victim = r;
+          break;
+        }
+      }
+      if (victim) this.helmetHit(h, victim);
+      else if (helmetExpired(h, t)) this.removeHelmet(h, 'expire');
+    }
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length && !list[i].done; j++) {
+        if (list[j].done || !helmetsClash(list[i], list[j], L)) continue;
+        this.removeHelmet(list[i], 'clash');
+        this.removeHelmet(list[j], 'clash');
+      }
+    }
+    let n = 0;
+    for (const h of list) if (!h.done) list[n++] = h;
+    list.length = n;
+  }
+
+  // En l'air (saut de VTT) ou à terre, on ne se fait pas toucher.
+  canHelmetHit(h, r) {
+    if (this.mtb && (r.air || this.mtb.down(r, this.time))) return false;
+    return canHitRacer(h, r, this.time);
+  }
+
+  helmetHit(h, r) {
+    const t = this.time;
+    this.removeHelmet(h, 'hit');
+    if (t < r.shieldUntil) {
+      // Le bouclier encaisse le casque et disparaît.
+      r.shieldUntil = -Infinity;
+      this.emit('helmet-blocked', { racer: r, helmet: h });
+      return;
+    }
+    r.slipUntil = Math.max(r.slipUntil, t + HELMET.hitDuration);
+    r.hitAt = t;
+    r.hitUntil = t + HELMET.hitDuration;
+    r.hitSpin = this.random() < 0.5 ? -1 : 1;
+    r.v *= r.isPlayer ? HELMET.hitSpeedKeep : HELMET.aiHitSpeedKeep;
+    r.yawRate += r.hitSpin * 0.3;
+    if (r.isPlayer && !h.owner.isPlayer) this.playerTargetedAt = t;
+    this.emit('helmet-hit', { racer: r, helmet: h });
+  }
+
+  removeHelmet(h, reason) {
+    if (h.done) return;
+    h.done = true;
+    h.reason = reason;
+    this.emit('helmet-removed', h);
+  }
+
+  // opts.back : lancer le casque vers l'arrière (↓ tenue au moment d'utiliser l'objet).
+  useItem(r, { back = false } = {}) {
     const item = r.item;
     if (!item || this.time < 0) return null;
     r.item = null;
@@ -356,9 +472,22 @@ export class Race extends EventTarget {
       };
       this.bananas.push(b);
       this.emit('banana-dropped', b);
+    } else if (HELMET_ITEMS.has(item)) {
+      const target = item === 'red' && !back ? nextAhead(this.ranking(), r) : null;
+      const h = launchHelmet({ id: ++this.helmetId, kind: item, owner: r, back, t: this.time, target });
+      this.helmets.push(h);
+      // Un adversaire vise le joueur (casque rouge, ou vert aligné sur lui) : le joueur est tranquille un moment.
+      if (!r.isPlayer && (target?.isPlayer || this.aimsAtPlayer(r, back))) this.playerTargetedAt = this.time;
+      this.emit('helmet-thrown', h);
     }
     this.emit('use', { racer: r, item });
     return item;
+  }
+
+  aimsAtPlayer(r, back) {
+    const p = this.player;
+    const gap = back ? r.s - p.s : p.s - r.s;
+    return gap > 0 && gap < 45 && Math.abs(p.lateral - r.lateral) < 1.2;
   }
 
   // Temps estimé pour les coureurs pas encore arrivés (écran de fin).

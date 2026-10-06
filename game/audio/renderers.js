@@ -69,6 +69,10 @@ export const RENDERERS = {
   crash: (sr, r) => S.renderCrash(sr, r),
   squelch: (sr, r) => S.renderSquelch(sr, r),
   woodpecker: (sr, r) => at32(S.renderWoodpecker(32000, r)),
+  // Casques lancés : choc et rebond, ronronnement en vol (boucle), bouclier qui pare
+  helmetHit: (sr, r, o) => S.renderHelmetHit(sr, r, o),
+  helmetHum: (sr) => S.renderHelmetHum(sr),
+  shieldBlock: (sr, r) => S.renderShieldBlock(sr, r),
   // Musique et réverbération
   drum: (sr, r, o) => S.renderDrum(sr, r, o),
   // Notes rendues à 32 kHz : timbre intact, un tiers de mémoire en moins (une note par hauteur et instrument)

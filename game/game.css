@@ -789,6 +789,7 @@ kbd, .tk, .pb {
 .slot.rolling .slot-roll { display: flex; animation: roll 0.78s cubic-bezier(0.25, 0.6, 0.3, 1) both; }
 .slot.rolling #hItem, .slot.rolling #kItem { opacity: 0; }
 .slot.landed #hItem, .slot.landed #kItem { display: inline-block; animation: item-land 0.45s var(--ease-back) both; }
+.item-ico { display: block; width: 1.4em; height: 0.95em; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.45)); }
 .slot-label { display: inline-block; margin-top: 6px; padding: 4px 10px; border-radius: 999px; font: 700 14px/1 var(--f-ui); letter-spacing: 0.06em; text-transform: uppercase; color: #fff; background: rgba(10, 13, 26, 0.6); }
 
 /* Mini-carte */
@@ -817,6 +818,7 @@ kbd, .tk, .pb {
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
 }
 .badge.turbo { background: linear-gradient(90deg, #4fd2ff, #2b8cff); color: #031a2e; border-color: #b9ecff; }
+.badge.hit { background: linear-gradient(90deg, #ff8a5c, #e8342b); color: #fff; border-color: #ffd0c0; }
 .badge.slip { background: linear-gradient(90deg, #ffe34f, #ffbf1f); color: #2d2400; border-color: #fff4b0; }
 .badge.draft { background: linear-gradient(90deg, #4be38f, #1fae5d); color: #052313; border-color: #b7ffd6; }
 .badge.grass { background: linear-gradient(90deg, #ff6b6b, #e23b3b); color: #fff; }

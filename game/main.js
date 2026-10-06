@@ -37,6 +37,7 @@ import { WeatherSystem } from './weather.js';
 import { weatherMode, forecast, WEATHER_LABELS, windGrade, ftmsWindSpeed } from '../src/core/weather.js';
 import { buildForestScenery } from './mtb-scene.js';
 import { MtbMode } from './mtb-mode.js';
+import { HelmetFx } from './helmet-fx.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -314,6 +315,8 @@ let boxMeshes = [];
 const bananaMeshes = new Map(); // id -> mesh
 const raceObjects = new THREE.Group();
 scene.add(raceObjects);
+// Casques lancés : réserve d'objets cachés, créée une fois (avant warmShaders, pour compiler ses matériaux).
+const helmetFx = new HelmetFx(scene, { detailed: DETAILED, shadows: SHADOWS });
 let lastSentGrade = null;
 let feltGrade = 0;
 let windGradeNow = 0; // part du vent dans la pente ressentie (%)
@@ -332,6 +335,7 @@ function setupRace() {
   disposeTree(raceObjects); // coureurs, étiquettes et objets de la course précédente
   raceObjects.clear();
   bananaMeshes.clear();
+  helmetFx.reset();
   models = new Map();
   race = new Race(track, { laps: lapsFor(track.course) });
   const style = track.course.theme === 'forest' ? 'mtb' : 'road'; // VTT et tenue de VTT en forêt
@@ -379,6 +383,22 @@ function setupRace() {
     } else if (detail.banana.owner === race.player) {
       hud.flash(`${detail.racer.name} a glissé sur ta banane !`, 1500, 'good');
     }
+  });
+  // Casques : lancer, coup reçu (tête-à-queue, pente +10 % au trainer pendant la glissade), coup donné, bouclier.
+  race.addEventListener('helmet-thrown', ({ detail: h }) => helmetFx.take(h));
+  race.addEventListener('helmet-hit', ({ detail }) => {
+    const { racer: r, helmet: h } = detail;
+    if (r.isPlayer) {
+      hud.flash(h.owner === r ? 'Touché par ton propre casque ! Pente +10 %' : `Touché ! Casque de ${h.owner.name} · pente +10 %`, 1700, 'bad');
+      shake = 1.2;
+      devices.vibrate();
+    } else if (h.owner === race.player) {
+      hud.flash(`Dans le mille ! ${r.name} est touché`, 1500, 'good');
+    }
+  });
+  race.addEventListener('helmet-blocked', ({ detail }) => {
+    if (detail.racer.isPlayer) hud.flash('🛡️ Casque esquivé', 1300, 'good');
+    else if (detail.helmet.owner === race.player) hud.flash(`${detail.racer.name} a paré ton casque`, 1300);
   });
   race.addEventListener('lap', ({ detail }) => {
     hud.flash(detail.lap === race.laps ? 'Dernier tour !' : `Tour ${detail.lap} / ${race.laps}`, 1500);
@@ -1368,8 +1388,9 @@ window.addEventListener('keydown', (e) => {
     else if (state === 'end') goHome();
   } else if (code === 'Space' && state === 'race' && mode === 'bike') {
     // VTT : près d'un saut, Espace donne l'impulsion au lieu d'utiliser l'objet.
+    // ↓ tenue : le casque part vers l'arrière.
     if (mtbMode.wantsKey()) mtbMode.key();
-    else race.useItem(race.player);
+    else race.useItem(race.player, { back: keys.has('ArrowDown') });
   } else if (code === 'ArrowUp' && state === 'race' && mode === 'bike') {
     mtbMode.key(); // VTT : chaque nouvel appui sur ↑ est une impulsion (sans effet ailleurs)
   } else if (code === 'Space' && state === 'race' && mode === 'kayak') {
@@ -1530,13 +1551,18 @@ function updateGrade() {
   return terrain;
 }
 
+const HIT_SPIN = 0.75; // s
+
 function syncScene(dt) {
   const t = race.time;
   for (const [r, m] of models) {
     const f = track.frame(r.s, r.lateral, tmpFrame);
     m.group.position.set(f.x, f.y + 0.03, f.z);
     // Le vélo pointe dans sa direction réelle (cap par rapport à la route) et s'incline dans les virages.
-    const yaw = Math.atan2(f.tx, f.tz) - (r.heading || 0);
+    let yaw = Math.atan2(f.tx, f.tz) - (r.heading || 0);
+    // Touché par un casque : tête-à-queue complet, rapide puis amorti.
+    const hit = t - r.hitAt;
+    if (hit >= 0 && hit < HIT_SPIN) yaw += (r.hitSpin || 1) * Math.PI * 2 * (1 - (1 - hit / HIT_SPIN) ** 2);
     let pitch = -Math.atan(f.grade / 100);
     let roll = r.lean || 0;
     if (r.slipping(t)) roll += Math.sin(t * 25) * 0.18;
@@ -1672,6 +1698,7 @@ function frame(nowMs) {
   updateSim(dt);
   audio.update({ dt, mode, state, camera, track, race, rowing: rowing?.race, gear: gears.gear, player: mode === 'kayak' ? { speed: kayak?.race?.player?.v ?? 0 } : undefined, weather: weather.audio });
   updateCrowds(dt, camera); // foules et figurants animés (people.js)
+  helmetFx.group.visible = mode === 'bike';
   if (mode === 'kayak') {
     kayakSounds();
     kayak.frame(dt, nowMs, state, kayakInput(), kayakHud());
@@ -1694,6 +1721,7 @@ function frame(nowMs) {
     if (race.time < 0) hud.countdown(String(Math.ceil(-race.time)));
   }
   syncScene(state === 'paused' ? 0 : dt);
+  helmetFx.sync(race, track, state === 'paused' ? 0 : dt, camera);
   mtbMode.frame(state === 'paused' ? 0 : dt, state, { trainer: devices.trainerActive, touch: TOUCH });
   const terrain = updateGrade();
   updateCamera(dt, nowMs);
@@ -1728,6 +1756,7 @@ function frame(nowMs) {
         item: p.item,
         turboLeft: p.turboUntil - race.time,
         slipLeft: p.slipUntil - race.time,
+        hitLeft: p.hitUntil - race.time,
         draft: p.draft,
         offRoad: p.offRoad,
         surface: p.surface,
@@ -1776,6 +1805,7 @@ window.__mcw = {
   weather,
   get weatherPref() { return weatherPref; },
   mtb: mtbMode,
+  helmetFx,
   get scenery() { return scenery; },
 };
 
