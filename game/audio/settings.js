@@ -15,7 +15,20 @@ export const BUS_LABELS = {
 };
 
 // windNoise : souffle du vent de la vitesse dans les oreilles (désactivé par défaut, réglable dans Options).
-export const DEFAULTS = Object.freeze({ master: 80, music: 50, ambience: 70, sfx: 80, ui: 60, muted: false, windNoise: false });
+// Mélange calme par défaut : musique nettement en retrait, ambiance en fond, effets présents mais doux.
+export const DEFAULTS = Object.freeze({ master: 80, music: 35, ambience: 60, sfx: 70, ui: 45, muted: false, windNoise: false });
+
+// Version du format enregistré. Les réglages de la version 1 (sans champ v) restés aux anciennes valeurs
+// par défaut passent aux nouvelles ; une valeur choisie par le joueur n'est jamais modifiée.
+export const SETTINGS_VERSION = 2;
+export const OLD_DEFAULTS = Object.freeze({ master: 80, music: 50, ambience: 70, sfx: 80, ui: 60 });
+
+export function migrateSettings(raw) {
+  if (!raw || typeof raw !== 'object' || raw.v >= SETTINGS_VERSION) return raw;
+  const out = { ...raw };
+  for (const bus of BUSES) if (Number(raw[bus]) === OLD_DEFAULTS[bus]) out[bus] = DEFAULTS[bus];
+  return out;
+}
 
 const clampPercent = (v, fallback) => {
   const n = Number(v);
@@ -36,7 +49,7 @@ export function normalizeSettings(raw) {
 export function loadSettings(storage = globalThis.localStorage) {
   try {
     const text = storage?.getItem(STORAGE_KEY);
-    return normalizeSettings(text ? JSON.parse(text) : null);
+    return normalizeSettings(text ? migrateSettings(JSON.parse(text)) : null);
   } catch {
     return normalizeSettings(null);
   }
@@ -44,14 +57,14 @@ export function loadSettings(storage = globalThis.localStorage) {
 
 export function saveSettings(settings, storage = globalThis.localStorage) {
   try {
-    storage?.setItem(STORAGE_KEY, JSON.stringify(normalizeSettings(settings)));
+    storage?.setItem(STORAGE_KEY, JSON.stringify({ v: SETTINGS_VERSION, ...normalizeSettings(settings) }));
     return true;
   } catch {
     return false; // stockage indisponible (navigation privée) : réglage valable pour cette session
   }
 }
 
-// Pourcentage -> gain linéaire. Courbe au carré : 50 % ≈ -12 dB, 70 % ≈ -6 dB, 0 % = silence.
+// Pourcentage -> gain linéaire. Courbe au carré : 35 % ≈ -18 dB, 50 % ≈ -12 dB, 70 % ≈ -6 dB, 0 % = silence.
 // L'oreille perçoit le volume de façon logarithmique : un curseur linéaire en gain serait « tout en haut ».
 export function volumeToGain(percent) {
   const p = clampPercent(percent, 0) / 100;

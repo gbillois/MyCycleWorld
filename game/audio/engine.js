@@ -2,11 +2,13 @@
 // bus de mixage (musique, ambiance, effets, interface), réverbération, compresseur et limiteur de sortie,
 // voix ponctuelles (stéréo ou positionnées en 3D) avec plafond de voix, écoute qui suit la caméra.
 //
-//   musique ─► filtre/duck ───────────────────────────┐
-//   ambiance ─┐                                       ├─► général ─► compresseur ─► limiteur ─► écrêteur doux ─► sortie
-//   effets ───┴─► monde ─► filtre pause ──────────────┤
-//   (envois réverbération ─► convolution ─► monde)    │
-//   interface ────────────────────────────────────────┘
+//   musique ─► filtre/pause ─► retrait sous les effets ─┐
+//   ambiance ─┐                                         ├─► général ─► limiteur de sécurité ─► écrêteur doux ─► sortie
+//   effets ───┴─► monde ─► filtre pause ────────────────┤
+//   (envois réverbération ─► convolution ─► égaliseur ─► monde)
+//   interface ──────────────────────────────────────────┘
+// Gain unitaire de bout en bout : le mélange est calme par construction (sonie visée -23 à -20 LUFS en course,
+// crêtes vraies sous -3 dBFS), le limiteur ne sert qu'aux empilements exceptionnels.
 import { loadSettings, saveSettings, normalizeSettings, volumeToGain } from './settings.js';
 import { Bank } from './bank.js';
 
@@ -28,6 +30,17 @@ export function biquad(ctx, type = 'lowpass', freq = 1000, q = 0.707) {
   b.Q.value = q;
   return b;
 }
+// Niveau du retour de réverbération partagée.
+const REVERB_LEVEL = 0.7;
+// Gain de sortie fixe (+1,5 dB) : place la course vers -22 LUFS aux réglages par défaut.
+const OUTPUT_TRIM = 1.19;
+
+// Absorption de l'air et du sol : coupure du passe-bas d'une source lointaine (Hz) selon la distance (m).
+// 10 m : presque rien ; 60 m : ~7 kHz ; 120 m : ~2,7 kHz. Les oiseaux et les cloches au loin perdent leur éclat.
+export function distanceCutoff(d) {
+  return Math.max(1200, Math.min(20000, 20000 * Math.exp(-Math.max(0, d) / 57)));
+}
+
 const GESTURES = ['pointerdown', 'pointerup', 'touchend', 'mousedown', 'keydown', 'click'];
 
 export class AudioEngine extends EventTarget {
@@ -173,27 +186,36 @@ export class AudioEngine extends EventTarget {
       return g;
     };
     this.master = gain(0);
-    // Compresseur doux (cohésion du mélange) puis limiteur rapide, enfin écrêteur doux plafonné à 0,96.
-    const glue = c.createDynamicsCompressor();
-    Object.entries({ threshold: -16, knee: 10, ratio: 2.5, attack: 0.012, release: 0.25 }).forEach(([k, v]) => (glue[k].value = v));
+    // Limiteur de sécurité sans gain de compensation : le compresseur du navigateur ajoute un gain automatique
+    // dès que son seuil est sous 0 dB (il gonflait tout le mélange de 8 à 9 dB et l'écrasait en permanence).
+    // Seuil réglé à 0 dB et signal monté de 3 dB juste avant puis redescendu juste après : il agit au-dessus
+    // de -3 dBFS, et le gain reste exactement 1 en dessous.
+    const pre = gain(1.4125);
     const limiter = c.createDynamicsCompressor();
-    Object.entries({ threshold: -4, knee: 0, ratio: 20, attack: 0.002, release: 0.12 }).forEach(([k, v]) => (limiter[k].value = v));
+    Object.entries({ threshold: 0, knee: 0, ratio: 20, attack: 0.002, release: 0.2 }).forEach(([k, v]) => (limiter[k].value = v));
+    const post = gain(0.708);
+    // Écrêteur de dernier recours : transparent sous 0,8 (droite exacte), arrondi au-delà, plafonné à 0,98.
     const clip = c.createWaveShaper();
-    const N = 1024;
+    const N = 2049;
     const curve = new Float32Array(N);
     for (let i = 0; i < N; i++) {
       const x = (i / (N - 1)) * 2 - 1;
-      curve[i] = 0.96 * Math.tanh(x * 1.25) / Math.tanh(1.25);
+      const a = Math.abs(x);
+      const y = a <= 0.8 ? a : 0.8 + 0.18 * Math.tanh((a - 0.8) / 0.18);
+      curve[i] = Math.sign(x) * y;
     }
     clip.curve = curve;
-    this.master.connect(glue).connect(limiter).connect(clip).connect(c.destination);
-    this.out = { glue, limiter, clip };
+    // Pas de suréchantillonnage : sous 0,8 la courbe est une droite exacte (aucune distorsion, aucun repliement)
+    // et le limiteur garde le signal sous 0,71 ; il ne coûterait que du calcul.
+    this.master.connect(pre).connect(limiter).connect(post).connect(clip).connect(c.destination);
+    this.out = { limiter, clip, glue: limiter };
 
     this.buses = { music: gain(), ambience: gain(), sfx: gain(), ui: gain() };
-    // Musique : filtre et atténuation pendant la pause
+    // Musique : filtre et atténuation pendant la pause, puis léger retrait sous les effets importants
     this.musicFilter = biquad(c, 'lowpass', 20000);
     this.musicDuck = gain();
-    this.buses.music.connect(this.musicFilter).connect(this.musicDuck).connect(this.master);
+    this.musicSide = gain();
+    this.buses.music.connect(this.musicFilter).connect(this.musicDuck).connect(this.musicSide).connect(this.master);
     // Monde (ambiance + effets) : passe-bas et atténuation en pause, comme si on s'éloignait de la course
     this.world = gain();
     this.worldFilter = biquad(c, 'lowpass', 20000);
@@ -202,12 +224,13 @@ export class AudioEngine extends EventTarget {
     this.world.connect(this.worldFilter).connect(this.master);
     this.buses.ui.connect(this.master);
     // Réverbération partagée : envois par bus (suivent le volume du bus), réponse impulsionnelle par décor
+    // Retour de réverbération égalisé : ni boue dans le grave, ni brillance métallique (queue chaude et lointaine).
     this.convolver = c.createConvolver();
-    this.reverbOut = gain(0.8);
+    this.reverbOut = gain(REVERB_LEVEL);
     this.wet = { ambience: gain(), sfx: gain() };
     this.wet.ambience.connect(this.convolver);
     this.wet.sfx.connect(this.convolver);
-    this.convolver.connect(this.reverbOut).connect(this.worldFilter);
+    this.convolver.connect(biquad(c, 'highpass', 180, 0.6)).connect(biquad(c, 'lowpass', 5500, 0.6)).connect(this.reverbOut).connect(this.worldFilter);
     this.applyVolumes(true);
   }
 
@@ -219,7 +242,7 @@ export class AudioEngine extends EventTarget {
       if (instant) param.value = v;
       else param.setTargetAtTime(v, t, 0.03);
     };
-    set(this.master.gain, s.muted ? 0 : volumeToGain(s.master));
+    set(this.master.gain, s.muted ? 0 : volumeToGain(s.master) * OUTPUT_TRIM);
     set(this.buses.music.gain, volumeToGain(s.music));
     set(this.buses.ambience.gain, volumeToGain(s.ambience));
     set(this.wet.ambience.gain, volumeToGain(s.ambience));
@@ -263,6 +286,16 @@ export class AudioEngine extends EventTarget {
     this.musicDuck.gain.setTargetAtTime(paused ? 0.5 : 1, t, 0.15);
   }
 
+  // Retrait de la musique sous un effet important (objet, tour, départ) : -3 dB environ, puis retour en douceur.
+  duckMusic(depth = 0.7, hold = 0.5) {
+    if (!this.ctx) return;
+    const g = this.musicSide.gain;
+    const t = this.ctx.currentTime;
+    g.cancelScheduledValues(t);
+    g.setTargetAtTime(depth, t, 0.05);
+    g.setTargetAtTime(1, t + hold, 0.6);
+  }
+
   async setReverb(preset) {
     if (!this.ctx || this.reverbPreset === preset) return;
     this.reverbPreset = preset;
@@ -278,7 +311,7 @@ export class AudioEngine extends EventTarget {
         } catch {
           /* rien */
         }
-        this.reverbOut.gain.setTargetAtTime(0.8, this.ctx.currentTime, 0.2);
+        this.reverbOut.gain.setTargetAtTime(REVERB_LEVEL, this.ctx.currentTime, 0.2);
       }, 250);
     } catch {
       /* pas de réverbération */
@@ -368,10 +401,17 @@ export class AudioEngine extends EventTarget {
       g.gain.linearRampToValueAtTime(level, t + o.fadeIn);
     } else g.gain.value = level;
     let node = src;
-    if (o.lowpass) {
-      const f = biquad(c, 'lowpass', o.lowpass);
-      node.connect(f);
-      node = f;
+    // Passe-bas demandé, ou absorption de l'air pour une source 3D lointaine (au-delà de 15 m)
+    let lp = o.lowpass;
+    if (!lp && spatial && o.air !== false) {
+      const d = this.distanceTo(o.pos);
+      if (d > 15) lp = distanceCutoff(d);
+    }
+    let filter = null;
+    if (lp) {
+      filter = biquad(c, 'lowpass', lp, 0.6);
+      node.connect(filter);
+      node = filter;
     }
     node.connect(g);
     let pan = null;
@@ -415,6 +455,7 @@ export class AudioEngine extends EventTarget {
       if (this.voices.delete(voice) && voice.spatial) this.spatialCount--;
       src.disconnect();
       g.disconnect();
+      filter?.disconnect();
       pan?.disconnect();
       wet?.disconnect();
     };
@@ -490,6 +531,7 @@ export class AudioEngine extends EventTarget {
     if (!this.meters) {
       this.meters = {};
       const taps = { ...this.buses, world: this.worldFilter, out: this.out.clip };
+      // (out : après le limiteur et l'écrêteur, c'est ce qu'entend le joueur)
       for (const [k, n] of Object.entries(taps)) {
         const a = this.ctx.createAnalyser();
         a.fftSize = 4096;
@@ -517,7 +559,9 @@ export class AudioEngine extends EventTarget {
   }
 
   // Source en boucle d'un bruit de base (rose, brun, blanc), départ au hasard dans la boucle.
-  noise(color = 'pink', { rate = 1 } = {}) {
+  // opts : { rate } ou directement la vitesse de lecture (nombre).
+  noise(color = 'pink', opts = {}) {
+    const rate = typeof opts === 'number' ? opts : opts.rate ?? 1;
     const buf = this.bank.get('noise', { color, seconds: 6 });
     if (!buf) return null;
     const src = this.ctx.createBufferSource();

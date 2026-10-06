@@ -1,7 +1,9 @@
 // Spectateurs : groupes positionnés (départ, montées, tribune de l'aviron) qui s'animent quand le coureur
 // approche : brouhaha au repos, puis cris, « allez ! » scandés, sifflets et applaudissements qui enflent.
 // Seuls les deux groupes les plus proches sont actifs (trois boucles chacun), les autres ne coûtent rien.
+// Son chaud et un peu lointain : passe-bas vers 3,2 kHz (qui s'éclaircit à peine au passage), niveaux modérés.
 import { crowdExcitement } from './patterns.js';
+import { biquad, distanceCutoff } from './engine.js';
 
 const CROWD = { excited: true, seconds: 6 };
 const MURMUR = { excited: false, seconds: 6 };
@@ -49,12 +51,13 @@ export class Crowds {
       src.connect(g).connect(mix);
       return { src, g };
     });
-    mix.connect(pan).connect(e.buses.ambience);
+    const tone = biquad(c, 'lowpass', 2600, 0.6);
+    mix.connect(tone).connect(pan).connect(e.buses.ambience);
     const wet = c.createGain();
     wet.gain.value = 0.2;
     pan.connect(wet).connect(e.wet.ambience);
-    const voice = e.adopt(layers.map((l) => l.src), [mix, ...layers.map((l) => l.g), pan, wet], { spatial: true });
-    this.active.set(spot, { voice, layers, mix, ex: -1, burstUntil: 0, wasNear: false });
+    const voice = e.adopt(layers.map((l) => l.src), [mix, tone, ...layers.map((l) => l.g), pan, wet], { spatial: true });
+    this.active.set(spot, { voice, layers, mix, tone, ex: -1, burstUntil: 0, wasNear: false });
   }
 
   deactivate(spot, fade = 1.5) {
@@ -91,14 +94,16 @@ export class Crowds {
       a.chantIn = (a.chantIn ?? 2 + Math.random() * 4) - 0.2;
       if (ex > 0.55 && a.chantIn <= 0) {
         a.chantIn = 3.5 + Math.random() * 6;
-        e.play(e.bank.pool('chant', {}, 3), { bus: 'ambience', pos: spot, ref: spot.ref ?? 14, gain: 0.55 * Math.min(1, ex), rate: 0.95 + Math.random() * 0.1, wet: 0.2, radius: 200 });
+        e.play(e.bank.pool('chant', {}, 3), { bus: 'ambience', pos: spot, ref: spot.ref ?? 14, gain: 0.3 * Math.min(1, ex), rate: 0.95 + Math.random() * 0.1, wet: 0.25, radius: 200 });
       }
       if (Math.abs(ex - a.ex) < 0.02) continue;
       a.ex = ex;
       const [cheer, murmur, claps] = a.layers;
-      cheer.g.gain.setTargetAtTime(0.1 + 0.75 * ex, t, 0.4);
-      murmur.g.gain.setTargetAtTime(0.55 * Math.max(0.15, 1 - ex), t, 0.6);
-      claps.g.gain.setTargetAtTime(0.06 + 0.55 * Math.min(1, ex), t, 0.5);
+      cheer.g.gain.setTargetAtTime(0.06 + 0.42 * ex, t, 0.5);
+      murmur.g.gain.setTargetAtTime(0.35 * Math.max(0.15, 1 - ex), t, 0.7);
+      claps.g.gain.setTargetAtTime(0.04 + 0.3 * Math.min(1, ex), t, 0.6);
+      // Plus proche et plus animée : un peu plus claire ; au loin, l'air la rend sourde
+      a.tone.frequency.setTargetAtTime(Math.min(2400 + 1200 * Math.min(1, ex), distanceCutoff(e.distanceTo(spot))), t, 0.6);
     }
   }
 

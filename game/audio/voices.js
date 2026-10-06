@@ -11,7 +11,9 @@ const secs = (sr, s) => Math.max(1, Math.round(sr * s));
 // =====================================================================
 // Oiseaux
 // =====================================================================
-export function renderSong(sr, notes, { gain = 0.9 } = {}) {
+// Le chant est adouci (passe-bas à un pôle vers 6,5 kHz) : un oiseau entendu à quelques dizaines de mètres,
+// pas un sifflet collé à l'oreille. L'éloignement réel est ajouté au moment de la lecture.
+export function renderSong(sr, notes, { gain = 0.7 } = {}) {
   const len = secs(sr, songDuration(notes) + 0.05);
   const out = new Float32Array(len);
   for (const n of notes) {
@@ -31,7 +33,9 @@ export function renderSong(sr, notes, { gain = 0.9 } = {}) {
       out[start + i] += s * e;
     }
   }
-  return fadeEdges(normalize(out, gain), sr, 2);
+  const soft = new OnePole(6500, sr);
+  for (let i = 0; i < len; i++) out[i] = soft.process(out[i]);
+  return fadeEdges(normalize(out, gain), sr, 3);
 }
 
 // =====================================================================
@@ -182,8 +186,8 @@ export function renderGull(sr, r) {
     parts.push([t, renderVoice(sr, r, {
       dur: s.d,
       jitter: 0.02,
-      breath: 0.16,
-      tilt: 6000,
+      breath: 0.14,
+      tilt: 4500,
       f0: (u) => s.f(u),
       formants: () => [[1800, 4, 1], [3000, 5, 0.6], [900, 3, 0.35]],
       am: (tt) => 1 - 0.25 * (0.5 + 0.5 * Math.sin(TAU * 55 * tt)),
@@ -207,8 +211,8 @@ export function renderRaptor(sr, r) {
     parts.push([t, renderVoice(sr, r, {
       dur: range(r, 0.8, 1.1),
       jitter: 0.02,
-      breath: 0.25,
-      tilt: 7000,
+      breath: 0.18,
+      tilt: 4000,
       f0: (u, tt) => (u < 0.14 ? 1500 + (top - 1500) * smoothstep(0, 0.14, u) : top - (top - 1250) * smoothstep(0.14, 1, u)) * (1 + 0.01 * Math.sin(TAU * 18 * tt)),
       formants: () => [[2500, 3, 1], [4200, 4, 0.45], [1500, 3, 0.3]],
       am: (tt) => 1 - 0.2 * (0.5 + 0.5 * Math.sin(TAU * 30 * tt)),
@@ -295,17 +299,18 @@ export function renderCowbell(sr, r, { f0 = 650, double = false } = {}) {
   const len = secs(sr, 1.5);
   const out = new Float32Array(len);
   const ratios = [1, 1.59, 2.14, 2.68, 3.37, 4.12, 5.2];
-  const amps = [1, 0.62, 0.48, 0.36, 0.26, 0.16, 0.1];
+  const amps = [1, 0.55, 0.38, 0.26, 0.16, 0.08, 0.04];
   const t60 = [1.25, 0.95, 0.7, 0.52, 0.4, 0.3, 0.22];
   const hits = double ? [[0, 1], [Math.round(sr * range(r, 0.045, 0.085)), 0.45]] : [[0, 1]];
   for (const [at, g] of hits) {
     ratios.forEach((q, k) => partial(out, sr, at, f0 * q * range(r, 0.995, 1.005), amps[k] * g * range(r, 0.7, 1.1), t60[k] * range(r, 0.85, 1.15), 0.0025 + r() * 0.003, r() * TAU));
-    // Claquement du battant sur la tôle
+    // Claquement du battant sur la tôle (feutré, sans bord franc)
     const click = Math.round(sr * 0.004);
-    const hp = new Filter('highpass', 2200, 0.8, sr);
-    for (let i = 0; i < click && at + i < len; i++) out[at + i] += hp.process(r() * 2 - 1) * g * 0.5 * (1 - i / click);
+    const bp = new Filter('bandpass', 1600, 0.8, sr);
+    for (let i = 0; i < click && at + i < len; i++) out[at + i] += bp.process(r() * 2 - 1) * g * 0.25 * Math.sin((Math.PI * i) / click);
   }
-  return fadeEdges(normalize(out, 0.85), sr, 1);
+  new Filter('lowpass', 5000, 0.6, sr).run(out);
+  return fadeEdges(normalize(out, 0.8), sr, 2);
 }
 
 // Cloche d'église : bourdon (hum), fondamentale, tierce mineure, quinte, nominale et partiels aigus.
@@ -318,10 +323,10 @@ export function renderChurchBell(sr, r, { nominal = 440, dur = 8 } = {}) {
   ];
   for (const [q, a, t] of P) partial(out, sr, 0, nominal * q, a * range(r, 0.85, 1.1), t * range(r, 0.9, 1.1), 0.0012 + r() * 0.002, r() * TAU);
   // Frappe du battant : quelques partiels très aigus et brefs, plus un souffle métallique
-  for (const q of [7.3, 8.9, 11.2]) partial(out, sr, 0, nominal * q, 0.12, 0.08, 0.004, r() * TAU);
-  const hp = new Filter('bandpass', 3500, 1, sr);
+  for (const q of [7.3, 8.9, 11.2]) partial(out, sr, 0, nominal * q, 0.06, 0.08, 0.004, r() * TAU);
+  const hp = new Filter('bandpass', 2500, 1, sr);
   const click = Math.round(sr * 0.012);
-  for (let i = 0; i < click; i++) out[i] += hp.process(r() * 2 - 1) * 0.4 * (1 - i / click);
+  for (let i = 0; i < click; i++) out[i] += hp.process(r() * 2 - 1) * 0.25 * Math.sin((Math.PI * i) / click);
   // Fin du son : fondu long, la résonance s'éteint au lieu d'être coupée
   const tail = Math.round(sr * 1.5);
   for (let i = 0; i < tail; i++) out[len - tail + i] *= Math.cos((Math.PI / 2) * (i / tail));
@@ -339,10 +344,10 @@ export function renderWoodTok(sr, r, { f = 200 } = {}) {
   partial(out, sr, 0, f * 2.57, 0.45, 0.05, 0.004, 1);
   partial(out, sr, 0, f * 4.2, 0.25, 0.03, 0.005, 2);
   partial(out, sr, 0, 115, 0.6, 0.12, 0.002, 0); // caisson creux sous les planches
-  const lp = new Filter('lowpass', 2200, 0.7, sr);
+  const lp = new Filter('lowpass', 1800, 0.7, sr);
   const click = Math.round(sr * 0.005);
-  for (let i = 0; i < click; i++) out[i] += lp.process(r() * 2 - 1) * 0.6 * (1 - i / click);
-  return fadeEdges(normalize(out, 0.8), sr, 1);
+  for (let i = 0; i < click; i++) out[i] += lp.process(r() * 2 - 1) * 0.45 * Math.sin((Math.PI * i) / click);
+  return fadeEdges(normalize(out, 0.8), sr, 2);
 }
 
 // Bulles de Minnaert (modèle de van den Doel) : chaque bulle sonne à sa fréquence, s'amortit et monte
@@ -419,20 +424,22 @@ export function renderLapping(sr, r, { seconds = 8 } = {}) {
 }
 
 // Éclaboussure de l'aviron à l'attaque : gerbe bruitée, « plouf » grave et pluie de petites bulles.
+// Eau naturelle : bruit adouci (passe-bas vers 4 kHz), bulles résonantes surtout entre 300 Hz et 2 kHz.
 export function renderSplash(sr, r, { size = 1 } = {}) {
-  const len = secs(sr, 0.45);
+  const len = secs(sr, 0.5);
   const out = new Float32Array(len);
-  const bp = new Filter('bandpass', range(r, 1000, 1500) / Math.sqrt(size), 0.7, sr);
-  const hp = new Filter('highpass', 350, 0.7, sr);
-  const tau = 0.04 * size;
+  const bp = new Filter('bandpass', range(r, 800, 1200) / Math.sqrt(size), 0.6, sr);
+  const hp = new Filter('highpass', 250, 0.7, sr);
+  const tau = 0.045 * size;
   for (let i = 0; i < len; i++) {
     const t = i / sr;
-    out[i] = hp.process(bp.process(r() * 2 - 1)) * Math.min(1, t / 0.003) * Math.exp(-t / tau) * 2.2;
+    out[i] = hp.process(bp.process(r() * 2 - 1)) * smoothstep(0, 0.006, t) * Math.exp(-t / tau) * 2.2;
   }
-  addBubble(out, sr, Math.round(sr * 0.004), range(r, 280, 420) / Math.sqrt(size), 0.9);
-  const nb = irange(r, 10, 20);
-  for (let k = 0; k < nb; k++) addBubble(out, sr, Math.floor(r() * sr * 0.18), logRange(r, 900, 3200), range(r, 0.05, 0.25));
-  return fadeEdges(normalize(out, 0.85), sr, 2);
+  addBubble(out, sr, Math.round(sr * 0.004), range(r, 260, 400) / Math.sqrt(size), 0.9);
+  const nb = irange(r, 8, 16);
+  for (let k = 0; k < nb; k++) addBubble(out, sr, Math.floor(r() * sr * 0.2), logRange(r, 500, 2000), range(r, 0.05, 0.22));
+  new Filter('lowpass', 4000, 0.6, sr).run(out);
+  return fadeEdges(normalize(dcBlock(out, sr), 0.8), sr, 3);
 }
 
 // Glouglou de la pale pendant la propulsion : bulles et eau poussée.
@@ -446,8 +453,9 @@ export function renderDrips(sr, r) {
   const out = new Float32Array(len);
   mixInto(out, renderSplash(sr, r, { size: 0.5 }), 0, 0.5);
   const n = irange(r, 3, 7);
-  for (let k = 0; k < n; k++) addBubble(out, sr, Math.floor(range(r, 0.06, 0.45) * sr), logRange(r, 1100, 3200), range(r, 0.15, 0.45));
-  return fadeEdges(normalize(out, 0.8), sr, 2);
+  for (let k = 0; k < n; k++) addBubble(out, sr, Math.floor(range(r, 0.06, 0.45) * sr), logRange(r, 800, 2200), range(r, 0.12, 0.35));
+  new Filter('lowpass', 4500, 0.6, sr).run(out);
+  return fadeEdges(normalize(out, 0.75), sr, 3);
 }
 
 // Coup de pagaie (kayak) : attaque sourde « toump », traction gargouillante, sortie avec gouttes.
@@ -457,7 +465,7 @@ export function renderPaddle(sr, r, { strength = 1 } = {}) {
   const lp = new Filter('lowpass', 1300, 0.8, sr);
   for (let i = 0; i < sr * 0.12; i++) {
     const t = i / sr;
-    out[i] += lp.process(r() * 2 - 1) * Math.min(1, t / 0.004) * Math.exp(-t / 0.035) * 1.6 * strength;
+    out[i] += lp.process(r() * 2 - 1) * smoothstep(0, 0.006, t) * Math.exp(-t / 0.035) * 1.6 * strength;
   }
   addBubble(out, sr, Math.round(sr * 0.003), range(r, 210, 320), 0.9 * strength);
   mixInto(out, renderGurgle(sr, r, { dur: 0.35 + 0.1 * strength }), Math.round(sr * 0.05), 0.55 * strength);
@@ -487,11 +495,12 @@ export function renderSeatSlide(sr, r, { dur = 0.9 } = {}) {
 export function renderOarlock(sr, r) {
   const len = secs(sr, 0.12);
   const out = new Float32Array(len);
-  partial(out, sr, 0, range(r, 1000, 1250), 1, 0.035, 0.004, 0);
-  partial(out, sr, 0, range(r, 2500, 2900), 0.6, 0.025, 0.005, 1);
-  const hp = new Filter('highpass', 1500, 0.7, sr);
-  for (let i = 0; i < sr * 0.003; i++) out[i] += hp.process(r() * 2 - 1) * 0.6;
-  return fadeEdges(normalize(out, 0.8), sr, 1);
+  partial(out, sr, 0, range(r, 700, 900), 1, 0.035, 0.004, 0);
+  partial(out, sr, 0, range(r, 1700, 2000), 0.35, 0.02, 0.005, 1);
+  const lp = new Filter('lowpass', 2500, 0.7, sr);
+  const n = Math.round(sr * 0.003);
+  for (let i = 0; i < n; i++) out[i] += lp.process(r() * 2 - 1) * 0.4 * Math.sin((Math.PI * i) / n);
+  return fadeEdges(normalize(out, 0.7), sr, 2);
 }
 
 // =====================================================================
@@ -504,16 +513,18 @@ export function renderCrunch(sr, r, { seconds = 2 } = {}) {
   const count = Math.round(260 * seconds);
   for (let k = 0; k < count; k++) {
     const at = Math.floor(r() * len);
-    const n = Math.round(sr * range(r, 0.0008, 0.004));
+    const n = Math.round(sr * range(r, 0.0015, 0.006));
     const amp = Math.pow(r(), 2.2);
-    for (let i = 0; i < n; i++) out[(at + i) % len] += (r() * 2 - 1) * amp * (1 - i / n);
+    // Grain fenêtré (montée et descente en sinus) : craquement net mais sans bord vif
+    for (let i = 0; i < n; i++) out[(at + i) % len] += (r() * 2 - 1) * amp * Math.sin((Math.PI * i) / n) * (1 - 0.5 * (i / n));
   }
-  const bp = new Filter('bandpass', 2600, 0.6, sr);
-  const lo = new Filter('peaking', 700, 1, sr, 5);
-  loopFilter(out, bp, lo);
-  const bed = pink(len, r);
-  loopFilter(bed, new Filter('highpass', 3000, 0.7, sr));
-  for (let i = 0; i < len; i++) out[i] += bed[i] * 0.35;
+  const bp = new Filter('bandpass', 1500, 0.6, sr);
+  const lo = new Filter('peaking', 600, 1, sr, 5);
+  const lp = new Filter('lowpass', 4000, 0.6, sr);
+  loopFilter(out, bp, lo, lp);
+  const bed = pink(len, r, true);
+  loopFilter(bed, new Filter('bandpass', 900, 0.7, sr));
+  for (let i = 0; i < len; i++) out[i] += bed[i] * 0.25;
   return normalize(out, 0.8);
 }
 
@@ -527,7 +538,7 @@ export function renderInsects(sr, r, { seconds = 8, kind = 'meadow' } = {}) {
     const n = 4;
     for (let k = 0; k < n; k++) {
       const pulse = range(r, 170, 260);
-      const res = new Filter('bandpass', range(r, 4800, 6200), 7, sr);
+      const res = new Filter('bandpass', range(r, 4400, 5600), 6, sr);
       const [gl, gr] = panGains(range(r, -0.9, 0.9));
       const amp = range(r, 0.4, 1);
       // Profil de chant : montée, palier pulsé, descente, silence (en boucle).
@@ -559,7 +570,7 @@ export function renderInsects(sr, r, { seconds = 8, kind = 'meadow' } = {}) {
     return normalizeStereo(L, R, 0.7);
   }
   // Deux textures de stridulation (bruit filtré) partagées par les individus.
-  const tex = [6500, 8600].map((f) => loopFilter(white(len, r), new Filter('bandpass', f, 2.2, sr)));
+  const tex = [5600, 7000].map((f) => loopFilter(white(len, r), new Filter('bandpass', f, 3, sr), new Filter('lowpass', 8000, 0.6, sr)));
   const n = 6;
   for (let k = 0; k < n; k++) {
     const src = tex[k % 2];
@@ -685,19 +696,21 @@ export async function renderCrowd(sr, r, { seconds = 6, excited = true, voices =
       const at = Math.floor(r() * len);
       const dur = range(r, 0.35, 0.8);
       const n = secs(sr, dur);
-      const f0 = range(r, 2100, 2800);
+      const f0 = range(r, 1700, 2200);
       const [gl, gr] = panGains(range(r, -0.9, 0.9));
       let ph = 0;
       for (let i = 0; i < n; i++) {
         const u = i / n;
         ph += (f0 * (1 + 0.35 * smoothstep(0, 0.4, u) - 0.1 * smoothstep(0.7, 1, u))) / sr;
-        const v = (Math.sin(TAU * ph) + (r() * 2 - 1) * 0.1) * arEnv(u, 0.1, 0.2) * 0.35;
+        const v = Math.sin(TAU * ph) * arEnv(u, 0.15, 0.25) * 0.1;
         L[(at + i) % len] += v * gl;
         R[(at + i) % len] += v * gr;
       }
     }
   }
-  return normalizeStereo(dcBlock(L, sr), dcBlock(R, sr), 0.8);
+  // Brouhaha chaud : plafond vers 3 kHz ; filtres passés en boucle (raccord sans saut)
+  for (const ch of [L, R]) loopFilter(ch, new Filter('highpass', 20, 0.7, sr), new Filter('lowpass', 3200, 0.6, sr));
+  return normalizeStereo(L, R, 0.8);
 }
 
 // « Al-lez ! Al-lez ! Al-lez ! » scandé par un groupe (petits décalages entre les voix), joué de temps en temps
@@ -730,14 +743,14 @@ export async function renderApplause(sr, r, { seconds = 6, clappers = 36, yieldF
   let budget = performance.now();
   for (let k = 0; k < clappers; k++) {
     const period = range(r, 0.2, 0.34);
-    const bp = new Filter('bandpass', range(r, 800, 2600), range(r, 1, 2), sr);
+    const bp = new Filter('bandpass', range(r, 700, 2000), range(r, 1, 2), sr);
     const [gl, gr] = panGains(range(r, -1, 1));
     const amp = range(r, 0.3, 1);
     for (let t = r() * period; t < seconds; t += period * range(r, 0.9, 1.1)) {
       const at = Math.floor(t * sr);
       const n = Math.round(sr * range(r, 0.015, 0.03));
       for (let i = 0; i < n; i++) {
-        const e = Math.min(1, i / (sr * 0.0008)) * Math.exp(-i / (sr * 0.006));
+        const e = Math.min(1, i / (sr * 0.002)) * Math.exp(-i / (sr * 0.007));
         const v = bp.process(r() * 2 - 1) * e * amp;
         L[(at + i) % len] += v * gl;
         R[(at + i) % len] += v * gr;
@@ -748,6 +761,8 @@ export async function renderApplause(sr, r, { seconds = 6, clappers = 36, yieldF
       budget = performance.now();
     }
   }
+  loopFilter(L, new Filter('lowpass', 5000, 0.6, sr));
+  loopFilter(R, new Filter('lowpass', 5000, 0.6, sr));
   return normalizeStereo(L, R, 0.8);
 }
 
