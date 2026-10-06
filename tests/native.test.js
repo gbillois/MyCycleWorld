@@ -127,6 +127,8 @@ test('révision 1 : tapis de course sans puissance, machine déconnectée', () =
   win.mcwNative.state({ ...STATE, machineKind: 'treadmill', power: undefined });
   assert.equal(devices.machineKind, 'treadmill');
   assert.equal(devices.trainerActive, false, 'pas de puissance : le jeu reste au clavier');
+  win.mcwNative.state({ ...STATE, machineKind: 'treadmill', power: 210 });
+  assert.equal(devices.trainerActive, true, 'puissance estimée par l’appli : le tapis fait avancer le jeu');
   win.mcwNative.state({ ...STATE, trainer: { connected: false }, machineKind: 'rower' });
   assert.equal(devices.machineKind, null);
   assert.equal(devices.trainer.kind, null);

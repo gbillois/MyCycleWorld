@@ -120,9 +120,10 @@ export class NativeDevices extends EventTarget {
     else this.keyEmitter.buttonUp(name);
   }
 
-  // Un tapis de course ne fournit pas de puissance : le jeu reste alors au clavier, comme sur le web.
+  // Toute machine connectée fait avancer le jeu. Tapis de course : seulement quand l'appli envoie sa
+  // puissance estimée (vitesse et pente) ; sinon (ancienne appli) le jeu reste au clavier.
   get trainerActive() {
-    return this.trainer.connected && this.trainer.kind !== 'treadmill';
+    return this.trainer.connected && (this.trainer.kind !== 'treadmill' || this.trainer.data.power != null);
   }
 
   // Type de la machine connectée : bike | cross | rower | treadmill | power (null si aucune).

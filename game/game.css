@@ -1545,3 +1545,11 @@ body.touch, body.touch #hud, body.touch #rowHud { -webkit-user-select: none; use
 .mtb-cue-hint { margin-top: 7px; font: 600 16px/1 var(--f-ui); letter-spacing: 0.04em; color: #fff; text-shadow: 0 2px 6px rgba(0, 0, 0, 0.8); }
 @keyframes mtb-cue-in { from { opacity: 0; transform: translate(-50%, -30%) scale(0.85); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
 @media (prefers-reduced-motion: reduce) { #hud > .mtb-cue { animation: none; } }
+
+/* Jouer : machine connectée mise en avant */
+.machine-card.connected { border-color: rgba(60, 207, 122, 0.85); box-shadow: 0 0 0 2px rgba(60, 207, 122, 0.35), 0 10px 26px rgba(0, 0, 0, 0.35); }
+.machine-card.connected::after {
+  content: attr(data-badge); position: absolute; top: 10px; right: 10px; z-index: 2;
+  padding: 4px 10px; border-radius: 999px; font: 700 12px/1 var(--f-ui); letter-spacing: 0.04em; text-transform: uppercase;
+  color: #06210f; background: #3ccf7a; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}

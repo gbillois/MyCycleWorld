@@ -1017,7 +1017,26 @@ function setStatus(id, text, cls = '') {
 
 let busy = { trainer: false, hr: false, zwift: false };
 
+// Jouer : la carte de la machine connectée est mise en avant (badge, focus par défaut) ; un tapis de
+// course ou un capteur de puissance joue les circuits vélo.
+let markedKind;
+function markConnectedMachine() {
+  const kind = devices.trainer.connected ? devices.machineKind : null;
+  if (kind === markedKind) return; // appelé souvent : ne touche au DOM qu'au changement
+  markedKind = kind;
+  const want = kind === 'cross' ? 'cross' : kind === 'rower' ? 'row' : kind ? 'bike' : null;
+  for (const card of document.querySelectorAll('[data-machine]')) {
+    const on = card.dataset.machine === want;
+    card.classList.toggle('connected', on);
+    if (on) {
+      card.setAttribute('aria-current', 'true');
+      card.dataset.badge = kind === 'treadmill' ? 'Tapis connecté' : 'Connecté';
+    } else card.removeAttribute('aria-current');
+  }
+}
+
 function refreshDevices() {
+  markConnectedMachine();
   const t = devices.trainer;
   if (!busy.trainer) {
     if (t.connected) {
@@ -1043,7 +1062,7 @@ function refreshDevices() {
     gfxLabel: `${DETAILED ? 'graphismes détaillés' : 'graphisme simple'} · météo ${WEATHER_LABELS[weatherPref].toLowerCase()}`,
   });
   refreshHwTest();
-  const verb = { rower: 'Rame', cross: 'Pédale sur l’elliptique' }[devices.machineKind] || 'Pédale';
+  const verb = { rower: 'Rame', cross: 'Pédale sur l’elliptique', treadmill: 'Cours sur le tapis' }[devices.machineKind] || 'Pédale';
   $('modeHint').textContent = t.connected
     ? `${t.name} fournit la puissance. ${verb} pour avancer !`
     : TOUCH
