@@ -29,6 +29,9 @@ import { BleInspector, parseServiceList } from '../src/ble/inspector.js';
 import { FrameGovernor } from '../src/core/framerate.js';
 import { TapDrive } from '../src/core/taps.js';
 import { createAudio } from './audio/index.js';
+import { KayakMode } from './kayak-mode.js';
+import { KAYAK_LEVELS, kayakCard, kayakPreview } from './kayak-menu.js';
+import { riverById } from './rivers.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -72,9 +75,9 @@ let tapEnabled = storedPref(TAP_KEY) !== 'off';
 const tapDrive = new TapDrive();
 let playMachine = 'bike'; // bike | cross | row : machine choisie dans « Jouer »
 
-// Puissance simulée au clavier (sans home trainer). Au rameur : 180 W à 26 coups/min.
+// Puissance simulée au clavier (sans home trainer). Au rameur : 180 W à 26 coups/min ; en kayak, Maj + ↑ = sprint.
 const SIM = { power: 250, cadence: 90, rise: 900, fall: 140, cadenceFall: 70 };
-const SIM_ROW = { power: 180, rate: 26 };
+const SIM_ROW = { power: 180, rate: 26, sprint: 250, sprintRate: 32 };
 const TURBO_GRADE = -5;
 const BANANA_GRADE = 10;
 
@@ -166,6 +169,43 @@ if (TOUCH) document.body.classList.add('touch');
 
 // Son (voir audio/index.js) : démarre au premier geste, réglages dans Options.
 const audio = createAudio({ quality: QUALITY, touch: TOUCH });
+
+// Sons du mode kayak : abonnement aux événements de chaque nouvelle course, coups de pagaie au rythme du joueur.
+const kayakAudio = { race: null, half: 0, count: 0 };
+function kayakSounds() {
+  const r = kayak?.race;
+  if (!r) return;
+  if (r !== kayakAudio.race) {
+    kayakAudio.race = r;
+    kayakAudio.half = Math.floor(r.player.phase / Math.PI);
+    kayakAudio.count = Math.ceil(-r.time);
+    const mine = (d) => d?.racer?.isPlayer;
+    r.addEventListener('go', () => audio.sfx('horn'));
+    r.addEventListener('gate', ({ detail: d }) => mine(d) && audio.sfx(d.ok ? 'gate-pass' : 'gate-miss'));
+    r.addEventListener('sprint', ({ detail: d }) => mine(d) && audio.sfx(d.ok ? 'sprint-gate' : 'sprint-fail'));
+    r.addEventListener('glide', ({ detail: d }) => mine(d) && audio.sfx(d.ok ? 'whoosh' : 'bump'));
+    r.addEventListener('bump', ({ detail: d }) => mine(d) && audio.sfx('bump'));
+    r.addEventListener('pickup', ({ detail: d }) => mine(d) && audio.sfx('pickup'));
+    r.addEventListener('use', ({ detail: d }) => mine(d) && d.item === 'turbo' && audio.sfx('turbo'));
+    r.addEventListener('whirl-hit', ({ detail: d }) => mine(d) && audio.sfx('whirlpool', { duration: 2.5 }));
+    r.addEventListener('finish', ({ detail: d }) => {
+      if (!d?.isPlayer) return;
+      audio.sfx('fanfare');
+      const pos = r.positionOf ? r.positionOf(d) : 9;
+      setTimeout(() => audio.sfx(pos === 1 ? 'win' : pos <= 3 ? 'podium' : 'finish-other'), 1800);
+    });
+  }
+  // Compte à rebours 3, 2, 1
+  if (r.time < 0) {
+    const c = Math.ceil(-r.time);
+    if (c < kayakAudio.count) audio.sfx('beep');
+    kayakAudio.count = c;
+  }
+  // Un coup d'aviron du rameur = un coup de pagaie à gauche puis un à droite.
+  const half = Math.floor(r.player.phase / Math.PI);
+  if (half !== kayakAudio.half && state === 'race' && r.player.strokeRate > 1) audio.sfx('paddle', { side: half % 2 ? 'right' : 'left' });
+  kayakAudio.half = half;
+}
 menu.sound = (kind) => audio.ui(kind);
 
 function resize() {
@@ -202,8 +242,9 @@ if (NATIVE) {
 const keys = new Set();
 const sim = { power: 0, cadence: 0 };
 let state = 'home'; // home | race | paused | end
-let mode = 'bike'; // bike | row
+let mode = 'bike'; // bike | row | kayak
 let rowing = null; // { race, world, boats } en mode rameur
+let kayak = null; // KayakMode (kayak-mode.js) en mode kayak
 let race = null;
 let models = new Map(); // racer -> RiderModel
 let boxMeshes = [];
@@ -291,6 +332,7 @@ function show(id) {
   const racing = state === 'race' || state === 'paused' || state === 'end';
   hud.show(racing && mode === 'bike');
   $('rowHud').hidden = !(racing && mode === 'row');
+  $('kayakHud').hidden = !(racing && mode === 'kayak');
   if (id === 'home') {
     menu.close(false);
     menu.focusDefault();
@@ -300,6 +342,7 @@ function show(id) {
 async function goHome() {
   clearTimeout(endTimer);
   if (mode === 'row') await leaveRowing();
+  if (mode === 'kayak') await leaveKayak();
   state = 'home';
   setupRace();
   show('home');
@@ -336,6 +379,7 @@ function resume() {
 
 function showEnd() {
   if (mode === 'row') return showRowEnd();
+  if (mode === 'kayak') return showKayakEnd();
   if (state === 'paused') {
     endTimer = setTimeout(showEnd, 500);
     return;
@@ -538,12 +582,16 @@ function rowPreview(d) {
     </div>
   </div>`;
 }
-$('rowList').innerHTML = ROW_LEVELS.map((l) => `<button type="button" class="course-card" data-row="${l.distance}" data-theme="lake"><span class="cc-map">${rowSvg(l.distance)}</span><span class="cc-body"><span class="c-name">${l.name}</span><span class="c-tag">${l.tagline}</span><span class="c-stats"><span>${l.distance} m</span><span>6 bateaux</span><span>temps visé ${l.ref}</span></span></span>${stars(l.difficulty)}</button>`).join('');
+$('rowList').innerHTML = ROW_LEVELS.map((l) => `<button type="button" class="course-card" data-row="${l.distance}" data-theme="lake"><span class="cc-map">${rowSvg(l.distance)}</span><span class="cc-body"><span class="c-name">${l.name}</span><span class="c-tag">${l.tagline}</span><span class="c-stats"><span>${l.distance} m</span><span>6 bateaux</span><span>temps visé ${l.ref}</span></span></span>${stars(l.difficulty)}</button>`).join('')
+  + KAYAK_LEVELS.map((id) => kayakCard(id, stars)).join(''); // kayak cross : rivières (kayak-menu.js)
 showPreview('rowPreview', 500, rowPreview);
 bindPreview('rowList', 'rowPreview', 'data-row', rowPreview);
+bindPreview('rowList', 'rowPreview', 'data-kayak', (id) => kayakPreview(id, { stars, icon }));
 $('rowList').addEventListener('click', (e) => {
   const card = e.target.closest('[data-row]');
   if (card) startRowing(+card.dataset.row);
+  const k = e.target.closest('[data-kayak]');
+  if (k) startKayak(k.dataset.kayak);
 });
 
 // Jouer : choix de la machine, puis du niveau.
@@ -768,6 +816,93 @@ function showRowEnd() {
   fillEnd(rows, { kind: 'row', distance: r.distance, note: 'le rameur' });
 }
 
+// ---------- Mode kayak cross ----------
+
+// Descente de rivière (kayak-mode.js) : le décor du circuit est libéré, celui de la rivière construit à la place.
+async function startKayak(id = 'gorges') {
+  keepScreenOn();
+  devices.prepareRace?.();
+  clearTimeout(endTimer);
+  document.activeElement?.blur?.();
+  const def = riverById(id);
+  if (mode !== 'kayak' || kayak.riverId !== def.id) {
+    $('loadingText').textContent = `Chargement : ${def.name}…`;
+    show('loading');
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    if (mode === 'bike') {
+      scenery.dispose();
+      disposeTree(raceObjects);
+      raceObjects.clear();
+      models = new Map();
+      boxMeshes = [];
+    }
+    if (!kayak) {
+      kayak = new KayakMode({ scene, raceObjects, camera, sun, renderer, quality: QUALITY, detailed: DETAILED, hud, devices });
+      kayak.onFinish = () => (endTimer = setTimeout(showEnd, 2200));
+    }
+    mode = 'kayak';
+    kayak.load(def.id);
+  }
+  kayak.setup();
+  state = 'race';
+  lastSentGrade = null;
+  show(null);
+  hud.flash('', 1);
+}
+
+// Revient au vélo : décor du circuit reconstruit.
+async function leaveKayak() {
+  $('loadingText').textContent = `Chargement : ${track.course.name}…`;
+  show('loading');
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  kayak.dispose();
+  raceObjects.clear();
+  mode = 'bike';
+  buildWorld();
+}
+
+// Entrées du kayak (objet réutilisé à chaque image) : puissance et cadence de la machine, des tapotements ou du clavier.
+const kIn = { power: 0, strokeRate: 0, steer: 0, auto: false, machine: 'other' };
+function kayakInput() {
+  const trainer = devices.trainerActive;
+  const rate = devices.trainer?.data?.strokeRate;
+  const sprinting = !trainer && !sim.tapRate && (keys.has('ShiftLeft') || keys.has('ShiftRight')) && keys.has('ArrowUp');
+  kIn.power = trainer ? devices.power : sim.power;
+  kIn.strokeRate = trainer ? rate ?? (devices.machineKind === 'rower' ? devices.cadence : 0) : sim.tapRate ? sim.tapRate : sim.power > 20 ? (sprinting ? SIM_ROW.sprintRate : SIM_ROW.rate) * Math.min(1, sim.power / SIM_ROW.power) : 0;
+  kIn.steer = (keys.has('ArrowRight') ? 1 : 0) - (keys.has('ArrowLeft') ? 1 : 0);
+  kIn.auto = autoSteer();
+  kIn.machine = trainer && devices.machineKind === 'rower' ? 'rower' : 'other';
+  return kIn;
+}
+
+function kayakHud() {
+  const kind = devices.machineKind;
+  let hint = '';
+  if (!devices.trainerActive) {
+    if (tapEnabled) hint = sim.tapRate ? '' : TOUCH ? 'Tape l’écran à chaque coup de pagaie (plus vite pour sprinter)' : 'Clique en rythme pour pagayer, ou maintiens ↑ (Maj + ↑ pour sprinter)';
+    else hint = TOUCH ? 'Maintiens « Pédaler » pour pagayer' : 'Maintiens ↑ pour pagayer · Maj + ↑ pour sprinter · ← → pour tourner';
+  } else if (kind && kind !== 'rower') hint = `Machine connectée : ${MACHINE_LABELS[kind] || kind} (sa puissance fait avancer le kayak)`;
+  touch?.setPedalVisible(!devices.trainerActive);
+  touch?.setItemReady(!!kayak.race?.player.item);
+  kHud.hint = hint;
+  kHud.autoSteer = autoSteer() && !keys.has('ArrowLeft') && !keys.has('ArrowRight');
+  kHud.heartRate = devices.heartRate;
+  kHud.trainer = devices.trainerActive;
+  return kHud;
+}
+const kHud = { hint: '', autoSteer: false, heartRate: null, trainer: false };
+
+function showKayakEnd() {
+  if (state === 'paused') {
+    endTimer = setTimeout(showEnd, 500);
+    return;
+  }
+  if (state !== 'race') return;
+  state = 'end';
+  touch?.releaseAll();
+  fillEnd(kayak.results(), { kind: 'kayak', note: 'le kayakiste' });
+}
+
 // ---------- Matériel ----------
 
 function setStatus(id, text, cls = '') {
@@ -831,7 +966,7 @@ $('connectHr').addEventListener('click', () => connect('hr', 'hrStatus', () => d
 $('connectZwift').addEventListener('click', () => connect('zwift', 'zwiftStatus', () => devices.connectController()));
 $('resume').addEventListener('click', resume);
 $('quit').addEventListener('click', goHome);
-$('replay').addEventListener('click', () => (mode === 'row' ? startRowing(rowing.distance) : startRace()));
+$('replay').addEventListener('click', replay);
 $('backHome').addEventListener('click', goHome);
 
 if (NATIVE) {
@@ -1060,6 +1195,13 @@ for (const btn of document.querySelectorAll('.seg-btn[data-gfx]')) {
   });
 }
 
+// Rejouer la même course (vélo, aviron ou kayak).
+function replay() {
+  if (mode === 'row') startRowing(rowing.distance);
+  else if (mode === 'kayak') startKayak(kayak.riverId);
+  else startRace();
+}
+
 // ---------- Clavier (et manettes, via KeyEmitter) ----------
 
 const PREVENT = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space']);
@@ -1079,9 +1221,11 @@ window.addEventListener('keydown', (e) => {
     else if (state === 'end') goHome();
   } else if (code === 'Space' && state === 'race' && mode === 'bike') {
     race.useItem(race.player);
+  } else if (code === 'Space' && state === 'race' && mode === 'kayak') {
+    kayak.useItem();
   } else if (code === 'Enter' || code === 'NumpadEnter') {
     if (state === 'paused') resume();
-    else if (state === 'end') (mode === 'row' ? startRowing(rowing.distance) : startRace());
+    else if (state === 'end') replay();
   }
 });
 window.addEventListener('keyup', (e) => keys.delete(e.code));
@@ -1104,7 +1248,7 @@ gears.addEventListener('change', () => {
 // ---------- Boucle ----------
 
 function updateSim(dt) {
-  const kind = mode === 'row' ? 'row' : 'bike';
+  const kind = mode === 'bike' ? 'bike' : 'row';
   const now = performance.now();
   // Tapotements : la puissance et la cadence suivent le rythme (sans machine connectée).
   const tapping = tapEnabled && !devices.trainerActive && state !== 'paused' && tapDrive.active(now, kind);
@@ -1117,7 +1261,8 @@ function updateSim(dt) {
     return;
   }
   const pedaling = keys.has('ArrowUp') && !devices.trainerActive && state !== 'paused';
-  const maxPower = mode === 'row' ? SIM_ROW.power : SIM.power;
+  const sprint = mode === 'kayak' && (keys.has('ShiftLeft') || keys.has('ShiftRight'));
+  const maxPower = mode === 'row' ? SIM_ROW.power : mode === 'kayak' ? (sprint ? SIM_ROW.sprint : SIM_ROW.power) : SIM.power;
   if (pedaling) {
     sim.power = Math.min(maxPower, sim.power + SIM.rise * dt);
     sim.cadence = Math.min(SIM.cadence, sim.cadence + 200 * dt);
@@ -1166,6 +1311,17 @@ function playerInput() {
 
 // Pente envoyée au trainer : terrain + effets des objets, puis vitesses virtuelles.
 function updateGrade() {
+  if (mode === 'kayak') {
+    // Kayak : les rapides sont un peu plus durs (pente légère au vélo et à l'elliptique, résistance douce au rameur).
+    const kind = devices.machineKind;
+    const g = state === 'race' ? kayak.grade(kind) : 0;
+    feltGrade = kind === 'rower' ? g : gears.effectiveGrade(g);
+    if (lastSentGrade === null || Math.abs(feltGrade - lastSentGrade) >= 0.1) {
+      lastSentGrade = feltGrade;
+      devices.sendGrade(feltGrade, g);
+    }
+    return g;
+  }
   if (mode === 'row') {
     // Au rameur, pas de pente : on laisse la machine sur sa résistance (et un trainer sur du plat).
     if (lastSentGrade !== 0 && devices.machineKind !== 'rower') devices.sendGrade(0, 0);
@@ -1308,7 +1464,16 @@ function frame(nowMs) {
   const dt = Math.min(0.1, Math.max(0, (nowMs - lastFrame) / 1000));
   lastFrame = nowMs;
   updateSim(dt);
-  audio.update({ dt, mode, state, camera, track, race, rowing: rowing?.race, gear: gears.gear });
+  audio.update({ dt, mode, state, camera, track, race, rowing: rowing?.race, gear: gears.gear, player: mode === 'kayak' ? { speed: kayak?.race?.player?.v ?? 0 } : undefined });
+  if (mode === 'kayak') {
+    kayakSounds();
+    kayak.frame(dt, nowMs, state, kayakInput(), kayakHud());
+    updateGrade();
+    if (post) post.render();
+    else renderer.render(scene, camera);
+    requestAnimationFrame(frame);
+    return;
+  }
   if (mode === 'row') {
     frameRowing(dt, nowMs);
     if (post) post.render();
@@ -1379,6 +1544,8 @@ window.__mcw = {
   governor,
   get mode() { return mode; },
   get rowing() { return rowing; },
+  get kayak() { return kayak; },
+  startKayak,
   devices,
   gears,
   get track() { return track; },

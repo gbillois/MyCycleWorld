@@ -2,6 +2,7 @@
 // houle large, Fresnel, reflet du ciel calculé (même dégradé que le dôme), scintillement du soleil,
 // couleur selon la profondeur (lue dans la carte d'altitude du terrain), écume sur le rivage.
 // En qualité high, le bassin d'aviron peut ajouter un vrai reflet plan (Reflector, demi-résolution).
+// Rivière du kayak (option flow) : vaguelettes emportées par le courant, eau blanche dans les rapides.
 import * as THREE from 'three';
 import { SKY_GLSL, SUN_DIR, noiseTexture, makeHash, periodicFbm } from './atmosphere.js';
 import { TERRAIN_GLSL } from './nature.js';
@@ -43,8 +44,16 @@ const VERT = /* glsl */ `
   uniform mat4 textureMatrix;
   varying vec3 vWorld;
   varying vec4 vReflUv;
+  #ifdef HAS_FLOW
+    // Rivière : vitesse du courant (m/s, plan xz) et écume des rapides (0..1) dans les sommets
+    attribute vec3 aFlow;
+    varying vec3 vFlow;
+  #endif
   #include <fog_pars_vertex>
   void main() {
+    #ifdef HAS_FLOW
+      vFlow = aFlow;
+    #endif
     vec4 wp = modelMatrix * vec4( position, 1.0 );
     // Houle douce et va-et-vient sur le rivage (mer).
     wp.y += ( sin( uTime * 0.55 ) * 0.06 + sin( wp.x * 0.02 + uTime * 0.7 ) * 0.05 + sin( wp.z * 0.031 - uTime * 0.9 ) * 0.04 ) * uSwell;
@@ -67,18 +76,36 @@ const FRAG = /* glsl */ `
   uniform vec3 uShallow, uDeep, uSandTint;
   varying vec3 vWorld;
   varying vec4 vReflUv;
+  #ifdef HAS_FLOW
+    varying vec3 vFlow;
+  #endif
   #include <fog_pars_fragment>
   void main() {
     vec3 V = cameraPosition - vWorld;
     float dist = length( V );
     V /= dist;
     vec2 p = vWorld.xz;
-    vec2 n1 = texture2D( uNormal, p * 0.043 + uTime * vec2( 0.011, 0.007 ) ).xy * 2.0 - 1.0;
-    vec2 n2 = texture2D( uNormal, p * 0.117 + uTime * vec2( -0.016, 0.012 ) ).xy * 2.0 - 1.0;
-    vec2 n3 = texture2D( uNormal, p * 0.0085 + uTime * vec2( 0.003, -0.0025 ) ).xy * 2.0 - 1.0;
+    #ifdef HAS_FLOW
+      // Carte de courant : deux phases décalées qui avancent avec l'eau et se relaient (pas d'étirement).
+      float fph0 = fract( uTime * 0.5 );
+      float fph1 = fract( uTime * 0.5 + 0.5 );
+      float fw = abs( fph0 - 0.5 ) * 2.0;
+      vec2 fo0 = vFlow.xy * fph0 * 2.0;
+      vec2 fo1 = vFlow.xy * fph1 * 2.0;
+      vec2 n1 = mix( texture2D( uNormal, ( p - fo0 ) * 0.043 ).xy, texture2D( uNormal, ( p - fo1 ) * 0.043 + 0.37 ).xy, fw ) * 2.0 - 1.0;
+      vec2 n2 = mix( texture2D( uNormal, ( p - fo0 ) * 0.117 + 0.21 ).xy, texture2D( uNormal, ( p - fo1 ) * 0.117 + 0.61 ).xy, fw ) * 2.0 - 1.0;
+      vec2 n3 = texture2D( uNormal, p * 0.0085 + uTime * vec2( 0.003, -0.0025 ) ).xy * 2.0 - 1.0;
+      float rapid = vFlow.z;
+      float chop = uChop * ( 1.0 + rapid * 1.8 );
+    #else
+      vec2 n1 = texture2D( uNormal, p * 0.043 + uTime * vec2( 0.011, 0.007 ) ).xy * 2.0 - 1.0;
+      vec2 n2 = texture2D( uNormal, p * 0.117 + uTime * vec2( -0.016, 0.012 ) ).xy * 2.0 - 1.0;
+      vec2 n3 = texture2D( uNormal, p * 0.0085 + uTime * vec2( 0.003, -0.0025 ) ).xy * 2.0 - 1.0;
+      float chop = uChop;
+    #endif
     // Les vaguelettes s'adoucissent au loin (pas de scintillement), la houle large reste.
     float near = 1.0 / ( 1.0 + dist * 0.015 );
-    vec2 slope = ( n1 * 0.6 + n2 * 0.4 ) * uChop * near + n3 * uChop * 0.55;
+    vec2 slope = ( n1 * 0.6 + n2 * 0.4 ) * chop * near + n3 * chop * 0.55;
     vec3 N = normalize( vec3( slope.x, 1.0, slope.y ) );
     float NdV = max( dot( N, V ), 0.0 );
     float fres = min( 0.02 + 0.98 * pow( 1.0 - NdV, 5.0 ), 0.8 );
@@ -94,7 +121,11 @@ const FRAG = /* glsl */ `
     #endif
     float depth = 8.0;
     #ifdef HAS_FIELD
-      depth = uWaterY - terrainH( p );
+      #ifdef HAS_FLOW
+        depth = vWorld.y - terrainH( p ); // la rivière descend : niveau de l'eau dans les sommets
+      #else
+        depth = uWaterY - terrainH( p );
+      #endif
     #endif
     float dk = 1.0 - exp( - max( depth, 0.0 ) * uDepthScale );
     vec3 body = mix( uShallow, uDeep, dk );
@@ -115,6 +146,21 @@ const FRAG = /* glsl */ `
       float foam = shore * smoothstep( 0.5, 0.85, waves * 0.7 + fn * 0.5 ) + smoothstep( 0.22, 0.0, depth ) * 0.9;
       col = mix( col, vec3( 0.93, 0.96, 1.0 ) * ( 0.65 + 0.45 * sunUp ), clamp( foam * uFoam, 0.0, 0.92 ) );
     #endif
+    #ifdef HAS_FLOW
+      // Eau blanche des rapides : bouillons et traînées emportés par le courant.
+      // Repère du courant : traînées étirées dans le sens de l'eau.
+      vec2 fd = normalize( vFlow.xy + vec2( 1e-4, 0.0 ) );
+      vec2 fq0 = vec2( dot( p - fo0, fd ), dot( p - fo0, vec2( -fd.y, fd.x ) ) );
+      vec2 fq1 = vec2( dot( p - fo1, fd ), dot( p - fo1, vec2( -fd.y, fd.x ) ) );
+      float wn = mix( texture2D( uNoise, fq0 * vec2( 0.035, 0.12 ) ).b, texture2D( uNoise, fq1 * vec2( 0.035, 0.12 ) + 0.5 ).b, fw );
+      float wf = mix( texture2D( uNoise, fq0 * 0.16 ).a, texture2D( uNoise, fq1 * 0.16 + 0.3 ).a, fw );
+      float wb = texture2D( uNoise, p * 0.021 ).g;
+      float white = rapid * smoothstep( 0.8, 0.98, wn * 0.7 + wf * 0.2 + wb * 0.25 ) * 0.9;
+      white += smoothstep( 0.5, 0.0, depth ) * 0.55 * ( 0.35 + rapid ); // écume au pied des berges et des rochers
+      col = mix( col, vec3( 0.94, 0.97, 1.0 ) * ( 0.7 + 0.4 * sunUp ), clamp( white, 0.0, 0.85 ) );
+      // Eau vive plus claire et plus verte (bulles en suspension)
+      col = mix( col, col * vec3( 1.05, 1.18, 1.14 ) + vec3( 0.03, 0.05, 0.05 ), rapid * 0.45 );
+    #endif
     gl_FragColor = vec4( col, 1.0 );
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
@@ -122,7 +168,8 @@ const FRAG = /* glsl */ `
   }`;
 
 // Uniformes et paramètres de shader de l'eau.
-function waterShader({ mood, maps, waterY, shared, chop, swell, foam, shallow, deep, sand, depthScale }) {
+// flow : la géométrie porte un attribut aFlow (courant x, z et écume des rapides), le niveau de l'eau suit les sommets.
+function waterShader({ mood, maps, waterY, shared, chop, swell, foam, shallow, deep, sand, depthScale, flow = false }) {
   const uniforms = {
     ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog),
     uZenith: { value: new THREE.Color(mood.zenith) },
@@ -148,6 +195,7 @@ function waterShader({ mood, maps, waterY, shared, chop, swell, foam, shallow, d
   };
   const defines = {};
   if (maps) defines.HAS_FIELD = '';
+  if (flow) defines.HAS_FLOW = '';
   return { uniforms, defines, vertexShader: VERT, fragmentShader: FRAG };
 }
 

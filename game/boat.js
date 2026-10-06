@@ -233,7 +233,7 @@ function rowerExtras(parts, quality) {
 }
 
 // --- Flaques des pelles et sillage (textures partagées) ---
-function puddleTexture() {
+export function puddleTexture() {
   return cached('puddleTex', () => {
     const S = 128;
     const cv = document.createElement('canvas');
@@ -250,7 +250,7 @@ function puddleTexture() {
     return keep(new THREE.CanvasTexture(cv));
   });
 }
-function wakeTexture() {
+export function wakeTexture() {
   return cached('wakeTex', () => {
     const W = 128;
     const H = 256;
