@@ -48,6 +48,10 @@ audio.setScene('river');                 // décor d'ambiance d'un mode autre qu
 
 Options communes de `sfx(nom, options)` : `gain`, `rate`, `pan`, `pos: { x, y, z }` (source 3D), `when`, `bus`. Autres noms : `beep`, `go`, `horn`, `whistle`, `pickup`, `turbo`, `banana`, `skid`, `bump`, `whoosh`, `lap`, `final-lap`, `fanfare`, `win`, `podium`, `finish-other`, `gear`, `splash`, `kayak-splash`, `cow`, `sheep`, `duck`, `gull`, `church-bell`.
 
+## Cardio avec une montre Garmin
+
+Les montres Garmin récentes (Forerunner 245, 255, 265, 955…) peuvent diffuser la fréquence cardiaque du poignet en Bluetooth avec le service cardio standard : le jeu les voit comme une ceinture cardio. Sur la montre, activer « Diffuser la fréquence cardiaque » (menu Capteurs ou Fréquence cardiaque au poignet, ou le raccourci « Diffusion FC » des commandes ; pendant une activité : « Diffuser pendant l'activité »), puis connecter la montre comme ceinture cardio dans le jeu (web) ou dans Réglages de l'appli > Appareils (iOS). La diffusion n'accepte souvent qu'un appareil à la fois : fermer les autres applis qui s'y connectent. Les modèles plus anciens (Forerunner 235 et avant) diffusent seulement en ANT+, illisible par iOS et par le navigateur.
+
 ## Développer
 
 Aucun build. Servir le dossier en local (le Bluetooth exige https ou localhost) :
