@@ -188,10 +188,6 @@ export function makeLabel(text, color) {
   return sprite;
 }
 
-let boxMaterial = null;
-let glowMaterial = null;
-const boxGeo = new THREE.BoxGeometry(1.5, 1.5, 1.5);
-
 function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath();
   ctx.moveTo(x + r, y);
@@ -202,70 +198,247 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
-// Boîte à bonus façon kart : arc-en-ciel vif, bordure blanche, gros point d'interrogation.
+// --- Boîte à bonus façon kart : cube arrondi translucide et irisé aux couleurs de l'arc-en-ciel,
+// gros « ? » en relief qui flotte à l'intérieur, halo doux visible de loin. Ressources partagées entre boîtes.
+let boxRes = null;
+const noDispose = (o) => {
+  o.dispose = () => {};
+  return o;
+};
+
+// Cube aux arêtes arrondies : sommets d'un cube subdivisé ramenés sur une « boîte arrondie ».
+function roundedBox(size, radius, seg) {
+  const g = new THREE.BoxGeometry(size, size, size, seg, seg, seg);
+  const P = g.attributes.position;
+  const N = g.attributes.normal;
+  const inner = size / 2 - radius;
+  const v = new THREE.Vector3();
+  const c = new THREE.Vector3();
+  for (let i = 0; i < P.count; i++) {
+    v.fromBufferAttribute(P, i);
+    c.set(Math.max(-inner, Math.min(inner, v.x)), Math.max(-inner, Math.min(inner, v.y)), Math.max(-inner, Math.min(inner, v.z)));
+    v.sub(c).normalize();
+    N.setXYZ(i, v.x, v.y, v.z);
+    v.multiplyScalar(radius).add(c);
+    P.setXYZ(i, v.x, v.y, v.z);
+  }
+  return g;
+}
+
+// Forme du point d'interrogation (crochet, tige, point), extrudée avec un biseau
+function questionGeometry() {
+  const s = new THREE.Shape();
+  s.moveTo(-0.3, 0.2);
+  s.absarc(0, 0.2, 0.3, Math.PI, -Math.PI * 0.27, true);
+  s.quadraticCurveTo(0.085, -0.1, 0.085, -0.2);
+  s.lineTo(0.085, -0.3);
+  s.lineTo(-0.085, -0.3);
+  s.lineTo(-0.085, -0.18);
+  s.quadraticCurveTo(-0.085, -0.04, 0.075, 0.05);
+  s.absarc(0, 0.2, 0.13, -Math.PI * 0.32, Math.PI, false);
+  s.lineTo(-0.3, 0.2);
+  const dot = new THREE.Shape();
+  dot.absarc(0, -0.45, 0.09, 0, Math.PI * 2, false);
+  const g = new THREE.ExtrudeGeometry([s, dot], { depth: 0.07, bevelEnabled: true, bevelThickness: 0.035, bevelSize: 0.03, bevelSegments: 2, curveSegments: 7 });
+  g.center().translate(0, 0, 0.072);
+  // Deux « ? » dos à dos : il se lit à l'endroit des deux côtés de la boîte qui tourne
+  const back = g.clone().rotateY(Math.PI);
+  const out = new THREE.BufferGeometry();
+  for (const name of ['position', 'normal']) {
+    const a = g.attributes[name].array;
+    const b = back.attributes[name].array;
+    const arr = new Float32Array(a.length + b.length);
+    arr.set(a);
+    arr.set(b, a.length);
+    out.setAttribute(name, new THREE.BufferAttribute(arr, 3));
+  }
+  return out;
+}
+
 export function createItemBox() {
-  if (!boxMaterial) {
+  if (!boxRes) {
     const S = 256;
     const cv = document.createElement('canvas');
     cv.width = cv.height = S;
     const ctx = cv.getContext('2d');
     const grad = ctx.createLinearGradient(0, 0, S, S);
     grad.addColorStop(0, '#ff3d6e');
-    grad.addColorStop(0.35, '#ffb21f');
-    grad.addColorStop(0.65, '#2fd4c0');
-    grad.addColorStop(1, '#3d8bff');
+    grad.addColorStop(0.3, '#ffb21f');
+    grad.addColorStop(0.55, '#5bf08a');
+    grad.addColorStop(0.78, '#2fd4ff');
+    grad.addColorStop(1, '#8b5bff');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, S, S);
-    // Bordure blanche arrondie
-    ctx.lineWidth = 14;
+    // Reflet diagonal et liseré blanc lumineux
+    const sheen = ctx.createLinearGradient(0, 0, S, S * 0.6);
+    sheen.addColorStop(0.25, 'rgba(255,255,255,0)');
+    sheen.addColorStop(0.4, 'rgba(255,255,255,0.45)');
+    sheen.addColorStop(0.5, 'rgba(255,255,255,0)');
+    ctx.fillStyle = sheen;
+    ctx.fillRect(0, 0, S, S);
+    ctx.lineWidth = 12;
     ctx.strokeStyle = '#ffffff';
-    roundRect(ctx, 14, 14, S - 28, S - 28, 30);
+    roundRect(ctx, 10, 10, S - 20, S - 20, 34);
     ctx.stroke();
-    // Point d'interrogation : contour sombre puis remplissage blanc
-    ctx.font = '900 190px "Arial Black", system-ui, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.lineJoin = 'round';
-    ctx.lineWidth = 22;
-    ctx.strokeStyle = 'rgba(40, 10, 70, 0.85)';
-    ctx.strokeText('?', S / 2, S / 2 + 12);
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText('?', S / 2, S / 2 + 12);
-    const tex = new THREE.CanvasTexture(cv);
+    const tex = noDispose(new THREE.CanvasTexture(cv));
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = 4;
-    // MeshBasicMaterial : couleurs franches, indépendantes de la lumière, donc lisibles de loin.
-    boxMaterial = new THREE.MeshBasicMaterial({ map: tex });
+    const shell = noDispose(new THREE.MeshPhysicalMaterial({
+      map: tex,
+      emissive: '#ffffff',
+      emissiveMap: tex,
+      emissiveIntensity: 0.32,
+      roughness: 0.12,
+      metalness: 0,
+      clearcoat: 1,
+      clearcoatRoughness: 0.05,
+      iridescence: 0.9,
+      iridescenceIOR: 1.6,
+      transparent: true,
+      opacity: 0.42,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    }));
+    const mark = noDispose(new THREE.MeshStandardMaterial({ color: '#ffffff', emissive: '#fff1b8', emissiveIntensity: 0.5, roughness: 0.2, metalness: 0.1, transparent: true }));
+    // « ? » dessiné après la coque (ordre de rendu) : il reste net derrière la paroi translucide.
     // Lueur douce (disque dégradé, additif) : repère visible de loin, sans contour carré.
     const g = document.createElement('canvas');
     g.width = g.height = 128;
     const gc = g.getContext('2d');
     const rad = gc.createRadialGradient(64, 64, 6, 64, 64, 64);
-    rad.addColorStop(0, 'rgba(255, 236, 150, 0.85)');
-    rad.addColorStop(0.45, 'rgba(255, 190, 80, 0.28)');
+    rad.addColorStop(0, 'rgba(255, 236, 150, 0.7)');
+    rad.addColorStop(0.45, 'rgba(255, 190, 80, 0.22)');
     rad.addColorStop(1, 'rgba(255, 170, 60, 0)');
     gc.fillStyle = rad;
     gc.fillRect(0, 0, 128, 128);
-    glowMaterial = new THREE.SpriteMaterial({
-      map: new THREE.CanvasTexture(g),
-      blending: THREE.AdditiveBlending,
-      transparent: true,
-      depthWrite: false,
-    });
+    const glow = noDispose(new THREE.SpriteMaterial({ map: noDispose(new THREE.CanvasTexture(g)), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }));
+    boxRes = { shell, mark, glow, geo: noDispose(roundedBox(1.5, 0.22, 5)), qGeo: noDispose(questionGeometry().scale(1.15, 1.15, 1.15)) };
   }
-  const box = new THREE.Mesh(boxGeo, boxMaterial);
-  const glow = new THREE.Sprite(glowMaterial);
+  const box = new THREE.Mesh(boxRes.geo, boxRes.shell);
+  box.renderOrder = 2;
+  const mark = new THREE.Mesh(boxRes.qGeo, boxRes.mark);
+  mark.renderOrder = 3;
+  box.add(mark);
+  const glow = new THREE.Sprite(boxRes.glow);
   glow.scale.set(3.6, 3.6, 1);
   box.add(glow);
   return box;
 }
 
-const bananaGeo = new THREE.TorusGeometry(0.28, 0.09, 5, 9, Math.PI * 1.1).rotateX(-Math.PI / 2);
-const bananaMat = lambert('#ffd21f');
+// --- Peau de banane : quatre lanières ouvertes en étoile autour du bout, taches brunes, queue sombre ---
+let bananaRes = null;
+function bananaGeometry() {
+  const parts = [];
+  const yellow = new THREE.Color('#ffd21f');
+  const cream = new THREE.Color('#fff1b0');
+  const brown = new THREE.Color('#5a3d1a');
+  const tmp = new THREE.Color();
+  const speck = (x, y, z) => {
+    const h = Math.sin(x * 91.7 + z * 57.3 + y * 33.1) * 43758.5453;
+    return h - Math.floor(h) > 0.93;
+  };
+  const strip = (curve, width, inner) => {
+    const segs = 10;
+    const radial = 6;
+    const geo = new THREE.TubeGeometry(curve, segs, 1, radial, false);
+    // Section aplatie : on écrase le tube autour de sa courbe (large à la base, pointu au bout)
+    const P = geo.attributes.position;
+    const pt = new THREE.Vector3();
+    const col = [];
+    for (let i = 0; i <= segs; i++) {
+      const t = i / segs;
+      curve.getPointAt(t, pt);
+      const w = width * (1 - 0.7 * t * t) + 0.004;
+      for (let j = 0; j <= radial; j++) {
+        const k = i * (radial + 1) + j;
+        const dx = P.getX(k) - pt.x;
+        const dy = P.getY(k) - pt.y;
+        const dz = P.getZ(k) - pt.z;
+        P.setXYZ(k, pt.x + dx * w, pt.y + dy * 0.012, pt.z + dz * w);
+        const up = dy > 0;
+        tmp.copy(t > 0.88 ? brown : up && inner && t < 0.55 ? cream : yellow);
+        if (speck(P.getX(k), P.getY(k), P.getZ(k)) && t < 0.86) tmp.lerp(brown, 0.7);
+        col.push(tmp.r, tmp.g, tmp.b);
+      }
+    }
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    geo.computeVertexNormals();
+    parts.push(geo);
+  };
+  for (let k = 0; k < 4; k++) {
+    const a = (k / 4) * Math.PI * 2 + 0.4 + (k % 2) * 0.25;
+    const len = 0.22 + (k % 2) * 0.04;
+    const d = new THREE.Vector3(Math.cos(a), 0, Math.sin(a));
+    strip(new THREE.CatmullRomCurve3([
+      new THREE.Vector3(0, 0.1, 0).addScaledVector(d, 0.02),
+      new THREE.Vector3(0, 0.13, 0).addScaledVector(d, 0.1),
+      new THREE.Vector3(0, 0.06, 0).addScaledVector(d, len * 0.75),
+      new THREE.Vector3(0, 0.02, 0).addScaledVector(d, len),
+      new THREE.Vector3(0, 0.03, 0).addScaledVector(d, len + 0.035),
+    ]), 0.075, true);
+  }
+  // Cœur de la peau et queue
+  const stalk = new THREE.TubeGeometry(new THREE.CatmullRomCurve3([new THREE.Vector3(0, 0.02, 0), new THREE.Vector3(0.0, 0.12, 0.0), new THREE.Vector3(0.03, 0.24, 0.02), new THREE.Vector3(0.07, 0.3, 0.03)]), 8, 0.04, 7, false);
+  const P = stalk.attributes.position;
+  const col = [];
+  for (let i = 0; i < P.count; i++) {
+    const y = P.getY(i);
+    tmp.copy(y > 0.25 ? brown : yellow);
+    if (speck(P.getX(i), y, P.getZ(i))) tmp.lerp(brown, 0.6);
+    col.push(tmp.r, tmp.g, tmp.b);
+  }
+  stalk.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  stalk.computeVertexNormals();
+  parts.push(stalk);
+  parts.push(paintGeo(new THREE.SphereGeometry(0.045, 10, 8).scale(1, 0.8, 1).translate(0, 0.1, 0), yellow));
+  return mergeSimple(parts);
+}
+function paintGeo(geo, color) {
+  const n = geo.attributes.position.count;
+  const col = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) col.set([color.r, color.g, color.b], i * 3);
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  return geo;
+}
+// Fusion minimale (position, normale, couleur) de géométries indexées
+function mergeSimple(list) {
+  let vc = 0;
+  let ic = 0;
+  for (const g of list) {
+    vc += g.attributes.position.count;
+    ic += g.index.count;
+  }
+  const pos = new Float32Array(vc * 3);
+  const nor = new Float32Array(vc * 3);
+  const col = new Float32Array(vc * 3);
+  const idx = new Uint32Array(ic);
+  let vo = 0;
+  let io = 0;
+  for (const g of list) {
+    const n = g.attributes.position.count;
+    pos.set(g.attributes.position.array.subarray(0, n * 3), vo * 3);
+    nor.set(g.attributes.normal.array.subarray(0, n * 3), vo * 3);
+    col.set(g.attributes.color.array.subarray(0, n * 3), vo * 3);
+    for (let k = 0; k < g.index.count; k++) idx[io + k] = g.index.array[k] + vo;
+    io += g.index.count;
+    vo += n;
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  out.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  out.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  out.setIndex(new THREE.BufferAttribute(idx, 1));
+  return out;
+}
+
 export function createBanana() {
-  const m = new THREE.Mesh(bananaGeo, bananaMat);
-  const tip = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.06), lambert('#5a3d1a'));
-  tip.position.set(0.28, 0, 0);
-  m.add(tip);
+  if (!bananaRes) {
+    bananaRes = {
+      geo: noDispose(bananaGeometry().scale(1.35, 1.35, 1.35)),
+      mat: noDispose(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.45, metalness: 0, emissive: '#3a2a00', emissiveIntensity: 0.35 })),
+    };
+  }
+  const m = new THREE.Mesh(bananaRes.geo, bananaRes.mat);
+  m.castShadow = true;
   return m;
 }
