@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a3f9e"/>
+      <stop offset="0.45" stop-color="#7a5bd0"/>
+      <stop offset="0.72" stop-color="#ff7a45"/>
+      <stop offset="0.86" stop-color="#ffb35c"/>
+    </linearGradient>
+    <radialGradient id="sun" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#fff4c2"/>
+      <stop offset="0.55" stop-color="#ffd75e"/>
+      <stop offset="1" stop-color="#ff9b3d"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ffd27a" stop-opacity="0.75"/>
+      <stop offset="1" stop-color="#ffd27a" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="hillA" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#57c25a"/><stop offset="1" stop-color="#2f8f3c"/></linearGradient>
+    <linearGradient id="hillB" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a9e46"/><stop offset="1" stop-color="#1f6b2e"/></linearGradient>
+    <linearGradient id="road" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4a4f63"/><stop offset="1" stop-color="#262a38"/></linearGradient>
+    <linearGradient id="jersey" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff8a3d"/><stop offset="1" stop-color="#e8400f"/></linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#sky)"/>
+  <!-- étoiles discrètes en haut -->
+  <g fill="#ffffff" opacity="0.7">
+    <circle cx="150" cy="130" r="5"/><circle cx="300" cy="80" r="3.5"/><circle cx="820" cy="110" r="4.5"/><circle cx="905" cy="230" r="3"/><circle cx="90" cy="290" r="3"/>
+  </g>
+  <circle cx="560" cy="560" r="400" fill="url(#glow)"/>
+  <circle cx="560" cy="560" r="250" fill="url(#sun)"/>
+  <!-- montagnes lointaines -->
+  <path d="M0 640 L120 520 L210 590 L330 470 L450 600 L560 520 L690 610 L800 480 L930 590 L1024 530 V700 H0z" fill="#6b5aa8" opacity="0.55"/>
+  <!-- collines -->
+  <path d="M0 660 Q180 590 380 650 T760 640 T1024 620 V1024 H0z" fill="url(#hillA)"/>
+  <path d="M0 760 Q220 700 470 760 T1024 740 V1024 H0z" fill="url(#hillB)"/>
+  <!-- arbres -->
+  <g fill="#1a5a27">
+    <path d="M110 700 l34 -95 l34 95z"/><path d="M160 712 l26 -72 l26 72z"/>
+    <path d="M880 690 l30 -85 l30 85z"/><path d="M930 700 l22 -62 l22 62z"/>
+  </g>
+  <!-- route vers l'horizon -->
+  <path d="M470 652 Q500 650 530 652 L760 1024 H120z" fill="url(#road)"/>
+  <path d="M500 660 L506 700 M512 730 L522 800 M530 840 L546 950" stroke="#ffffff" stroke-width="14" stroke-linecap="round" opacity="0.85"/>
+  <path d="M470 652 L120 1024" stroke="#f2f2f2" stroke-width="10" opacity="0.6"/>
+  <path d="M530 652 L760 1024" stroke="#f2f2f2" stroke-width="10" opacity="0.6"/>
+
+  <!-- traits de vitesse -->
+  <g stroke="#ffffff" stroke-width="18" stroke-linecap="round" opacity="0.85">
+    <path d="M70 470 H220"/><path d="M40 560 H170"/><path d="M100 380 H210"/>
+  </g>
+
+  <!-- cycliste : contour sombre puis couleurs (style des textes du jeu) -->
+  <g transform="translate(70 92) scale(0.9)" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <!-- ombre au sol -->
+    <ellipse cx="505" cy="842" rx="300" ry="26" fill="#000000" opacity="0.28" stroke="none"/>
+    <!-- contour -->
+    <g stroke="#121830" stroke-width="50">
+      <path d="M325 700 L480 712 L440 520 Z M440 520 L650 505 L480 712 M650 505 L700 700 M650 505 L688 470 Q726 470 718 520"/>
+      <path d="M440 505 L560 612 L425 668"/>
+      <path d="M440 505 L582 592 L536 770"/>
+      <path d="M445 500 L612 398" stroke-width="84"/>
+      <path d="M612 398 L656 462 L700 488"/>
+    </g>
+    <g stroke="#121830" stroke-width="44"><circle cx="325" cy="700" r="124"/><circle cx="700" cy="700" r="124"/></g>
+    <!-- roues -->
+    <g stroke="#2a2f40" stroke-width="22"><circle cx="325" cy="700" r="124"/><circle cx="700" cy="700" r="124"/></g>
+    <g stroke="#e9ecf5" stroke-width="10"><circle cx="325" cy="700" r="108"/><circle cx="700" cy="700" r="108"/></g>
+    <g stroke="#9aa3b8" stroke-width="5" opacity="0.9">
+      <path d="M325 594 V806 M219 700 H431 M250 625 L400 775 M400 625 L250 775"/>
+      <path d="M700 594 V806 M594 700 H806 M625 625 L775 775 M775 625 L625 775"/>
+    </g>
+    <g fill="#e9ecf5" stroke="none"><circle cx="325" cy="700" r="16"/><circle cx="700" cy="700" r="16"/></g>
+    <!-- jambe arrière (plus sombre) -->
+    <path d="M440 505 L560 612 L425 668" stroke="#2b3550" stroke-width="40"/>
+    <!-- cadre -->
+    <path d="M325 700 L480 712 L440 520 Z M440 520 L650 505 L480 712 M650 505 L700 700" stroke="#2f7bff" stroke-width="26"/>
+    <path d="M650 505 L688 470 Q726 470 718 520" stroke="#e9ecf5" stroke-width="16"/>
+    <circle cx="480" cy="712" r="30" fill="#c9d0de" stroke="#121830" stroke-width="8"/>
+    <!-- selle -->
+    <path d="M405 512 H470" stroke="#121830" stroke-width="22"/>
+    <!-- jambe avant -->
+    <path d="M440 505 L582 592 L536 770" stroke="#20283f" stroke-width="42"/>
+    <path d="M520 772 H566" stroke="#ffffff" stroke-width="22"/>
+    <!-- buste -->
+    <path d="M445 500 L612 398" stroke="url(#jersey)" stroke-width="64"/>
+    <path d="M470 486 L585 414" stroke="#ffffff" stroke-width="10" opacity="0.85"/>
+    <!-- bras -->
+    <path d="M612 398 L656 462 L700 488" stroke="#ff7a35" stroke-width="30"/>
+    <circle cx="702" cy="488" r="13" fill="#121830" stroke="none"/>
+    <!-- tête et casque -->
+    <circle cx="668" cy="350" r="34" fill="#f4c7a0" stroke="#121830" stroke-width="12"/>
+    <path d="M622 344 Q628 284 690 288 Q734 296 726 338 Z" fill="#ffffff" stroke="#121830" stroke-width="12"/>
+    <path d="M650 300 L668 322 M676 296 L690 320" stroke="#2f7bff" stroke-width="8"/>
+    <path d="M684 352 H708" stroke="#121830" stroke-width="12"/>
+  </g>
+</svg>
