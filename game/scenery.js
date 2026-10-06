@@ -16,6 +16,8 @@ import {
   makeFieldMaps, makeRoadMap, makeGrassField,
 } from './nature.js';
 import { makeWater } from './water.js';
+import { BuildingSet, SIGN, tint } from './buildings.js';
+import { cottage, gantry, featherFlag } from './architecture.js';
 
 const smoothstep = (a, b, x) => {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
@@ -1149,10 +1151,20 @@ function addRoadside(group, ctx, theme, quality, shared, anisotropy) {
   });
   const barrierGeo = new THREE.BoxGeometry(2.0, 0.55, 0.04).translate(0, 0.62, 0);
   const bMesh = new THREE.InstancedMesh(barrierGeo, new THREE.MeshStandardMaterial({ map: tarp, roughness: 0.7 }), barriers.length);
-  barriers.forEach(([x, y, z, yaw], i) => bMesh.setMatrixAt(i, m4.compose(v3.set(x, y, z), q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, yaw), s3.set(1, 1, 1))));
-  bMesh.castShadow = quality !== 'low';
-  bMesh.receiveShadow = true;
-  group.add(bMesh);
+  // Armature des barrières Vauban : montants, lisses haute et basse, barreaux, pieds plats
+  const tube = (x0, y0, x1, y1, r) => new THREE.CylinderGeometry(r, r, Math.hypot(x1 - x0, y1 - y0), 6).rotateZ(-Math.atan2(x1 - x0, y1 - y0)).translate((x0 + x1) / 2, (y0 + y1) / 2, 0);
+  const frameParts = [tube(-0.98, 0.12, -0.98, 1.06, 0.022), tube(0.98, 0.12, 0.98, 1.06, 0.022), tube(-0.98, 1.04, 0.98, 1.04, 0.02), tube(-0.98, 0.26, 0.98, 0.26, 0.018)];
+  for (let k = -4; k <= 4; k++) frameParts.push(tube(k * 0.2, 0.26, k * 0.2, 1.04, 0.008));
+  for (const x of [-0.92, 0.92]) frameParts.push(new THREE.BoxGeometry(0.05, 0.03, 0.62).translate(x, 0.015, 0), tube(x - 0.06, 0.03, x - 0.06, 0.14, 0.015));
+  const fMesh = new THREE.InstancedMesh(mergeGeometries(frameParts.map((g) => colored(indexify(g), '#b9bec6'))), new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0.7, roughness: 0.38 }), barriers.length);
+  barriers.forEach(([x, y, z, yaw], i) => {
+    m4.compose(v3.set(x, y, z), q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, yaw), s3.set(1, 1, 1));
+    bMesh.setMatrixAt(i, m4);
+    fMesh.setMatrixAt(i, m4);
+  });
+  bMesh.castShadow = fMesh.castShadow = quality !== 'low';
+  bMesh.receiveShadow = fMesh.receiveShadow = true;
+  group.add(bMesh, fMesh);
 }
 
 // --- Montagnes lointaines : anneau de relief en crêtes, enneigé, fondu dans la brume ---
@@ -1281,6 +1293,8 @@ export function buildScenery(scene, track, { quality = 'high', renderer = null }
   const v3 = new THREE.Vector3();
   const e = new THREE.Euler();
   const shared = { uTime: { value: 0 }, uWind: { value: 1 }, noise: noiseTexture() };
+  // Bâtiments de tout le circuit (ferme, village, plage, maisons, portique) : une matière, quelques maillages
+  const bset = new BuildingSet({ quality, shared });
 
   // Ciel, brume, lumières et environnement
   applyMood(scene, mood);
@@ -1338,7 +1352,23 @@ export function buildScenery(scene, track, { quality = 'high', renderer = null }
   };
 
   // Éléments propres au circuit (avant la végétation, qui évite leurs emplacements)
-  const ctx = { edgeSlope, track, heightAt, reserve, lake, rnd: rng(23), cast: castTrees, free, seaY, maps, mood, shared, quality, coast, palms: [] };
+  // Sol nu (pas d'herbe dense) sur un disque : places pavées, terrasses, parvis.
+  const bare = (x, z, rad) => {
+    const g = maps.groundTex.image.data;
+    const i0 = Math.max(0, Math.floor((x - rad - maps.x0) / maps.cellX));
+    const i1 = Math.min(maps.nx - 1, Math.ceil((x + rad - maps.x0) / maps.cellX));
+    const j0 = Math.max(0, Math.floor((z - rad - maps.z0) / maps.cellZ));
+    const j1 = Math.min(maps.nz - 1, Math.ceil((z + rad - maps.z0) / maps.cellZ));
+    for (let j = j0; j <= j1; j++) {
+      for (let i = i0; i <= i1; i++) {
+        const d = Math.hypot(maps.x0 + i * maps.cellX - x, maps.z0 + j * maps.cellZ - z);
+        const k = j * maps.nx + i;
+        g[k * 4 + 3] = Math.min(g[k * 4 + 3], Math.round(255 * smoothstep(rad, rad + maps.cellX * 1.5, d)));
+      }
+    }
+    maps.groundTex.needsUpdate = true;
+  };
+  const ctx = { edgeSlope, track, heightAt, reserve, lake, rnd: rng(23), cast: castTrees, free, seaY, maps, mood, shared, quality, coast, palms: [], bset, bare };
   const updaters = [];
   if (feats.farm) updaters.push(addFarm(group, ctx, feats.farm));
   if (feats.village) updaters.push(addAlpineVillage(group, ctx, feats.village));
@@ -1494,38 +1524,14 @@ export function buildScenery(scene, track, { quality = 'high', renderer = null }
     if (houses.some((h) => Math.hypot(h.x - f.x, h.z - f.z) < 70)) continue;
     houses.push({ x: f.x, z: f.z, yaw: Math.atan2(-side * f.rx, -side * f.rz), k: r() });
   }
-  if (houses.length) {
-    const wallColors = ['#f3e6cc', '#efd9bb', '#f8f2e8', '#e6d4b8'];
-    const roofColors = ['#b9503b', '#a64535', '#c4643a', '#8a5a3c'];
-    const solid = [];
-    const glass = [];
-    const mtx = new THREE.Matrix4();
-    for (const h of houses) {
-      const y = heightAt(h.x, h.z) - 0.2;
-      mtx.compose(v3.set(h.x, y, h.z), q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, h.yaw), s3.set(1, 1, 1));
-      const wc = wallColors[Math.floor(h.k * 4)];
-      const rc = roofColors[Math.floor(h.k * 7) % 4];
-      const parts = [
-        colored(new THREE.BoxGeometry(7, 3.4, 5.5).translate(0, 1.7, 0), wc),
-        colored(new THREE.BoxGeometry(7.3, 0.35, 5.8).translate(0, 0.1, 0), '#9a958a'),
-        colored(new THREE.CylinderGeometry(3.4, 3.4, 7.8, 3, 1).rotateZ(Math.PI / 2).rotateX(Math.PI / 6).scale(1, 0.62, 1).translate(0, 4.4, 0), rc),
-        colored(new THREE.BoxGeometry(0.7, 1.6, 0.7).translate(2.2, 5.4, -0.8), rc),
-        colored(new THREE.BoxGeometry(1.1, 2.1, 0.1).translate(-1.6, 1.05, 2.78), '#4a3a30'),
-      ];
-      for (const x of [0.6, 2.4]) {
-        parts.push(colored(new THREE.BoxGeometry(1.2, 1.2, 0.08).translate(x, 2, 2.76), '#f4f1ea'));
-        parts.push(colored(new THREE.BoxGeometry(0.32, 1.1, 0.06).translate(x - 0.78, 2, 2.79), '#3f6b46'));
-        parts.push(colored(new THREE.BoxGeometry(0.32, 1.1, 0.06).translate(x + 0.78, 2, 2.79), '#3f6b46'));
-        glass.push(colored(new THREE.BoxGeometry(1, 1, 0.1).translate(x, 2, 2.8), '#9fc4dc').applyMatrix4(mtx));
-      }
-      for (const g of parts) solid.push((g.index ? g : indexify(g)).applyMatrix4(mtx));
-    }
-    const houseMesh = new THREE.Mesh(mergeGeometries(solid), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 }));
-    houseMesh.castShadow = true;
-    houseMesh.receiveShadow = true;
-    const glassMesh = new THREE.Mesh(mergeGeometries(glass.map((g) => (g.index ? g : indexify(g)))), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.08, metalness: 0.3 }));
-    group.add(houseMesh, glassMesh);
-  }
+  // Variantes tirées d'un générateur propre (le tirage des emplacements du décor n'en dépend pas)
+  houses.forEach((h, i) => {
+    const y = heightAt(h.x, h.z);
+    let lo = y;
+    for (const [a, c] of [[-4.5, -3.5], [4.5, -3.5], [-4.5, 3.5], [4.5, 3.5]]) lo = Math.min(lo, heightAt(h.x + a * Math.cos(h.yaw) + c * Math.sin(h.yaw), h.z - a * Math.sin(h.yaw) + c * Math.cos(h.yaw)));
+    cottage(bset, h.x, Math.min(lo + 0.3, y - 0.15), h.z, h.yaw, rng(300 + i * 7));
+    bset.site('cottage', h.x, y, h.z);
+  });
 
   // Bottes de foin dans les champs
   const bales = [];
@@ -1570,34 +1576,19 @@ export function buildScenery(scene, track, { quality = 'high', renderer = null }
   line.position.set(start.x, start.y + 0.06, start.z);
   line.receiveShadow = true;
   group.add(line);
-  const arch = new THREE.Group();
-  // Le tore (demi-anneau) est dans le plan XY local : X = travers de la route, Y = haut.
-  const archMesh = new THREE.Mesh(
-    new THREE.TorusGeometry(ROAD_HALF + 1.4, 0.6, 16, 56, Math.PI),
-    new THREE.MeshStandardMaterial({ color: '#ff5a1f', roughness: 0.45 }),
-  );
-  arch.add(archMesh);
-  const bannerTex = canvasTexture(1024, 160, (cctx, cw, ch) => {
-    cctx.fillStyle = '#ffffff';
-    cctx.fillRect(0, 0, cw, ch);
-    cctx.fillStyle = '#ff5a1f';
-    cctx.font = '900 92px system-ui, sans-serif';
-    cctx.textAlign = 'center';
-    cctx.textBaseline = 'middle';
-    cctx.fillText('MyCycleWorld', cw / 2, ch / 2 + 6);
+  // Portique de départ en treillis : banderoles des partenaires, chrono, fanions ; drapeaux « plume »
+  const yawS = Math.atan2(start.tx, start.tz);
+  gantry(bset, start.x, start.y, start.z, yawS, {
+    span: ROAD_HALF + 1.2, h: 5.6, bh: 1.5, front: SIGN.brand, back: SIGN.brand, clock: true, flags: true, pillarSign: [SIGN.flag0, SIGN.flag0],
+    sponsors: [SIGN.sponsor0, SIGN.sponsor1, SIGN.sponsor2, SIGN.sponsor3],
+    foot: (sd) => heightAt(start.x - start.rx * sd * (ROAD_HALF + 1.65), start.z - start.rz * sd * (ROAD_HALF + 1.65)) - start.y,
   });
-  bannerTex.anisotropy = anisotropy;
-  const bannerGeo = mergeBanner();
-  const banner = new THREE.Mesh(bannerGeo, new THREE.MeshStandardMaterial({ map: bannerTex, roughness: 0.6 }));
-  banner.position.y = ROAD_HALF + 1.4;
-  arch.add(banner);
-  arch.traverse((o) => {
-    if (o.isMesh) o.castShadow = true;
+  bset.site('arch', start.x, start.y, start.z);
+  [[-26, -1, SIGN.flag1, '#ffffff'], [-26, 1, SIGN.flag2, '#ffffff'], [13, -1, SIGN.flag3, '#ffffff'], [13, 1, SIGN.flag1, '#ffffff']].forEach(([s, side, rect, col]) => {
+    const fp = track.frame(s, side * (ROAD_HALF + 4.2));
+    featherFlag(bset, fp.x, heightAt(fp.x, fp.z), fp.z, Math.atan2(-side * fp.rx, -side * fp.rz) + Math.PI / 2, rect, tint(col));
   });
-  // Axe local Z = sens de la course : l'arche enjambe la route, les banderoles regardent les coureurs.
-  arch.position.set(start.x, start.y, start.z);
-  arch.rotation.y = Math.atan2(start.tx, start.tz);
-  group.add(arch);
+  bset.build(group);
 
   const anim = updaters.filter(Boolean);
   let time = 0;
@@ -1610,6 +1601,7 @@ export function buildScenery(scene, track, { quality = 'high', renderer = null }
     forest.update(camera.position.x, camera.position.z, camera.position.y);
     for (const fld of fields) fld.update(camera);
     for (const u of anim) u(dt, time);
+    bset.update(camera);
   };
 
   // Libère tout le décor (changement de circuit sans recharger la page).
@@ -1625,20 +1617,4 @@ export function buildScenery(scene, track, { quality = 'high', renderer = null }
   };
 
   return { group, sky, heightAt, lake, update, dispose, center: new THREE.Vector3(cx, (track.minY + track.maxY) / 2, cz) };
-}
-
-// Banderole de l'arche : deux faces (avant et arrière) fusionnées en une géométrie.
-function mergeBanner() {
-  const a = new THREE.PlaneGeometry(6.4, 1).translate(0, 0, 0.62);
-  const bk = new THREE.PlaneGeometry(6.4, 1).rotateY(Math.PI).translate(0, 0, -0.62);
-  const g = new THREE.BufferGeometry();
-  const pos = new Float32Array([...a.attributes.position.array, ...bk.attributes.position.array]);
-  const nor = new Float32Array([...a.attributes.normal.array, ...bk.attributes.normal.array]);
-  const uv = new Float32Array([...a.attributes.uv.array, ...bk.attributes.uv.array]);
-  const idx = [...a.index.array, ...Array.from(bk.index.array, (i) => i + 4)];
-  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
-  g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
-  g.setIndex(idx);
-  return g;
 }
