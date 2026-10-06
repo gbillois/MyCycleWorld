@@ -50,7 +50,7 @@ test('détection de la WebView de l’appli', () => {
 
 test('au démarrage, le jeu annonce qu’il est prêt', () => {
   const { posted, win } = setup();
-  assert.deepEqual(posted, [{ type: 'ready', protocol: 1, minor: 1 }]);
+  assert.deepEqual(posted, [{ type: 'ready', protocol: 1, minor: 2 }]);
   assert.equal(typeof win.mcwNative.state, 'function');
   assert.equal(typeof win.mcwNative.button, 'function');
 });
@@ -218,6 +218,48 @@ test('manettes perdues : les touches tenues sont relâchées', () => {
   win.mcwNative.button('L_RIGHT', true);
   win.mcwNative.state({ ...STATE, controllers: [] });
   assert.deepEqual(keys, ['down:ArrowRight', 'up:ArrowRight']);
+});
+
+test('révision 2 : écrans natifs ouverts seulement si l’appli annonce « openNative »', () => {
+  const { devices, win, posted } = setup();
+  // Pas encore d'état, puis appli d'avant la révision 2 : rien n'est envoyé, le jeu garde sa page « Connecter ».
+  assert.equal(devices.canOpenNative, false);
+  assert.equal(devices.openNative('devices', 'technogym'), false);
+  win.mcwNative.state({ ...STATE, minor: 1 });
+  assert.equal(devices.canOpenNative, false);
+  assert.equal(devices.openNative('settings'), false);
+  assert.deepEqual(posted.slice(1), []);
+  // Appli récente.
+  win.mcwNative.state({ ...STATE, minor: 2, capabilities: ['openNative'] });
+  assert.equal(devices.canOpenNative, true);
+  assert.equal(devices.openNative('devices', 'technogym'), true);
+  assert.equal(devices.openNative('devices', 'zwift'), true);
+  assert.equal(devices.openNative('cockpit'), true);
+  assert.equal(devices.openNative(), true, 'par défaut : accueil des réglages');
+  assert.equal(devices.openNative('log', 'peloton'), true, 'profil inconnu : non transmis');
+  assert.equal(devices.openNative('inspector'), true);
+  assert.equal(devices.openNative('fusée'), false, 'écran inconnu : rien');
+  assert.deepEqual(posted.slice(1), [
+    { type: 'openNative', screen: 'devices', profile: 'technogym' },
+    { type: 'openNative', screen: 'devices', profile: 'zwift' },
+    { type: 'openNative', screen: 'cockpit' },
+    { type: 'openNative', screen: 'settings' },
+    { type: 'openNative', screen: 'log' },
+    { type: 'openNative', screen: 'inspector' },
+  ]);
+});
+
+test('révision 2 : capabilities invalides ou retirées', () => {
+  const { devices, win } = setup();
+  win.mcwNative.state({ ...STATE, capabilities: 'openNative' });
+  assert.equal(devices.canOpenNative, false, 'pas une liste : ignoré');
+  win.mcwNative.state({ ...STATE, capabilities: [42, null, 'openNative'] });
+  assert.equal(devices.canOpenNative, true, 'les noms non textuels sont ignorés');
+  win.mcwNative.state({ ...STATE, capabilities: ['autreChose'] });
+  assert.equal(devices.canOpenNative, false);
+  win.mcwNative.state({ ...STATE, capabilities: ['openNative'] });
+  win.mcwNative.state(STATE);
+  assert.equal(devices.canOpenNative, false, 'chaque état fait foi');
 });
 
 test('état invalide ignoré, connexion impossible depuis le jeu', async () => {
