@@ -44,3 +44,13 @@ test('le régulateur réagit à une machine lente puis rapide', () => {
   assert.ok(g.scale > 0.95, `échelle remontée ${g.scale}`);
   assert.ok(scales.length >= 3);
 });
+
+test('vitesses sans trainer : braquet adapté = toute la puissance, trop dur ou trop facile = moins', async () => {
+  const { simulatedEffort } = await import('../src/core/gears.js');
+  assert.equal(simulatedEffort(2).factor, 1);
+  assert.ok(simulatedEffort(12).factor < 0.65, 'grosse vitesse en côte');
+  assert.ok(simulatedEffort(12).cadence < 60);
+  assert.ok(simulatedEffort(-8).factor < 0.6, 'petite vitesse en descente');
+  assert.ok(simulatedEffort(-8).cadence > 120);
+  assert.ok(simulatedEffort(30).factor >= 0.35);
+});

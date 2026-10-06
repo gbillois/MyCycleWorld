@@ -275,6 +275,8 @@ export class Hud {
     if (d.slipLeft > 0) badges.push(`<span class="badge slip">🍌 Glissade ${d.slipLeft.toFixed(1)} s · pente +10 %</span>`);
     if (d.draft < 0.98) badges.push(`<span class="badge draft">Aspiration −${Math.round((1 - d.draft) * 100)} %</span>`);
     if (d.autoSteer) badges.push('<span class="badge auto">🧭 Pilote auto</span>');
+    if (d.gearAdvice === 'down') badges.push('<span class="badge grass">Trop dur : passe une vitesse plus petite (−)</span>');
+    else if (d.gearAdvice === 'up') badges.push('<span class="badge draft">Tu mouilles : passe une vitesse plus grande (+)</span>');
     if (d.offRoad) badges.push('<span class="badge grass">Dans l’herbe !</span>');
     else if (d.surface === 'sand') badges.push('<span class="badge sand">Sable : pédalage plus dur</span>');
     else if (d.surface === 'boardwalk') badges.push('<span class="badge wood">Passerelle en bois</span>');

@@ -12,7 +12,7 @@ import { Race, ITEMS } from './race.js';
 import { Devices, explainError } from './devices.js';
 import { NativeDevices, isNativeApp } from './native.js';
 import { Hud, formatTime, ordinal, ordinalHtml, renderResults } from './hud.js';
-import { VirtualGears } from '../src/core/gears.js';
+import { VirtualGears, simulatedEffort } from '../src/core/gears.js';
 import { msToKmh } from '../src/core/physics.js';
 import { bluetoothAdvice } from '../src/core/platform.js';
 import { keepScreenOn } from '../src/core/wakelock.js';
@@ -1253,19 +1253,22 @@ function updateSim(dt) {
   // Tapotements : la puissance et la cadence suivent le rythme (sans machine connectée).
   const tapping = tapEnabled && !devices.trainerActive && state !== 'paused' && tapDrive.active(now, kind);
   sim.tapRate = tapping ? tapDrive.target(now, kind).rate : 0;
+  // À vélo, la vitesse choisie compte même sans trainer (pente ressentie trop dure ou trop facile = moins de watts).
+  const effort = kind === 'bike' ? simulatedEffort(feltGrade) : { factor: 1, cadence: SIM.cadence };
+  sim.gearFactor = effort.factor;
   if (tapping) {
     const { power, rate } = tapDrive.target(now, kind);
     const k = 1 - Math.exp(-dt * 4);
-    sim.power += (power - sim.power) * k;
+    sim.power += (power * effort.factor - sim.power) * k;
     sim.cadence += ((kind === 'row' ? 90 : rate) - sim.cadence) * k;
     return;
   }
   const pedaling = keys.has('ArrowUp') && !devices.trainerActive && state !== 'paused';
   const sprint = mode === 'kayak' && (keys.has('ShiftLeft') || keys.has('ShiftRight'));
-  const maxPower = mode === 'row' ? SIM_ROW.power : mode === 'kayak' ? (sprint ? SIM_ROW.sprint : SIM_ROW.power) : SIM.power;
+  const maxPower = (mode === 'row' ? SIM_ROW.power : mode === 'kayak' ? (sprint ? SIM_ROW.sprint : SIM_ROW.power) : SIM.power) * effort.factor;
   if (pedaling) {
-    sim.power = Math.min(maxPower, sim.power + SIM.rise * dt);
-    sim.cadence = Math.min(SIM.cadence, sim.cadence + 200 * dt);
+    sim.power = sim.power < maxPower ? Math.min(maxPower, sim.power + SIM.rise * dt) : Math.max(maxPower, sim.power - SIM.fall * dt);
+    sim.cadence += ((kind === 'bike' ? effort.cadence : SIM.cadence) - sim.cadence) * (1 - Math.exp(-dt * 3));
   } else {
     sim.power = Math.max(0, sim.power - SIM.fall * dt);
     sim.cadence = Math.max(0, sim.cadence - SIM.cadenceFall * dt);
@@ -1519,6 +1522,8 @@ function frame(nowMs) {
         autoSteer: autoSteer() && !keys.has('ArrowLeft') && !keys.has('ArrowRight'),
         keyboard: !devices.trainerActive,
         tap: tapEnabled,
+        // Conseil de vitesse sans trainer : braquet trop dur (côte) ou trop facile (descente).
+        gearAdvice: !devices.trainerActive && sim.power > 5 && (sim.gearFactor ?? 1) < 0.85 ? (feltGrade > 5 ? 'down' : 'up') : null,
         touch: TOUCH,
       },
       race,

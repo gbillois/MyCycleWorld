@@ -559,6 +559,34 @@ export function impostorMaterial() {
         vec3 transformed = bbInv * ( bbRight * position.x * bbSx + vec3( 0.0, position.y * bbSy, 0.0 ) );`);
   };
   mat.customProgramCacheKey = () => 'impostor';
+  return crispAlpha(mat, 512, 256);
+}
+
+
+// Feuillage à transparence découpée : de loin, la réduction de texture (mipmaps) moyenne l'alpha et les
+// silhouettes fondent sous le seuil, d'où des arbres qui « apparaissent » en s'approchant. On compense
+// l'alpha selon le niveau de réduction puis on le rend net (préserve la couverture à toute distance).
+export function crispAlpha(mat, texW = 512, texH = 256) {
+  if (mat.userData.crisp) return mat;
+  mat.userData.crisp = true;
+  const prev = mat.onBeforeCompile;
+  const prevKey = mat.customProgramCacheKey;
+  mat.onBeforeCompile = (sh, renderer) => {
+    if (prev) prev.call(mat, sh, renderer);
+    sh.fragmentShader = sh.fragmentShader.replace('#include <alphatest_fragment>', `
+      #ifdef USE_MAP
+        vec2 crispUv = vMapUv * vec2( ${texW.toFixed(1)}, ${texH.toFixed(1)} );
+        vec2 crispDx = dFdx( crispUv );
+        vec2 crispDy = dFdy( crispUv );
+        float crispLod = max( 0.0, 0.5 * log2( max( dot( crispDx, crispDx ), dot( crispDy, crispDy ) ) ) );
+        diffuseColor.a *= 1.0 + crispLod * 0.3;
+      #endif
+      #ifdef USE_ALPHATEST
+        diffuseColor.a = clamp( ( diffuseColor.a - alphaTest ) / max( fwidth( diffuseColor.a ), 0.0001 ) + 0.5, 0.0, 1.0 );
+        if ( diffuseColor.a < 0.5 ) discard;
+      #endif`);
+  };
+  mat.customProgramCacheKey = () => `${prevKey ? prevKey.call(mat) : ''}|crisp`;
   return mat;
 }
 

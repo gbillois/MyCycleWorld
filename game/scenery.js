@@ -13,8 +13,7 @@ import {
 } from './atmosphere.js';
 import {
   Forest, deciduousGeometry, pineGeometry, bushGeometry, palmGeometry, rockGeometry, windMaterial, leafAtlas,
-  makeFieldMaps, makeRoadMap, makeGrassField,
-} from './nature.js';
+  makeFieldMaps, makeRoadMap, makeGrassField, crispAlpha } from './nature.js';
 import { makeWater } from './water.js';
 
 const smoothstep = (a, b, x) => {
@@ -719,18 +718,20 @@ function roadMaterial(params, shared, key, puddles) {
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uNoise = { value: shared.noise };
     sh.uniforms.uTime = shared.uTime;
+    sh.uniforms.uWet = shared.uWet;
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vRPos;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvRPos = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;');
     sh.fragmentShader = withCloudShade(sh.fragmentShader
-      .replace('#include <common>', `#include <common>\n${CLOUD_GLSL}\nvarying vec3 vRPos;`)
+      .replace('#include <common>', `#include <common>\n${CLOUD_GLSL}\nvarying vec3 vRPos;\nuniform float uWet;`)
       .replace('#include <map_fragment>', `#include <map_fragment>
         float macroR = texture2D( uNoise, vRPos.xz * 0.031 ).r;
         diffuseColor.rgb *= 0.9 + macroR * 0.2;
         float wet = 0.0;
-        ${puddles ? `wet = smoothstep( 0.775, 0.81, texture2D( uNoise, vRPos.xz * 0.016 + 0.3 ).g + ( texture2D( uNoise, vRPos.xz * 0.11 ).a - 0.5 ) * 0.12 );
-        diffuseColor.rgb *= mix( 1.0, 0.72, wet );` : ''}`)
-      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix( roughnessFactor, 0.22, wet );')
+        ${puddles ? `float pThr = mix( 0.875, 0.74, uWet ); // par temps sec, seulement quelques rares flaques
+        wet = smoothstep( pThr, pThr + 0.035, texture2D( uNoise, vRPos.xz * 0.016 + 0.3 ).g + ( texture2D( uNoise, vRPos.xz * 0.11 ).a - 0.5 ) * 0.12 );
+        diffuseColor.rgb *= mix( 1.0, 0.72, wet ) * mix( 1.0, 0.82, uWet );` : 'diffuseColor.rgb *= mix( 1.0, 0.88, uWet );'}`)
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix( roughnessFactor, 0.22, max( wet, uWet * 0.45 ) );')
       .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nnormal = normalize( mix( normal, nonPerturbedNormal, wet * 0.7 ) );\nfloat cloudShade = cloudShadeAt( vRPos.xz );'));
   };
   mat.customProgramCacheKey = () => `road-${key}`;
@@ -1280,7 +1281,8 @@ export function buildScenery(scene, track, { quality = 'high', renderer = null }
   const s3 = new THREE.Vector3();
   const v3 = new THREE.Vector3();
   const e = new THREE.Euler();
-  const shared = { uTime: { value: 0 }, uWind: { value: 1 }, noise: noiseTexture() };
+  // uWet : route mouillée (0 = sec, quelques rares flaques ; 1 = pluie, flaques nombreuses). Réglé par la météo.
+  const shared = { uTime: { value: 0 }, uWind: { value: 1 }, uWet: { value: 0 }, noise: noiseTexture() };
 
   // Ciel, brume, lumières et environnement
   applyMood(scene, mood);
@@ -1373,11 +1375,11 @@ export function buildScenery(scene, track, { quality = 'high', renderer = null }
   }
   for (const pm of ctx.palms) shadows.push([pm[0], pm[1], pm[2], 3]);
   const solidMat = windMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.86 }), shared, { key: 'solid' });
-  const leafMat = windMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.78, map: leafAtlas(), alphaTest: 0.5, side: THREE.DoubleSide }), shared, { key: 'leaf', flutter: 0.035, noFlip: true });
+  const leafMat = crispAlpha(windMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.78, map: leafAtlas(), alphaTest: 0.5, side: THREE.DoubleSide }), shared, { key: 'leaf', flutter: 0.035, noFlip: true }));
   if (quality === 'high') leafMat.alphaToCoverage = true;
   const cards = quality === 'high';
   const tints = ['#ffffff', '#f2ffe0', '#e4f7d6', '#fff2c4', '#ffe0b0', '#e8fff0', '#f8ffd8'].map(C);
-  const dist = quality === 'high' ? { close: 52, mid: 115 } : quality === 'medium' ? { close: 36, mid: 70 } : { close: 0.1, mid: 45 };
+  const dist = quality === 'high' ? { close: 52, mid: 125 } : quality === 'medium' ? { close: 38, mid: 90 } : { close: 0.1, mid: 55 };
   const forest = new Forest(group, [
     { near: deciduousGeometry(0, cards), impostor: 'deciduous', items: round, cast: castTrees, tints, nearMaterial: cards ? [solidMat, leafMat] : solidMat, material: solidMat },
     { near: pineGeometry(0), impostor: 'pine', items: pines, cast: castTrees, tints: null, material: solidMat },
@@ -1624,7 +1626,7 @@ export function buildScenery(scene, track, { quality = 'high', renderer = null }
     scene.fog = null;
   };
 
-  return { group, sky, heightAt, lake, update, dispose, center: new THREE.Vector3(cx, (track.minY + track.maxY) / 2, cz) };
+  return { group, sky, heightAt, lake, update, dispose, wet: shared.uWet, center: new THREE.Vector3(cx, (track.minY + track.maxY) / 2, cz) };
 }
 
 // Banderole de l'arche : deux faces (avant et arrière) fusionnées en une géométrie.

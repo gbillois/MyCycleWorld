@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { makeSky, makeEnvironment, disposeTree, terrainMaterial, fanGeometry, fanMaterial, mountainRingAround, fbm } from './scenery.js';
 import { MOODS, applyMood, installFog, makeSkyDome, makeEnvironment as makeSkyEnvironment, noiseTexture, makeBirds } from './atmosphere.js';
-import { Forest, deciduousGeometry, pineGeometry, bushGeometry, windMaterial, leafAtlas, makeFieldMaps } from './nature.js';
+import { Forest, deciduousGeometry, pineGeometry, bushGeometry, windMaterial, leafAtlas, makeFieldMaps, crispAlpha } from './nature.js';
 import { makeWater, makeReflectiveWater } from './water.js';
 import { mergeGeometries, colored, paint, indexify } from './geom.js';
 import { makeLabel } from './models.js';
@@ -553,7 +553,7 @@ export function buildRowingWorld(scene, opts = {}) {
     bushes.push([x, y, z, 0.7 + r() * 0.8, r()]);
   }
   const solidMat = windMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.86 }), shared, { key: 'solid' });
-  const leafMat = windMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.78, map: leafAtlas(), alphaTest: 0.5, side: THREE.DoubleSide }), shared, { key: 'leaf', flutter: 0.035, noFlip: true });
+  const leafMat = crispAlpha(windMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.78, map: leafAtlas(), alphaTest: 0.5, side: THREE.DoubleSide }), shared, { key: 'leaf', flutter: 0.035, noFlip: true }));
   if (quality === 'high') leafMat.alphaToCoverage = true;
   const cards = quality === 'high';
   const tints = ['#ffffff', '#f2ffe0', '#e4f7d6', '#fff2c4', '#ffe0b0', '#e8fff0'].map(C);
