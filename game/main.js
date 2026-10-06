@@ -27,6 +27,7 @@ import { onLog, logText, formatEntry } from '../src/ble/log.js';
 import { uuidName } from '../src/ble/bytes.js';
 import { BleInspector, parseServiceList } from '../src/ble/inspector.js';
 import { FrameGovernor } from '../src/core/framerate.js';
+import { TapDrive } from '../src/core/taps.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -64,6 +65,10 @@ const HW_KEY = 'mycycleworld.hw';
 const STEER_KEY = 'mycycleworld.steer';
 let hwId = hardwareById(params.get('hw') || storedPref(HW_KEY)).id;
 let steerPref = ['auto', 'on', 'off'].includes(storedPref(STEER_KEY)) ? storedPref(STEER_KEY) : 'auto';
+// Tapoter l'écran pour pédaler ou ramer (activé par défaut, désactivable dans Options).
+const TAP_KEY = 'mycycleworld.tap';
+let tapEnabled = storedPref(TAP_KEY) !== 'off';
+const tapDrive = new TapDrive();
 let playMachine = 'bike'; // bike | cross | row : machine choisie dans « Jouer »
 
 // Puissance simulée au clavier (sans home trainer). Au rameur : 180 W à 26 coups/min.
@@ -634,7 +639,7 @@ function rowingInput() {
   const rate = devices.trainer?.data?.strokeRate;
   return {
     power: trainer ? devices.power : sim.power,
-    strokeRate: trainer ? rate ?? (devices.machineKind === 'rower' ? devices.cadence : 0) : sim.power > 20 ? SIM_ROW.rate * Math.min(1, sim.power / SIM_ROW.power) : 0,
+    strokeRate: trainer ? rate ?? (devices.machineKind === 'rower' ? devices.cadence : 0) : sim.tapRate ? sim.tapRate : sim.power > 20 ? SIM_ROW.rate * Math.min(1, sim.power / SIM_ROW.power) : 0,
     steer: rowSteer(),
   };
 }
@@ -732,7 +737,10 @@ function updateRowHud() {
   }
   const kind = devices.machineKind;
   let hint = '';
-  if (!devices.trainerActive) hint = TOUCH ? 'Maintiens « Pédaler » pour ramer (180 W simulés)' : 'Maintiens ↑ pour ramer (180 W simulés) · ← → pour rester dans ton couloir';
+  if (!devices.trainerActive) {
+    if (tapEnabled) hint = sim.tapRate ? '' : TOUCH ? 'Tape l’écran à chaque coup d’aviron (ou maintiens « Pédaler »)' : 'Clique ou tape l’écran à chaque coup d’aviron, ou maintiens ↑';
+    else hint = TOUCH ? 'Maintiens « Pédaler » pour ramer (180 W simulés)' : 'Maintiens ↑ pour ramer (180 W simulés) · ← → pour rester dans ton couloir';
+  }
   else if (kind && kind !== 'rower') hint = `Machine connectée : ${MACHINE_LABELS[kind] || kind} (sa puissance fait avancer le bateau)`;
   set('rHint', hint);
   const fx = p.offLane ? '<span class="badge grass">Hors couloir : les bouées freinent !</span>' : autoSteer() ? '<span class="badge auto">🧭 Pilote auto</span>' : '';
@@ -1011,6 +1019,17 @@ $('inspectStop').addEventListener('click', () => {
 });
 
 // Direction : selon le matériel, toujours automatique ou manuelle.
+// Tapoter pour pédaler / ramer : activé ou désactivé.
+for (const btn of document.querySelectorAll('.seg-btn[data-tap]')) {
+  btn.setAttribute('aria-pressed', String((btn.dataset.tap === 'on') === tapEnabled));
+  btn.addEventListener('click', () => {
+    tapEnabled = btn.dataset.tap === 'on';
+    savePref(TAP_KEY, tapEnabled ? 'on' : 'off');
+    tapDrive.reset();
+    for (const b of document.querySelectorAll('.seg-btn[data-tap]')) b.setAttribute('aria-pressed', String(b === btn));
+  });
+}
+
 for (const btn of document.querySelectorAll('.seg-btn[data-steer]')) {
   btn.setAttribute('aria-pressed', String(btn.dataset.steer === steerPref));
   btn.addEventListener('click', () => {
@@ -1080,6 +1099,18 @@ gears.addEventListener('change', () => {
 // ---------- Boucle ----------
 
 function updateSim(dt) {
+  const kind = mode === 'row' ? 'row' : 'bike';
+  const now = performance.now();
+  // Tapotements : la puissance et la cadence suivent le rythme (sans machine connectée).
+  const tapping = tapEnabled && !devices.trainerActive && state !== 'paused' && tapDrive.active(now, kind);
+  sim.tapRate = tapping ? tapDrive.target(now, kind).rate : 0;
+  if (tapping) {
+    const { power, rate } = tapDrive.target(now, kind);
+    const k = 1 - Math.exp(-dt * 4);
+    sim.power += (power - sim.power) * k;
+    sim.cadence += ((kind === 'row' ? 90 : rate) - sim.cadence) * k;
+    return;
+  }
   const pedaling = keys.has('ArrowUp') && !devices.trainerActive && state !== 'paused';
   const maxPower = mode === 'row' ? SIM_ROW.power : SIM.power;
   if (pedaling) {
@@ -1090,6 +1121,21 @@ function updateSim(dt) {
     sim.cadence = Math.max(0, sim.cadence - SIM.cadenceFall * dt);
   }
 }
+
+// Un tapotement n'importe où sur la scène (pas sur un bouton) = un tour de pédalier ou un coup d'aviron.
+const TAP_IGNORE = 'button, a, input, select, textarea, label, .tc, .side-panel, .screen, [data-no-tap]';
+window.addEventListener('pointerdown', (e) => {
+  if (!tapEnabled || state !== 'race' || devices.trainerActive) return;
+  if (e.button > 0 || e.target.closest?.(TAP_IGNORE)) return;
+  tapDrive.tap(performance.now());
+  // Petit cercle à l'endroit du tapotement
+  const dot = document.createElement('div');
+  dot.className = 'tap-ripple';
+  dot.style.left = `${e.clientX}px`;
+  dot.style.top = `${e.clientY}px`;
+  document.body.appendChild(dot);
+  setTimeout(() => dot.remove(), 600);
+});
 
 // Pilote automatique : forcé dans les options, ou choisi selon le matériel (machine sans boutons de
 // direction : elliptique, vélo ou rameur Technogym / BLE, sans manette Zwift connectée).
@@ -1301,6 +1347,7 @@ function frame(nowMs) {
         surface: p.surface,
         autoSteer: autoSteer() && !keys.has('ArrowLeft') && !keys.has('ArrowRight'),
         keyboard: !devices.trainerActive,
+        tap: tapEnabled,
         touch: TOUCH,
       },
       race,
@@ -1322,6 +1369,7 @@ window.__mcw = {
   renderer,
   get state() { return state; },
   get race() { return race; },
+  tapDrive,
   governor,
   get mode() { return mode; },
   get rowing() { return rowing; },

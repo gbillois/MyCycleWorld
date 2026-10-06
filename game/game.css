@@ -1406,3 +1406,8 @@ body.native .connect-layout { grid-template-columns: minmax(0, 1fr); max-width: 
 
 /* Compteur d'images par seconde (?fps=1) */
 .fps-meter { position: fixed; left: 50%; bottom: 4px; transform: translateX(-50%); z-index: 50; padding: 2px 8px; border-radius: 6px; background: rgba(0, 0, 0, 0.6); color: #9effa8; font: 700 11px ui-monospace, monospace; pointer-events: none; }
+
+/* Tapoter pour pédaler : cercle à l'endroit du tapotement */
+.tap-ripple { position: fixed; z-index: 40; width: 64px; height: 64px; margin: -32px 0 0 -32px; border-radius: 50%; border: 3px solid rgba(255, 210, 63, 0.9); pointer-events: none; animation: tap-ripple 0.55s ease-out forwards; }
+@keyframes tap-ripple { from { transform: scale(0.3); opacity: 1; } to { transform: scale(1.4); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .tap-ripple { animation-duration: 0.2s; } }

@@ -277,8 +277,8 @@ export class Hud {
     this.set('hEffects', badges.join(''), (html) => (e.hEffects.innerHTML = html));
     let hint = '';
     if (!d.keyboard) hint = '';
-    else if (d.touch) hint = d.power < 5 && d.time > 0 ? 'Maintiens « Pédaler » pour avancer' : '';
-    else hint = d.power < 5 && d.time > 0 ? 'Maintiens ↑ pour pédaler' : 'Mode clavier : ↑ pédaler · ← → se déplacer';
+    else if (d.touch) hint = d.power < 5 && d.time > 0 ? (d.tap ? 'Tape l’écran pour pédaler (ou maintiens « Pédaler »)' : 'Maintiens « Pédaler » pour avancer') : '';
+    else hint = d.power < 5 && d.time > 0 ? (d.tap ? 'Maintiens ↑ ou clique en rythme pour pédaler' : 'Maintiens ↑ pour pédaler') : 'Mode clavier : ↑ pédaler · ← → se déplacer';
     this.set('hHint', hint);
   }
 
