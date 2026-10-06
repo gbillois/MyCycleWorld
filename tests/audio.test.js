@@ -2,12 +2,14 @@
 // emplacements des sources, et analyse spectrale des sons calculés. Lancer : node --test tests/
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULTS, BUSES, STORAGE_KEY, normalizeSettings, loadSettings, saveSettings, volumeToGain, busGain, stepVolume, percentLabel } from '../game/audio/settings.js';
+import { DEFAULTS, BUSES, STORAGE_KEY, SETTINGS_VERSION, normalizeSettings, loadSettings, saveSettings, volumeToGain, busGain, stepVolume, percentLabel } from '../game/audio/settings.js';
 import { rng, hashSeed, nextDelay, EventClock, Wander, weighted } from '../game/audio/random.js';
 import { BIRDS, SCENE_BIRDS, birdSong, contour, songDuration, surfaceMix, tyreParams, freewheelRate, isCoasting, chainMeshRate, countdownStep, passEvent, breathing, musicIntensity, crowdExcitement } from '../game/audio/patterns.js';
 import { makeSong, stepEvents, planSteps, stepDuration, swingOffset, layerLevel, SCALES, MOODS } from '../game/audio/music-gen.js';
 import { soundSpots, rowingSpots, coastZ } from '../game/audio/spots.js';
 import { bandEnergy, goertzel, dominantFreq, peak, rms, pink, brown, Filter, addDecaySine } from '../game/audio/dsp.js';
+import { distanceCutoff } from '../game/audio/engine.js';
+import { SFX } from '../game/audio/index.js';
 import * as V from '../game/audio/voices.js';
 import * as S from '../game/audio/sounds.js';
 import { RENDERERS, renderSound } from '../game/audio/renderers.js';
@@ -22,12 +24,12 @@ const memStorage = () => {
 // --- Réglages ---
 test('réglages : valeurs par défaut demandées', () => {
   assert.deepEqual(BUSES, ['master', 'music', 'ambience', 'sfx', 'ui']);
-  assert.deepEqual({ ...DEFAULTS }, { master: 80, music: 50, ambience: 70, sfx: 80, ui: 60, muted: false, windNoise: false });
+  assert.deepEqual({ ...DEFAULTS }, { master: 80, music: 35, ambience: 60, sfx: 70, ui: 45, muted: false, windNoise: false });
   assert.deepEqual(loadSettings(memStorage()), { ...DEFAULTS });
 });
 
 test('réglages : JSON abîmé, valeurs hors bornes, stockage indisponible', () => {
-  assert.deepEqual(normalizeSettings({ master: 140, music: -5, ambience: '35', sfx: 'abc', muted: 'oui' }), { master: 100, music: 0, ambience: 35, sfx: 80, ui: 60, muted: false, windNoise: false });
+  assert.deepEqual(normalizeSettings({ master: 140, music: -5, ambience: '35', sfx: 'abc', muted: 'oui' }), { master: 100, music: 0, ambience: 35, sfx: 70, ui: 45, muted: false, windNoise: false });
   const st = memStorage();
   st.setItem(STORAGE_KEY, '{pas du json');
   assert.deepEqual(loadSettings(st), { ...DEFAULTS });
@@ -41,6 +43,20 @@ test('réglages : enregistrés puis relus dans mycycleworld.audio', () => {
   assert.equal(saveSettings({ ...DEFAULTS, music: 25, muted: true }, st), true);
   assert.ok(st.map.has('mycycleworld.audio'));
   assert.deepEqual(loadSettings(st), { ...DEFAULTS, music: 25, muted: true });
+  assert.equal(JSON.parse(st.map.get(STORAGE_KEY)).v, SETTINGS_VERSION, 'version du format enregistrée');
+});
+
+test('réglages : migration des anciennes valeurs par défaut, choix du joueur conservés', () => {
+  const st = memStorage();
+  // Ancien format (sans version) resté aux anciennes valeurs par défaut : nouvelles valeurs par défaut
+  st.setItem(STORAGE_KEY, JSON.stringify({ master: 80, music: 50, ambience: 70, sfx: 80, ui: 60, muted: false }));
+  assert.deepEqual(loadSettings(st), { ...DEFAULTS });
+  // Ancien format avec des curseurs déplacés : ceux-là restent, les autres passent aux nouvelles valeurs
+  st.setItem(STORAGE_KEY, JSON.stringify({ master: 65, music: 25, ambience: 70, sfx: 90, ui: 60, muted: true, windNoise: true }));
+  assert.deepEqual(loadSettings(st), { master: 65, music: 25, ambience: 60, sfx: 90, ui: 45, muted: true, windNoise: true });
+  // Format actuel : rien n'est touché, même une valeur égale à un ancien défaut
+  st.setItem(STORAGE_KEY, JSON.stringify({ v: SETTINGS_VERSION, master: 80, music: 50, ambience: 70, sfx: 80, ui: 60, muted: false }));
+  assert.deepEqual(loadSettings(st), { master: 80, music: 50, ambience: 70, sfx: 80, ui: 60, muted: false, windNoise: false });
 });
 
 test('volume : courbe perceptive, 0 = silence, coupure générale', () => {
@@ -407,7 +423,78 @@ test('effets : bip du compte à rebours à 660 Hz, corne grave et riche, porte d
   const horn = S.renderHorn(SR, rng(1));
   assert.ok(bandEnergy(horn, SR, 300, 2500) > bandEnergy(horn, SR, 5000, 12000) * 5);
   const ding = S.renderGateDing(SR, rng(1));
-  assert.ok(goertzel(ding.l, SR, 1568, 0, 9600) > goertzel(ding.l, SR, 1300, 0, 9600) * 10);
+  assert.ok(goertzel(ding.l, SR, 784, 0, 9600) > goertzel(ding.l, SR, 650, 0, 9600) * 10, 'porte : sol 5 (784 Hz), registre médium');
+});
+
+// --- Qualité : sons doux, sans clic ni souffle aigu ---
+// Énergie relative (dB) d'une bande par rapport à 200-2000 Hz.
+const relBand = (buf, sr, f0, f1) => 10 * Math.log10(bandEnergy(buf, sr, f0, f1, 24) / bandEnergy(buf, sr, 200, 2000, 24));
+
+test('qualité : chaque effet commence et finit en douceur, sans composante continue', async () => {
+  const names = Object.keys(RENDERERS).filter((n) => !['crowd', 'applause', 'impulse', 'noise', 'water', 'lapping', 'insects', 'crunch'].includes(n));
+  for (const name of names) {
+    const opts = name === 'drum' ? { kind: 'snare' } : name === 'note' ? { instrument: 'synth', midi: 64 } : name === 'ui' ? { kind: 'tick' } : name === 'song' ? { species: 'robin' } : name === 'church' ? { nominal: 440, dur: 3 } : {};
+    const { channels } = await renderSound(name, SR, 3, opts);
+    for (const c of channels) {
+      const edge = Math.max(Math.abs(c[0]), Math.abs(c[c.length - 1]));
+      assert.ok(edge < 0.01, `${name} : bord ${edge.toFixed(4)} (clic)`);
+      let m = 0;
+      for (let i = 0; i < c.length; i++) m += c[i];
+      assert.ok(Math.abs(m / c.length) < 0.01, `${name} : composante continue ${(m / c.length).toFixed(4)}`);
+      // Aucun saut d'un échantillon à l'autre plus grand que la moitié de la crête (attaques adoucies) ;
+      // les chants d'oiseaux et le cri du rapace, sons aigus, varient naturellement vite d'un échantillon au suivant.
+      if (name === 'song' || name === 'raptor') continue;
+      let jump = 0;
+      for (let i = 1; i < c.length; i++) jump = Math.max(jump, Math.abs(c[i] - c[i - 1]));
+      assert.ok(jump < peak(c) * 0.5, `${name} : saut ${(jump / peak(c)).toFixed(2)} de la crête`);
+    }
+  }
+});
+
+test('qualité : effets du jeu et interface ronds (peu d’énergie au-dessus de 6 kHz, rien de perçant)', async () => {
+  const soft = ['beep', 'horn', 'pickup', 'turbo', 'banana', 'skid', 'bump', 'whoosh', 'lap', 'finalLap', 'fanfare', 'gear', 'gateDing', 'gateBuzz', 'sprintWhoosh', 'sprintFail', 'kayakSplash', 'splash', 'paddle', 'drips', 'oarlock', 'breath'];
+  for (const name of soft) {
+    const { channels, sampleRate } = await renderSound(name, SR, 5, {});
+    const c = channels[0];
+    const air = relBand(c, sampleRate, 6000, 15000);
+    assert.ok(air < -18, `${name} : 6-15 kHz à ${air.toFixed(1)} dB du médium`);
+  }
+  for (const kind of ['tick', 'confirm', 'back', 'open', 'close']) {
+    const u = S.renderUi(SR, rng(2), { kind });
+    assert.ok(relBand(u.l || u, SR, 2500, 8000) < -10, `interface ${kind} : haut médium contenu`);
+  }
+  // Bip du compte à rebours : court, ne dure pas plus d'une demi-seconde audible
+  const beep = S.renderBeep(SR, rng(1), { f: 660 });
+  assert.ok(rms(beep, Math.round(SR * 0.45)) < rms(beep, 0, Math.round(SR * 0.1)) * 0.1);
+});
+
+test('qualité : nappes chaudes (bruits filtrés), insectes et gravier sans souffle aigu', async () => {
+  const crunch = V.renderCrunch(32000, rng(1), { seconds: 2 });
+  assert.ok(relBand(crunch, 32000, 6000, 15000) < -15, 'gravier : pas de chuintement aigu');
+  const ins = V.renderInsects(32000, rng(2), { seconds: 4, kind: 'meadow' });
+  assert.ok(relBand(ins.l, 32000, 9000, 15000) < relBand(ins.l, 32000, 4000, 8000) - 10, 'insectes : rien au-dessus de 9 kHz');
+  const splash = V.renderSplash(SR, rng(3), {});
+  assert.ok(relBand(splash, SR, 6000, 15000) < -18, 'éclaboussure naturelle, pas sifflante');
+  const crowd = await V.renderCrowd(22050, rng(4), { seconds: 2, voices: 12, yieldFn: null });
+  assert.ok(relBand(crowd.l, 22050, 4000, 10000) < -20, 'foule chaude');
+});
+
+test('qualité : distance, musique posée, effets plus doux que les anciens réglages', () => {
+  // Absorption de l'air : la coupure baisse avec la distance, sans descendre sous 1,2 kHz
+  let prev = Infinity;
+  for (const d of [0, 15, 30, 60, 120, 400]) {
+    const f = distanceCutoff(d);
+    assert.ok(f <= prev && f >= 1200);
+    prev = f;
+  }
+  assert.ok(distanceCutoff(10) > 15000 && distanceCutoff(60) < 8000);
+  // Effort normal : nappe, basse et arpège, sans batterie ; batterie entière au turbo
+  const x = musicIntensity({ time: 10, power: 250, speed: 9 });
+  assert.ok(layerLevel(x, 'kick') === 0 && layerLevel(x, 'arp') > 0.9, `intensité ${x}`);
+  assert.equal(layerLevel(musicIntensity({ time: 10, power: 50, turbo: true }), 'kick'), 1);
+  // Aucun effet amplifié, la musique se met en retrait sous les effets importants
+  for (const [k, def] of Object.entries(SFX)) assert.ok((def.gain ?? 0.6) <= 1, `${k} : gain ${def.gain}`);
+  assert.ok(SFX.pickup.duck && SFX.lap.duck && !SFX.gear.duck);
 });
 
 test('filtre biquad : passe-bas atténue les aigus, sinus amorti décroît', () => {

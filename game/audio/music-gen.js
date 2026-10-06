@@ -54,11 +54,12 @@ export function voiceLead(notes, center = 64) {
 
 const pattern = (str) => [...str].map((c) => (c === 'x' ? 1 : c === 'o' ? 0.55 : c === '.' ? 0 : Number(c) / 9));
 
+// Batterie sobre : croches au plus (aucune double-croche continue de charleston), accents doux.
 const DRUMS = {
   indie: {
     kick: ['x.....x.x.......', 'x......xx...x...', 'x.....x...x.....'],
     snare: ['....x.......x...', '....x.......x..o'],
-    hat: ['x.o.x.o.x.o.x.o.', 'xoxoxoxoxoxoxoxo'],
+    hat: ['x.o.x.o.x.o.x.o.', '..x...x...x...x.'],
   },
   airy: {
     kick: ['x.......x.......', 'x.....x.........'],
@@ -68,17 +69,17 @@ const DRUMS = {
   tropical: {
     kick: ['x...x...x...x...', 'x...x...x...x..o'],
     snare: ['....x.......x...', '...x..x....x..x.'],
-    hat: ['..x...x...x...x.', '.ox.ox.ox.ox.ox.'],
+    hat: ['..x...x...x...x.', '..x..x....x..x..'],
   },
   drive: {
     kick: ['x...x...x...x...', 'x...x...x...x.o.'],
     snare: ['....x.......x...'],
-    hat: ['oxoxoxoxoxoxoxox', '..x...x...x...x.'],
+    hat: ['..x...x...x...x.', 'o.x.o.x.o.x.o.x.'],
   },
   calm: {
     kick: ['................'],
-    snare: ['....5.......5...'],
-    hat: ['3.2.3.2.3.2.3.2.'],
+    snare: ['....4.......4...'],
+    hat: ['................'],
   },
 };
 
@@ -86,7 +87,7 @@ const BASS = {
   indie: ['x.....x.x...x...', 'x..x..x...x.x...'],
   airy: ['x.......x.......', 'x.....x.....x...'],
   tropical: ['x..x..x...x..x..', 'x..x....x..x....'],
-  drive: ['.x.x.x.x.x.x.x.x', 'xxoxxoxoxxoxxoxo'],
+  drive: ['.x.x.x.x.x.x.x.x', 'x..x..x.x..x..x.'],
   calm: ['x...............', 'x.......x.......'],
 };
 
@@ -147,7 +148,7 @@ export function makeSong(seedText, moodName = 'meadow') {
     bassRhythm,
     bassNotes,
     arp,
-    arpOctave: moodName === 'menu' ? 0 : pick(r, [0, 12]),
+    arpOctave: 0, // arpège dans le médium (une octave plus haut, il devenait aigrelet)
     motif,
   };
 }
@@ -165,7 +166,9 @@ export function scaleNote(song, degree, octave = 0) {
 }
 
 // Couches selon l'intensité (0..3) : facteur 0..1 pour chaque instrument (fondu sur 0,4 d'intensité).
-export const LAYER_THRESHOLDS = { pad: -1, bass: 0.4, arp: 0.9, hat: 1.2, kick: 1.8, snare: 1.8, open: 2.5, perc: 2.5, motif: 2.6 };
+// Peu de couches à la fois : nappe et basse, puis arpège ; la batterie n'arrive qu'à l'effort soutenu, le motif
+// mélodique seulement dans les moments forts (turbo, dernier tour). Plus de charleston ouvert.
+export const LAYER_THRESHOLDS = { pad: -1, bass: 0.4, arp: 0.7, hat: 1.9, kick: 2.1, snare: 2.3, open: 9, perc: 2.8, motif: 2.75 };
 export function layerLevel(intensity, layer) {
   const th = LAYER_THRESHOLDS[layer] ?? 0;
   return Math.max(0, Math.min(1, (intensity - th) / 0.4));
@@ -184,21 +187,21 @@ export function stepEvents(song, stepIndex, intensity) {
   drum('kick', song.drums.kick[half][s] * lv('kick'));
   if (song.feel === 'calm') drum('brush', song.drums.snare[half][s] * Math.max(0.4, lv('hat')));
   else drum(song.feel === 'tropical' || song.feel === 'airy' ? 'clap' : 'snare', song.drums.snare[half][s] * lv('snare'));
-  drum(song.feel === 'airy' || song.feel === 'calm' ? 'shaker' : 'hat', song.drums.hat[(bar >> 1) & 1][s] * lv('hat') * 0.8);
+  drum(song.feel === 'drive' ? 'hat' : 'shaker', song.drums.hat[(bar >> 1) & 1][s] * lv('hat') * 0.8);
   drum('openhat', song.drums.open[s] * lv('open') * 0.6);
   drum(song.feel === 'tropical' ? 'conga' : 'rim', song.drums.perc[s] * lv('perc') * 0.5);
   // Roulement de caisse claire à la fin de chaque section de 8 mesures
-  if ((bar % 8 === 7) && s >= 12 && intensity >= 2) drum('snare', 0.35 + (s - 12) * 0.12);
+  if ((bar % 8 === 7) && s >= 12 && intensity >= 2.6) drum('snare', 0.25 + (s - 12) * 0.08);
   const b = song.bassRhythm[half][s];
   if (b > 0 && lv('bass') > 0) ev.push({ type: 'bass', midi: chord.bass + song.bassNotes[half][s], vel: b * lv('bass'), len: song.feel === 'drive' ? 0.5 : 1 });
   const a = song.arp[half][s];
   if (a !== null && lv('arp') > 0) {
     const notes = chord.notes;
-    ev.push({ type: 'note', midi: notes[a % notes.length] + 12 * Math.floor(a / notes.length) + song.arpOctave, vel: 0.6 * lv('arp') });
+    ev.push({ type: 'note', midi: notes[a % notes.length] + 12 * Math.floor(a / notes.length) + song.arpOctave, vel: 0.5 * lv('arp') });
   }
   if (lv('motif') > 0) {
     const m = (stepIndex % 32);
-    for (const n of song.motif) if (n.step === m && bar % 4 >= 2) ev.push({ type: 'note', midi: scaleNote(song, n.deg, 1), vel: 0.55 * lv('motif'), lead: true });
+    for (const n of song.motif) if (n.step === m && bar % 4 >= 2) ev.push({ type: 'note', midi: scaleNote(song, n.deg, 1), vel: 0.45 * lv('motif'), lead: true });
   }
   return ev;
 }

@@ -17,39 +17,41 @@ import { countdownStep, passEvent, musicIntensity } from './patterns.js';
 import { bindVolumeControls } from './ui.js';
 
 // Effets disponibles par sfx(nom, options) : rendu, options du rendu, niveau, bus, réverbération.
+// duck : la musique se met un instant en retrait sous cet effet (quelques dB, retour en douceur).
+// Les jingles des résultats passent par le bus des effets : la musique, très en retrait par défaut, les rendrait inaudibles.
 export const SFX = {
-  beep: { r: 'beep', o: { f: 660 }, gain: 0.55 },
-  go: { r: 'beep', o: { f: 1320, dur: 0.5 }, gain: 0.55 },
-  horn: { r: 'horn', gain: 0.5, wet: 0.35 },
-  whistle: { r: 'whistle', gain: 0.4, wet: 0.2 },
-  pickup: { r: 'pickup', gain: 0.6 },
-  turbo: { r: 'turbo', gain: 0.65 },
-  banana: { r: 'banana', gain: 0.7 },
-  skid: { r: 'skid', gain: 0.6 },
-  bump: { r: 'bump', gain: 0.7 },
-  whoosh: { r: 'whoosh', o: (x) => ({ dir: x.dir < 0 ? -1 : 1 }), gain: 0.5 },
-  lap: { r: 'lap', gain: 0.55, wet: 0.25 },
-  'final-lap': { r: 'finalLap', gain: 0.6, wet: 0.25 },
-  fanfare: { r: 'fanfare', gain: 0.65, wet: 0.3, priority: 3 },
-  win: { r: 'sting', o: { kind: 'win' }, gain: 0.6, bus: 'music', priority: 3 },
-  podium: { r: 'sting', o: { kind: 'podium' }, gain: 0.6, bus: 'music', priority: 3 },
-  'finish-other': { r: 'sting', o: { kind: 'other' }, gain: 0.6, bus: 'music', priority: 3 },
-  gear: { r: 'gear', gain: 0.45 },
-  splash: { r: 'splash', gain: 0.6, pool: true },
-  // Kayak (mode en préparation)
-  paddle: { r: 'paddle', gain: 0.6, pool: true, pan: (x) => (x.side === 'left' ? -0.5 : x.side === 'right' ? 0.5 : 0) },
-  'gate-pass': { r: 'gateDing', gain: 0.6, wet: 0.3 },
-  'gate-miss': { r: 'gateBuzz', gain: 0.45 },
-  'sprint-gate': { r: 'sprintWhoosh', gain: 0.6, wet: 0.2 },
-  'sprint-fail': { r: 'sprintFail', gain: 0.65 },
-  whirlpool: { r: 'whirlpool', o: (x) => ({ dur: Math.max(1, Math.min(6, Math.round(x.duration || 2.5))) }), gain: 0.6, wet: 0.3 },
-  'kayak-splash': { r: 'kayakSplash', gain: 0.6, pool: true },
+  beep: { r: 'beep', o: { f: 660 }, gain: 0.7 },
+  go: { r: 'beep', o: { f: 880, dur: 0.45 }, gain: 0.7, duck: true },
+  horn: { r: 'horn', gain: 0.55, wet: 0.3, duck: true },
+  whistle: { r: 'whistle', gain: 0.35, wet: 0.2 },
+  pickup: { r: 'pickup', gain: 0.8, duck: true },
+  turbo: { r: 'turbo', gain: 0.8, duck: true },
+  banana: { r: 'banana', gain: 0.85 },
+  skid: { r: 'skid', gain: 0.8 },
+  bump: { r: 'bump', gain: 0.9 },
+  whoosh: { r: 'whoosh', o: (x) => ({ dir: x.dir < 0 ? -1 : 1 }), gain: 0.7 },
+  lap: { r: 'lap', gain: 0.8, wet: 0.25, duck: true },
+  'final-lap': { r: 'finalLap', gain: 0.8, wet: 0.25, duck: true },
+  fanfare: { r: 'fanfare', gain: 0.9, wet: 0.3, priority: 3 },
+  win: { r: 'sting', o: { kind: 'win' }, gain: 0.8, bus: 'sfx', priority: 3 },
+  podium: { r: 'sting', o: { kind: 'podium' }, gain: 0.8, bus: 'sfx', priority: 3 },
+  'finish-other': { r: 'sting', o: { kind: 'other' }, gain: 0.8, bus: 'sfx', priority: 3 },
+  gear: { r: 'gear', gain: 0.5 },
+  splash: { r: 'splash', gain: 0.8, pool: true },
+  // Kayak
+  paddle: { r: 'paddle', gain: 0.8, pool: true, pan: (x) => (x.side === 'left' ? -0.45 : x.side === 'right' ? 0.45 : 0) },
+  'gate-pass': { r: 'gateDing', gain: 0.8, wet: 0.3, duck: true },
+  'gate-miss': { r: 'gateBuzz', gain: 0.6 },
+  'sprint-gate': { r: 'sprintWhoosh', gain: 0.8, wet: 0.2, duck: true },
+  'sprint-fail': { r: 'sprintFail', gain: 0.8 },
+  whirlpool: { r: 'whirlpool', o: (x) => ({ dur: Math.max(1, Math.min(6, Math.round(x.duration || 2.5))) }), gain: 0.8, wet: 0.3 },
+  'kayak-splash': { r: 'kayakSplash', gain: 0.8, pool: true },
   // Nature, utilisables par d'autres modes
-  cow: { r: 'cow', gain: 0.6, pool: true, bus: 'ambience' },
+  cow: { r: 'cow', gain: 0.7, pool: true, bus: 'ambience' },
   sheep: { r: 'sheep', gain: 0.6, pool: true, bus: 'ambience' },
   duck: { r: 'duck', gain: 0.6, pool: true, bus: 'ambience' },
-  gull: { r: 'gull', gain: 0.6, pool: true, bus: 'ambience' },
-  'church-bell': { r: 'church', o: { nominal: 440 }, gain: 0.7, wet: 0.5, bus: 'ambience' },
+  gull: { r: 'gull', gain: 0.55, pool: true, bus: 'ambience' },
+  'church-bell': { r: 'church', o: { nominal: 440 }, gain: 0.8, wet: 0.5, bus: 'ambience' },
 };
 
 const UI_SOUNDS = { focus: 'tick', confirm: 'confirm', back: 'back', open: 'open', close: 'close', slider: 'tick' };
@@ -119,6 +121,7 @@ class GameAudio {
     const buf = this.buffer(name, opts, 2);
     if (!buf) return null;
     const pan = opts.pan ?? (typeof def.pan === 'function' ? def.pan(opts) : def.pan);
+    if (def.duck && !opts.pos) this.engine.duckMusic();
     return this.engine.play(buf, {
       bus: opts.bus || def.bus || 'sfx',
       gain: (def.gain ?? 0.6) * (opts.gain ?? 1),
@@ -139,17 +142,17 @@ class GameAudio {
     if (!e.running) return;
     const buf = e.bank.get('ui', { kind: UI_SOUNDS[kind] || 'tick' });
     const rate = kind === 'slider' ? 0.75 + (value ?? 50) / 160 : kind === 'focus' ? 0.97 + Math.random() * 0.06 : 1;
-    e.play(buf, { bus: 'ui', gain: kind === 'focus' || kind === 'slider' ? 0.5 : 0.6, rate, priority: 2 });
+    e.play(buf, { bus: 'ui', gain: kind === 'focus' || kind === 'slider' ? 0.8 : 1, rate, priority: 2 });
   }
 
   // Aperçu en bougeant un curseur de volume : un son du bus concerné.
   preview(bus, value) {
     if (bus === 'ui' || bus === 'master') return this.ui('slider', value);
-    if (bus === 'sfx') return this.sfx('gear', { gain: 1.2 });
+    if (bus === 'sfx') return this.sfx('gear', { gain: 1.5 });
     if (bus === 'ambience') {
       const e = this.engine;
       const buf = e.running && e.bank.pool('song', { species: 'chaffinch' }, 2);
-      if (buf) e.play(buf, { bus: 'ambience', gain: 0.5, rate: 0.95 + Math.random() * 0.1 });
+      if (buf) e.play(buf, { bus: 'ambience', gain: 0.3, lowpass: 7000, wet: 0.3, rate: 0.95 + Math.random() * 0.1 });
     }
   }
 
@@ -424,7 +427,7 @@ class GameAudio {
     // Clameur de la foule autour de la ligne
     const e = this.engine;
     const buf = e.bank.get('crowd', { excited: true, seconds: 6 });
-    const v = e.play(buf, { bus: 'sfx', gain: 0.55, fadeIn: 0.3, offset: Math.random() * 2, priority: 3 });
+    const v = e.play(buf, { bus: 'sfx', gain: 0.3, lowpass: 3500, fadeIn: 0.4, offset: Math.random() * 2, priority: 3 });
     if (v) setTimeout(() => v.stop(1.6), 3200);
   }
 

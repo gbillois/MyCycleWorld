@@ -51,6 +51,7 @@ export const RENDERERS = {
   fanfare: (sr, r) => S.renderFanfare(sr, r),
   sting: (sr, r, o) => S.renderSting(sr, r, o),
   gear: (sr, r) => S.renderGearClick(sr, r),
+  breath: (sr, r, o) => at32(S.renderBreath(32000, r, o)),
   ui: (sr, r, o) => S.renderUi(sr, r, o),
   // Kayak
   gateDing: (sr, r) => S.renderGateDing(sr, r),

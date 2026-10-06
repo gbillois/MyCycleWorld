@@ -1,15 +1,28 @@
 // Lecteur de musique procédurale : programmateur « en avance » sur l'horloge audio (minuterie de 25 ms,
 // 100 ms programmées d'avance), nappe et basse en synthèse continue (aucun nœud créé par note),
-// batterie et notes mélodiques en échantillons calculés. Les couches suivent l'intensité de la course,
-// le filtre s'ouvre avec la vitesse. Peu de voix : léger pour le processeur.
+// batterie et notes mélodiques en échantillons calculés. Les couches suivent l'intensité de la course
+// (lissée sur plusieurs secondes : rien ne surgit d'un coup), le filtre s'ouvre un peu avec la vitesse.
+// Timbres chauds : formes d'onde aux harmoniques décroissantes (pas de dent de scie ni de carré bruts),
+// filtres doux sans résonance. Peu de voix : léger pour le processeur.
 import { makeSong, stepEvents, stepDuration, swingOffset, planSteps, layerLevel } from './music-gen.js';
 import { mtof } from './dsp.js';
 import { biquad } from './engine.js';
 
 const LOOKAHEAD = 0.1;
 const TICK_MS = 25;
-const DRUMS = ['kick', 'snare', 'clap', 'hat', 'openhat', 'shaker', 'rim', 'conga', 'brush'];
-const DRUM_GAIN = { kick: 0.85, snare: 0.45, clap: 0.42, hat: 0.2, openhat: 0.16, shaker: 0.22, rim: 0.25, conga: 0.35, brush: 0.3 };
+const DRUMS = ['kick', 'snare', 'clap', 'hat', 'shaker', 'rim', 'conga', 'brush'];
+const DRUM_GAIN = { kick: 1.2, snare: 0.5, clap: 0.45, hat: 0.18, openhat: 0.12, shaker: 0.25, rim: 0.3, conga: 0.4, brush: 0.4 };
+// Constantes de temps du lissage de l'intensité (s) : montée lente, descente plus lente encore.
+const RISE = 3;
+const FALL = 5;
+
+// Onde périodique aux harmoniques a_n = 1 / n^pente (n ≤ count) : une « dent de scie » déjà filtrée, ronde.
+function softWave(c, count, slope, extra = {}) {
+  const real = new Float32Array(count + 1);
+  const imag = new Float32Array(count + 1);
+  for (let n = 1; n <= count; n++) imag[n] = extra[n] ?? 1 / Math.pow(n, slope);
+  return c.createPeriodicWave(real, imag);
+}
 
 export class Music {
   constructor(engine) {
@@ -17,6 +30,7 @@ export class Music {
     this.song = null;
     this.playing = false;
     this.intensity = 1;
+    this.target = 1;
     this.brightness = 0.6;
     this.timer = null;
     this.built = false;
@@ -33,19 +47,20 @@ export class Music {
     };
     this.out = g(0);
     this.connected = false;
-    // Brillance générale (s'ouvre avec la vitesse)
-    this.tone = biquad(c, 'lowpass', 6000, 0.5);
+    // Brillance générale (s'ouvre un peu avec la vitesse), plafonnée bas : musique en retrait, jamais criarde
+    this.tone = biquad(c, 'lowpass', 4000, 0.5);
     this.tone.connect(this.out);
-    // Nappe : 4 voix × 2 dents de scie désaccordées, ouvertes en stéréo
-    this.padFilter = biquad(c, 'lowpass', 900, 0.6);
+    // Nappe : 4 voix × 2 oscillateurs désaccordés, ouverts en stéréo, onde douce
+    const padWave = softWave(c, 14, 1.9);
+    this.padFilter = biquad(c, 'lowpass', 800, 0.5);
     this.padGain = g(0);
-    const pl = this.e.stereoPanner(-0.55);
-    const pr = this.e.stereoPanner(0.55);
+    const pl = this.e.stereoPanner(-0.5);
+    const pr = this.e.stereoPanner(0.5);
     this.padOsc = [];
     for (let v = 0; v < 4; v++) {
-      for (const [side, det] of [[pl, -7], [pr, 7]]) {
+      for (const [side, det] of [[pl, -6], [pr, 6]]) {
         const o = c.createOscillator();
-        o.type = 'sawtooth';
+        o.setPeriodicWave(padWave);
         o.detune.value = det + (v - 1.5) * 1.5;
         o.frequency.value = 220;
         o.connect(side || this.padFilter);
@@ -57,33 +72,26 @@ export class Music {
     pr?.connect(this.padFilter);
     // Lente respiration de la nappe
     this.padLfo = c.createOscillator();
-    this.padLfo.frequency.value = 0.09;
-    const lfoDepth = g(220);
-    this.padLfo.connect(lfoDepth).connect(this.padFilter.frequency);
+    this.padLfo.frequency.value = 0.07;
+    this.padLfo.connect(g(110)).connect(this.padFilter.frequency);
     this.padLfo.start();
     this.padFilter.connect(this.padGain).connect(this.tone);
-    // Basse monophonique : dent de scie + carré une octave dessous, filtre à enveloppe
+    // Basse monophonique ronde (fondamentale, un peu d'octave et de quinte), passe-bas sans résonance
     this.bassA = c.createOscillator();
-    this.bassA.type = 'sawtooth';
-    this.bassB = c.createOscillator();
-    this.bassB.type = 'square';
-    this.bassFilter = biquad(c, 'lowpass', 300, 3);
+    this.bassA.setPeriodicWave(softWave(c, 3, 1, { 1: 1, 2: 0.3, 3: 0.1 }));
+    this.bassFilter = biquad(c, 'lowpass', 400, 0.7);
     this.bassGain = g(0);
-    this.bassA.connect(this.bassFilter);
-    const sub = g(0.5);
-    this.bassB.connect(sub).connect(this.bassFilter);
-    this.bassFilter.connect(this.bassGain).connect(this.tone);
+    this.bassA.connect(this.bassFilter).connect(this.bassGain).connect(this.tone);
     this.bassA.start();
-    this.bassB.start();
-    // Batterie et notes : un gain par famille, écho (croche pointée) sur les notes mélodiques
+    // Batterie et notes : un gain par famille, écho (croche pointée) feutré sur les notes mélodiques
     this.drumBus = g(1);
-    this.drumBus.connect(this.out); // la batterie garde son attaque, hors du filtre de brillance
+    this.drumBus.connect(biquad(c, 'lowpass', 9000, 0.5)).connect(this.out);
     this.noteBus = g(1);
     this.noteBus.connect(this.tone);
     this.delay = c.createDelay(1.5);
-    const fb = g(0.32);
-    const dlp = biquad(c, 'lowpass', 2600);
-    this.delaySend = g(0.28);
+    const fb = g(0.25);
+    const dlp = biquad(c, 'lowpass', 2000);
+    this.delaySend = g(0.18);
     this.noteBus.connect(this.delaySend).connect(this.delay).connect(dlp).connect(fb).connect(this.delay);
     dlp.connect(this.tone);
   }
@@ -100,19 +108,22 @@ export class Music {
       this.connected = true;
     }
     this.song = makeSong(key, kind === 'menu' ? 'menu' : key);
-    this.level = kind === 'menu' ? 1.5 : 1; // le thème du menu, plus doux, est un peu remonté
+    this.level = kind === 'menu' ? 1.2 : 1; // le thème du menu, plus doux, est à peine remonté
     this.prefetch();
     const c = this.e.ctx;
     const t = c.currentTime;
     // Fondu enchaîné : on recommence au début de la grille un peu plus tard
+    clearTimeout(this.offTimer);
     this.out.gain.cancelScheduledValues(t);
     this.out.gain.setTargetAtTime(0, t, 0.25);
     this.step = 0;
     this.nextTime = t + 0.9;
-    this.out.gain.setTargetAtTime(this.level, t + 0.9, 0.5);
+    this.out.gain.setTargetAtTime(this.level, t + 0.9, 0.8);
     this.stepDur = stepDuration(this.song.bpm);
     this.playing = true;
     this.lastChord = -1;
+    this.lastPump = t;
+    this.intensity = Math.min(this.intensity, 1); // un nouveau morceau commence toujours calmement
     if (!this.timer) this.tick();
   }
 
@@ -150,15 +161,16 @@ export class Music {
     }, fade * 1000 + 600);
   }
 
+  // Intensité voulue (0..3) : la musique s'en approche en quelques secondes.
   setIntensity(x) {
-    this.intensity = Math.max(0, Math.min(3, x));
+    this.target = Math.max(0, Math.min(3, x));
   }
 
   setBrightness(k) {
     const kk = Math.max(0, Math.min(1, k));
     if (Math.abs(kk - this.brightness) < 0.02 || !this.built) return;
     this.brightness = kk;
-    this.tone.frequency.setTargetAtTime(1800 + 9000 * kk * kk, this.e.ctx.currentTime, 0.4);
+    this.tone.frequency.setTargetAtTime(2200 + 5000 * kk * kk, this.e.ctx.currentTime, 0.8);
   }
 
   tick() {
@@ -166,8 +178,18 @@ export class Music {
     if (!this.playing) return;
     this.timer = setTimeout(() => this.tick(), TICK_MS);
     if (!this.e.running) return;
+    this.pump();
+  }
+
+  // Lissage de l'intensité sur l'horloge audio, puis programmation des pas qui tombent dans la fenêtre.
+  pump() {
     const c = this.e.ctx;
-    const { times, next } = planSteps(c.currentTime, this.nextTime, this.stepDur, LOOKAHEAD);
+    const now = c.currentTime;
+    const dt = Math.max(0, Math.min(0.5, now - (this.lastPump ?? now)));
+    this.lastPump = now;
+    const tau = this.target > this.intensity ? RISE : FALL;
+    this.intensity += (this.target - this.intensity) * (1 - Math.exp(-dt / tau));
+    const { times, next } = planSteps(now, this.nextTime, this.stepDur, LOOKAHEAD);
     times.forEach((tt) => {
       this.schedule(this.step, tt + swingOffset(this.step, this.stepDur, this.song.swing));
       this.step++;
@@ -190,38 +212,37 @@ export class Music {
     // Les voix glissent doucement vers le nouvel accord (portamento de nappe analogique)
     for (const { o, v } of this.padOsc) {
       const m = notes[v % notes.length] + (v >= notes.length ? 12 : 0);
-      o.frequency.setTargetAtTime(mtof(m), t, 0.05);
+      o.frequency.setTargetAtTime(mtof(m), t, 0.08);
     }
-    const level = 0.07 * (0.6 + 0.4 * layerLevel(x, 'pad')) * (x > 2.5 ? 0.8 : 1);
-    this.padGain.gain.setTargetAtTime(level, t, 0.6);
-    this.padFilter.frequency.setTargetAtTime(500 + 1600 * this.brightness * (0.5 + x / 6), t, 0.8);
+    const level = 0.15 * (0.6 + 0.4 * layerLevel(x, 'pad')) * (x > 2.5 ? 0.85 : 1);
+    this.padGain.gain.setTargetAtTime(level, t, 0.8);
+    this.padFilter.frequency.setTargetAtTime(500 + 900 * this.brightness * (0.6 + x / 8), t, 1);
   }
 
   bass(midi, vel, len, t) {
     const f = mtof(midi);
     const d = this.stepDur * (len >= 1 ? 1.8 : 0.9);
     this.bassA.frequency.setValueAtTime(f, t);
-    this.bassB.frequency.setValueAtTime(f / 2, t);
     const g = this.bassGain.gain;
     g.cancelScheduledValues(t);
-    g.setTargetAtTime(0.16 * vel, t, 0.006);
-    g.setTargetAtTime(0, t + d, 0.04);
+    g.setTargetAtTime(0.26 * vel, t, 0.012);
+    g.setTargetAtTime(0, t + d, 0.06);
     const fl = this.bassFilter.frequency;
     fl.cancelScheduledValues(t);
-    fl.setTargetAtTime(220 + 900 * vel * (0.4 + this.brightness), t, 0.004);
-    fl.setTargetAtTime(160 + 200 * this.brightness, t + 0.03, 0.08);
+    fl.setTargetAtTime(200 + 350 * vel * (0.5 + this.brightness), t, 0.01);
+    fl.setTargetAtTime(160 + 120 * this.brightness, t + 0.04, 0.12);
   }
 
   drum(kind, vel, t) {
     const buf = this.e.bank.get('drum', { kind });
     if (!buf) return;
-    this.hit(buf, (DRUM_GAIN[kind] ?? 0.3) * vel, t, this.drumBus, 1 + (Math.random() - 0.5) * 0.02);
+    this.hit(buf, (DRUM_GAIN[kind] ?? 0.15) * vel * (0.9 + Math.random() * 0.2), t, this.drumBus, 1 + (Math.random() - 0.5) * 0.02);
   }
 
   note(midi, vel, t, lead = false) {
     const buf = this.e.bank.get('note', { instrument: this.song.instrument, midi });
     if (!buf) return;
-    this.hit(buf, (lead ? 0.24 : 0.19) * vel, t, this.noteBus, 1);
+    this.hit(buf, 0.45 * vel * (0.85 + Math.random() * 0.2), t, this.noteBus, 1);
   }
 
   hit(buf, level, t, dest, rate) {

@@ -321,15 +321,17 @@ export function breathing(power, grade = 0, ref = 250) {
 }
 
 // =====================================================================
-// Musique : intensité 0..3 (couches : 0 nappes, 1 + charleston et arpège, 2 + grosse caisse, 3 tout)
+// Musique : intensité 0..3 (couches : 0 nappe et basse, 1 + arpège, 2 + maracas et grosse caisse, 3 tout).
+// Effort normal (puissance de référence) : vers 1,8, musique posée ; la batterie entière demande un gros effort,
+// le dernier tour, le turbo ou le sprint final.
 // =====================================================================
 export function musicIntensity({ state = 'race', time = 0, power = 0, speed = 0, turbo = false, finalLap = false, remaining = Infinity, ref = 250 } = {}) {
   if (state === 'home') return 1;
   if (state === 'end') return 1.5;
   if (time < 0) return 0.6; // compte à rebours : nappes seules, la tension monte
-  let x = 0.9 + Math.min(1.4, (power / ref) * 1.15) + Math.min(0.5, speed / 28);
+  let x = 0.8 + Math.min(1.2, (power / ref) * 0.85) + Math.min(0.3, speed / 40);
   if (finalLap) x = Math.max(x, 2.4);
-  if (remaining < 300) x = 3;
+  if (remaining < 300) x = Math.max(x, 2.8);
   if (turbo) x = 3;
   return Math.max(0, Math.min(3, x));
 }
