@@ -1568,3 +1568,21 @@ body.touch, body.touch #hud, body.touch #rowHud { -webkit-user-select: none; use
 .machine-bar .mb-dot.wait { background: #ffbf3c; animation: mb-pulse 1.2s ease-in-out infinite; }
 @keyframes mb-pulse { 50% { opacity: 0.35; } }
 @media (prefers-reduced-motion: reduce) { .machine-bar .mb-dot.wait { animation: none; } }
+
+/* Téléphone en paysage, aviron et kayak : bandeau des mesures sur une seule ligne, collé en bas, petits
+   badges ; le bateau du joueur et les adversaires restent visibles. */
+@media (orientation: landscape) and (max-height: 520px) {
+  body.touch #rowHud .hud-dock, body.touch #kayakHud .hud-dock { left: calc(150px + var(--sl)); right: calc(150px + var(--sr)); bottom: calc(6px + var(--sb)); }
+  body.touch #rowHud .hud-bottom, body.touch #kayakHud .hud-bottom { grid-template-columns: repeat(6, minmax(0, 1fr)); row-gap: 0; padding: 4px 4px; border-radius: 13px; }
+  body.touch #rowHud .m b, body.touch #kayakHud .m b { font-size: 19px; }
+  body.touch #rowHud .m.main b, body.touch #kayakHud .m.main b, body.touch #rowHud .m.main.split b { font-size: 20px; }
+  body.touch #rowHud .m i, body.touch #kayakHud .m i { font-size: 10px; }
+  body.touch #rowHud .hud-hint, body.touch #kayakHud .hud-hint { font-size: 11px; padding: 3px 8px; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+  body.touch #rowHud .badge, body.touch #kayakHud .badge { font-size: 11px; padding: 3px 8px; }
+  body.touch #rowHud .hud-effects { top: calc(56px + var(--st)); }
+  body.touch #kayakHud .slot-label { display: none; }
+  body.touch #kayakHud .hud-effects { top: calc(78px + var(--st)); }
+  body.touch #kayakHud .minimap { width: 72px; height: 72px; }
+  body.touch #rowHud .hud-top-left, body.touch #kayakHud .hud-top-left { padding: 5px 10px 6px; }
+  body.touch #rowHud .pos > span, body.touch #kayakHud .pos > span { font-size: 32px; }
+}
