@@ -174,6 +174,42 @@ function buildWorld() {
   };
 }
 buildWorld();
+
+// Précompile tous les programmes graphiques (shaders) de la scène pendant l'écran de chargement, objets
+// cachés compris : sinon chaque nouvel objet qui entre dans le champ fige l'image le temps de sa
+// compilation (des centaines de millisecondes sur iPad, à l'accueil comme en course).
+let warming = false;
+async function warmShaders() {
+  warming = true;
+  const hidden = [];
+  scene.traverse((o) => {
+    if (!o.visible) {
+      hidden.push(o);
+      o.visible = true;
+    }
+  });
+  try {
+    if (renderer.compileAsync) await renderer.compileAsync(scene, camera);
+    else renderer.compile(scene, camera);
+    // Rendu d'amorçage sans élagage : compile aussi les programmes des ombres
+    // (que compile() ne couvre pas) et envoie toutes les géométries à la carte graphique.
+    const culled = [];
+    scene.traverse((o) => {
+      if (o.isMesh && o.frustumCulled) {
+        culled.push(o);
+        o.frustumCulled = false;
+      }
+    });
+    // Rendu à l'écran (caché par l'écran de chargement ou le menu) : une cible hors écran compilerait
+    // d'autres variantes (sans tone mapping ni sortie sRGB) et ne servirait à rien.
+    renderer.render(scene, camera);
+    for (const o of culled) o.frustumCulled = true;
+  } catch (e) {
+    console.warn('Précompilation des shaders incomplète', e);
+  }
+  for (const o of hidden) o.visible = false;
+  warming = false;
+}
 const Rider = DETAILED ? DetailedRider : RiderModel;
 const hud = new Hud(track);
 const menu = new TitleMenu($('home'));
@@ -582,6 +618,8 @@ async function loadCourse(id) {
   buildWorld();
   hud.setTrack(track);
   renderCourses();
+  setupRace();
+  await warmShaders();
 }
 
 // Bassins d'aviron (miniature : couloirs, ligne d'arrivée et bateaux).
@@ -678,6 +716,7 @@ async function startRowing(distance = 500) {
     rowing = { world: buildRowingWorld(scene, { quality: QUALITY, renderer, detailed: DETAILED, distance }), race: null, boats: new Map(), distance };
   }
   setupRowing();
+  if (!$('loading').hidden) await warmShaders();
   // Météo du bassin : du vent seulement (lac abrité, pas de pluie), effet doux sur les bateaux.
   weather.start('lake', weatherPref, weatherSeed());
   state = 'race';
@@ -697,6 +736,8 @@ async function leaveRowing() {
   rowing = null;
   mode = 'bike';
   buildWorld();
+  setupRace();
+  await warmShaders();
 }
 
 function setupRowing() {
@@ -890,6 +931,7 @@ async function startKayak(id = 'gorges') {
     kayak.load(def.id);
   }
   kayak.setup();
+  if (!$('loading').hidden) await warmShaders();
   state = 'race';
   lastSentGrade = null;
   show(null);
@@ -905,6 +947,8 @@ async function leaveKayak() {
   raceObjects.clear();
   mode = 'bike';
   buildWorld();
+  setupRace();
+  await warmShaders();
 }
 
 // Entrées du kayak (objet réutilisé à chaque image) : puissance et cadence de la machine, des tapotements ou du clavier.
@@ -1557,11 +1601,18 @@ function updateSun() {
 const tmpVec = new THREE.Vector3();
 
 let lastFrame = performance.now();
+let lastMenuFrame = 0;
 function frame(nowMs) {
-  if (!governor.allow(nowMs)) {
+  if (warming || !governor.allow(nowMs)) {
     requestAnimationFrame(frame);
     return;
   }
+  // Un écran de menu couvre la scène : la 3D derrière se contente de 20 images/s.
+  if (state === 'home' && menu.panel && nowMs - lastMenuFrame < 50) {
+    requestAnimationFrame(frame);
+    return;
+  }
+  lastMenuFrame = nowMs;
   if (fpsMeter && nowMs - (frame.lastFps || 0) > 500) {
     frame.lastFps = nowMs;
     fpsMeter.textContent = `${Math.round(governor.fps)} i/s · résolution ${Math.round(governor.scale * 100)} %`;
@@ -1675,6 +1726,8 @@ window.__mcw = {
 };
 
 renderCourses();
+setupRace();
+await warmShaders();
 goHome();
 window.__mcwStarted = true;
 requestAnimationFrame(frame);
