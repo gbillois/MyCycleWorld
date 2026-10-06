@@ -1,10 +1,19 @@
 import SwiftUI
+import AVFoundation
 
 @main
 struct MyCycleWorldApp: App {
     @StateObject private var store = BluetoothStore()
     @StateObject private var inspector = BLEInspector()
     @Environment(\.scenePhase) private var phase
+
+    init() {
+        // Son du jeu (Web Audio dans la vue web) : audible même en mode silencieux, et mélangé à la
+        // musique ou au podcast que l'utilisateur écoute déjà (sans la couper).
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
+        try? AVAudioSession.sharedInstance().setActive(true)
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView().environmentObject(store).environmentObject(inspector)
