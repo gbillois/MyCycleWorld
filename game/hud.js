@@ -226,8 +226,11 @@ export class Hud {
     clearTimeout(this.rollTimer);
     this.slot.classList.remove('rolling', 'landed');
     if (item) {
-      e.hItem.textContent = ITEMS[item].icon;
-      e.hItemLabel.textContent = `${ITEMS[item].label} · Espace`;
+      const it = ITEMS[item];
+      // Casques : icône vectorielle (symbole #i-helmet) dans la couleur du casque, sinon l'émoji.
+      if (it.svg) e.hItem.innerHTML = `<svg class="item-ico" style="color:${it.color}" aria-hidden="true"><use href="#${it.svg}"/></svg>`;
+      else e.hItem.textContent = it.icon;
+      e.hItemLabel.textContent = `${it.label} · Espace`;
       this.slot.classList.add('full');
       if (had !== undefined && !this.reduced()) {
         this.slot.classList.add('rolling');
@@ -284,7 +287,8 @@ export class Hud {
     this.setItem(d.item);
     const badges = [];
     if (d.turboLeft > 0) badges.push(`<span class="badge turbo">🚀 Turbo ${d.turboLeft.toFixed(1)} s · pente −5 %</span>`);
-    if (d.slipLeft > 0) badges.push(`<span class="badge slip">🍌 Glissade ${d.slipLeft.toFixed(1)} s · pente +10 %</span>`);
+    if (d.hitLeft > 0) badges.push(`<span class="badge hit">Touché ${d.hitLeft.toFixed(1)} s · pente +10 %</span>`);
+    else if (d.slipLeft > 0) badges.push(`<span class="badge slip">🍌 Glissade ${d.slipLeft.toFixed(1)} s · pente +10 %</span>`);
     if (d.draft < 0.98) badges.push(`<span class="badge draft">Aspiration −${Math.round((1 - d.draft) * 100)} %</span>`);
     if (d.autoSteer) badges.push('<span class="badge auto">🧭 Pilote auto</span>');
     if (d.gearAdvice === 'down') badges.push('<span class="badge grass">Trop dur : passe une vitesse plus petite (−)</span>');

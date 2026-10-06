@@ -963,3 +963,63 @@ export function renderWoodpecker(sr, r) {
   }
   return fadeEdges(normalize(out, 0.8), sr, 2);
 }
+
+// =====================================================================
+// Casques lancés (vert et rouge) : choc, rebond, ronronnement en vol, bouclier
+// =====================================================================
+
+// Casque qui frappe un coureur : « bonk » creux de coque en plastique (partiels inharmoniques médium)
+// sur un choc sourd. kind 'bounce' : petit « tok » sec quand le casque rebondit sur le bord de la route.
+export function renderHelmetHit(sr, r, { kind = 'hit' } = {}) {
+  const bounce = kind === 'bounce';
+  const len = secs(sr, bounce ? 0.2 : 0.55);
+  const tmp = new Float32Array(len);
+  const f = bounce ? range(r, 560, 620) : range(r, 380, 420);
+  addDecaySine(tmp, 0, sr, f, 1, bounce ? 38 : 16, len);
+  addDecaySine(tmp, 0, sr, f * 1.67, 0.5, bounce ? 55 : 24, len);
+  addDecaySine(tmp, 0, sr, f * 2.71, 0.2, bounce ? 80 : 40, len);
+  const out = new Float32Array(len);
+  const lp = new Filter('lowpass', 1400, 0.7, sr);
+  const att = Math.round(sr * 0.003);
+  let ph = 0;
+  for (let i = 0; i < len; i++) {
+    const t = i / sr;
+    let v = tmp[i] * 0.6 + lp.process(r() * 2 - 1) * Math.exp(-t / 0.012) * 0.35;
+    if (!bounce) {
+      // Choc sourd du coureur touché, avec une hauteur qui retombe.
+      ph += (70 + 60 * Math.exp(-t / 0.03)) / sr;
+      v += Math.sin(TAU * ph) * Math.exp(-t / 0.09) * 0.9;
+    }
+    out[i] = v * rise(i, att);
+  }
+  new Filter('lowpass', 3200, 0.6, sr).run(out);
+  return fadeEdges(normalize(dcBlock(out, sr), bounce ? 0.6 : 0.8), sr, 4);
+}
+
+// Ronronnement d'un casque qui tournoie en volant, joué en boucle (1 s) et placé dans l'espace :
+// fondamentale ronde et deux harmoniques, modulées au rythme de la rotation. Toutes les fréquences font un
+// nombre entier de cycles dans la boucle : raccord parfait, et le son commence et finit à zéro.
+export function renderHelmetHum(sr) {
+  const len = secs(sr, 1);
+  const out = new Float32Array(len);
+  for (let i = 0; i < len; i++) {
+    const t = i / sr;
+    const spin = 0.6 - 0.4 * Math.cos(TAU * 12 * t); // au plus bas au raccord de la boucle
+    const tone = Math.sin(TAU * 120 * t) + 0.35 * Math.sin(TAU * 240 * t) + 0.12 * Math.sin(TAU * 360 * t);
+    const whirr = 0.18 * Math.sin(TAU * 600 * t) * (0.5 - 0.5 * Math.cos(TAU * 24 * t));
+    out[i] = (tone * spin + whirr) * 0.5;
+  }
+  return normalize(out, 0.6);
+}
+
+// Bouclier qui pare un casque : tintement de verre (deux notes de célesta) sur un souffle bref et rond.
+export function renderShieldBlock(sr, r) {
+  const o = stereo(sr, 1.1);
+  sweep(o, sr, r, 0, 0.3, 900, 300, { q: 1, amp: 0.5, lp: 2500, env: (u) => Math.sin(Math.PI * Math.min(1, u * 4)) * (1 - u) });
+  glock(o, sr, Math.round(0.01 * sr), mtof(84), { amp: 0.7, dur: 0.8, pan: -0.15, bright: 0.5 });
+  glock(o, sr, Math.round(0.06 * sr), mtof(91), { amp: 0.45, dur: 0.7, pan: 0.2, bright: 0.45 });
+  const thud = renderBump(sr, r);
+  mixInto(o.l, thud, 0, 0.35);
+  mixInto(o.r, thud, 0, 0.35);
+  return finish(o, sr, 0.72);
+}
