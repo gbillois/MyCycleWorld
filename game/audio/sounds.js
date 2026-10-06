@@ -680,6 +680,8 @@ export const REVERB_PRESETS = {
   coast: { t60: 0.7, pre: 0.006, damp: 4200, early: [[0.004, 0.45]], echoes: [] },
   lake: { t60: 1.5, pre: 0.012, damp: 3200, early: [[0.006, 0.6], [0.014, 0.3]], echoes: [[0.55, 0.18, 2000]] },
   river: { t60: 1.3, pre: 0.01, damp: 3000, early: [[0.005, 0.5], [0.012, 0.35]], echoes: [[0.22, 0.32, 2600], [0.47, 0.16, 1800]] },
+  // Sous-bois : réflexions denses et proches sur les troncs, queue sourde.
+  forest: { t60: 1.1, pre: 0.01, damp: 2300, early: [[0.006, 0.45], [0.013, 0.32], [0.021, 0.22], [0.034, 0.14]], echoes: [] },
 };
 
 export function renderImpulse(sr, r, preset = 'meadow') {
@@ -714,4 +716,101 @@ export function renderNoiseLoop(sr, r, { seconds = 6, color = 'pink' } = {}) {
   const len = secs(sr, seconds);
   const make = () => normalize(color === 'white' ? white(len, r) : color === 'brown' ? brown(len, r, true) : pink(len, r, true), 0.9);
   return { l: make(), r: make() };
+}
+
+// =====================================================================
+// VTT (circuit en forêt) : saut, réception, chute, boue, pic-vert
+// =====================================================================
+
+// Note de saut réussi : notes de glockenspiel qui montent, scintillement.
+export function renderJumpChime(sr, r) {
+  const o = stereo(sr, 1.3);
+  [84, 88, 91, 96].forEach((m, i) => glock(o, sr, Math.round(i * 0.055 * sr), mtof(m), { amp: 0.5 + i * 0.1, dur: 0.9, pan: -0.3 + i * 0.2, bright: 1.2 }));
+  sweep(o, sr, r, 0, 0.5, 5000, 9500, { q: 0.8, amp: 0.1, env: (u) => Math.exp(-u * 4) });
+  return finish(o, sr, 0.8);
+}
+
+// Réception : choc sourd des pneus, souffle de la fourche qui s'enfonce, cliquetis de la chaîne.
+export function renderLand(sr, r) {
+  const len = secs(sr, 0.45);
+  const out = new Float32Array(len);
+  const lp = new Filter('lowpass', 380, 0.8, sr);
+  const bp = new Filter('bandpass', 900, 0.9, sr);
+  let ph = 0;
+  for (let i = 0; i < len; i++) {
+    const t = i / sr;
+    ph += (48 + 60 * Math.exp(-t / 0.025)) / sr;
+    const thud = Math.sin(TAU * ph) * Math.exp(-t / 0.09) + lp.process(r() * 2 - 1) * Math.exp(-t / 0.03) * 0.9;
+    const fork = bp.process(r() * 2 - 1) * 0.35 * smoothstep(0.01, 0.04, t) * Math.exp(-t / 0.08);
+    out[i] = thud + fork;
+  }
+  for (let k = 0; k < 5; k++) addDecaySine(out, Math.round(sr * (0.015 + r() * 0.06)), sr, logRange(r, 2800, 5200), range(r, 0.05, 0.12), 90, secs(sr, 0.08));
+  return fadeEdges(normalize(out, 0.85), sr, 1);
+}
+
+// Chute : choc, glissade dans la terre et les feuilles, vélo qui cliquette en retombant.
+export function renderCrash(sr, r) {
+  const o = stereo(sr, 1.5);
+  const n = o.l.length;
+  const lp = new Filter('lowpass', 300, 0.9, sr);
+  const scrapeL = new Filter('bandpass', 1400, 0.8, sr);
+  const scrapeR = new Filter('bandpass', 1500, 0.8, sr);
+  let ph = 0;
+  let rough = 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / sr;
+    ph += (42 + 50 * Math.exp(-t / 0.04)) / sr;
+    const thud = Math.sin(TAU * ph) * Math.exp(-t / 0.13) * 0.9 + lp.process(r() * 2 - 1) * Math.exp(-t / 0.05) * 0.8;
+    if ((i & 127) === 0) rough = 0.5 + r() * 0.8;
+    const slide = smoothstep(0.03, 0.1, t) * (1 - smoothstep(0.55, 1.1, t)) * rough * 0.6;
+    const [gl, gr] = panGains(Math.sin(t * 3) * 0.4);
+    o.l[i] += thud + scrapeL.process(r() * 2 - 1) * slide * gl * 1.6;
+    o.r[i] += thud + scrapeR.process(r() * 2 - 1) * slide * gr * 1.6;
+  }
+  // Cliquetis métalliques (cadre, chaîne, rayons) qui rebondissent
+  for (let k = 0; k < 9; k++) {
+    const at = Math.round(sr * (0.05 + Math.pow(r(), 1.4) * 0.7));
+    const f = logRange(r, 1800, 6200);
+    const a = range(r, 0.05, 0.16) * (1 - at / n);
+    addDecaySine(r() < 0.5 ? o.l : o.r, at, sr, f, a, 40, secs(sr, 0.15));
+    addDecaySine(r() < 0.5 ? o.l : o.r, at, sr, f * 1.48, a * 0.6, 55, secs(sr, 0.1));
+  }
+  return finish(o, sr, 0.85);
+}
+
+// Boue : succion molle, petites bulles qui éclatent.
+export function renderSquelch(sr, r) {
+  const len = secs(sr, 0.38);
+  const out = new Float32Array(len);
+  const bp = new Filter('bandpass', 700, 2.2, sr);
+  for (let i = 0; i < len; i++) {
+    const t = i / sr;
+    const u = i / len;
+    if ((i & 31) === 0) bp.set(700 * Math.pow(220 / 700, smoothstep(0, 0.7, u)), 2.2);
+    out[i] = bp.process(r() * 2 - 1) * 3 * Math.min(1, t / 0.01) * Math.exp(-t / 0.1) * (0.7 + 0.3 * Math.sin(TAU * 22 * t));
+  }
+  addBubble(out, sr, Math.round(sr * range(r, 0.05, 0.12)), range(r, 140, 220), 0.6);
+  for (let k = 0; k < 4; k++) addBubble(out, sr, Math.floor(r() * sr * 0.25), logRange(r, 400, 1100), range(r, 0.08, 0.2));
+  return fadeEdges(normalize(out, 0.8), sr, 2);
+}
+
+// Pic-vert qui tambourine : une rafale de coups secs sur le bois.
+export function renderWoodpecker(sr, r) {
+  const count = Math.round(range(r, 12, 20));
+  const rate = range(r, 14, 18);
+  const len = secs(sr, count / rate + 0.25);
+  const out = new Float32Array(len);
+  const body = range(r, 850, 1250);
+  const click = secs(sr, 0.004);
+  let t = 0;
+  for (let k = 0; k < count; k++) {
+    const at = Math.round(t * sr);
+    const amp = (0.55 + 0.45 * Math.sin((Math.PI * (k + 1)) / (count + 1))) * range(r, 0.85, 1);
+    addDecaySine(out, at, sr, body, amp, 160, secs(sr, 0.05));
+    addDecaySine(out, at, sr, body * 2.37, amp * 0.45, 260, secs(sr, 0.03));
+    addDecaySine(out, at, sr, body * 0.52, amp * 0.5, 120, secs(sr, 0.05));
+    for (let i = 0; i < click; i++) if (at + i < len) out[at + i] += (r() * 2 - 1) * 0.4 * (1 - i / click);
+    t += (1 / rate) * (1 + 0.15 * Math.sin((Math.PI * k) / count));
+  }
+  return fadeEdges(normalize(out, 0.8), sr, 2);
 }

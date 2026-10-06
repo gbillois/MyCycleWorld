@@ -26,6 +26,7 @@ export const MOODS = {
   alpine: { bpm: [96, 104], modes: ['mixolydian', 'major'], roots: [62, 63, 65, 67], instrument: 'bell', feel: 'airy', swing: [0, 0.06] },
   coast: { bpm: [114, 120], modes: ['major', 'dorian'], roots: [60, 62, 65, 67], instrument: 'marimba', feel: 'tropical', swing: [0.08, 0.16] },
   lake: { bpm: [122, 126], modes: ['minor', 'dorian'], roots: [57, 59, 60, 62], instrument: 'synth', feel: 'drive', swing: [0, 0.04] },
+  forest: { bpm: [118, 124], modes: ['dorian', 'mixolydian'], roots: [57, 59, 62, 64], instrument: 'pluck', feel: 'indie', swing: [0.02, 0.08] },
   river: { bpm: [126, 132], modes: ['minor', 'dorian'], roots: [57, 58, 60, 62], instrument: 'synth', feel: 'drive', swing: [0, 0.03] },
   menu: { bpm: [80, 88], modes: ['major', 'lydian'], roots: [60, 62, 63, 65], instrument: 'keys', feel: 'calm', swing: [0.05, 0.12] },
 };

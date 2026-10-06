@@ -32,6 +32,8 @@ import { createAudio } from './audio/index.js';
 import { KayakMode } from './kayak-mode.js';
 import { KAYAK_LEVELS, kayakCard, kayakPreview } from './kayak-menu.js';
 import { riverById } from './rivers.js';
+import { buildForestScenery } from './mtb-scene.js';
+import { MtbMode } from './mtb-mode.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -138,6 +140,11 @@ if (DETAILED) {
 // Décor du circuit courant (reconstruit quand on change de circuit, sans recharger la page :
 // un rechargement couperait les connexions Bluetooth).
 function buildWorld() {
+  // Forêt (circuit de VTT) : décor dédié, détaillé ou simple (mtb-scene.js).
+  if (track.course.theme === 'forest') {
+    scenery = buildForestScenery(scene, track, { quality: QUALITY, renderer, detailed: DETAILED });
+    return;
+  }
   if (DETAILED) {
     scenery = buildDetailedScenery(scene, track, { quality: QUALITY, renderer });
     return;
@@ -241,6 +248,9 @@ if (NATIVE) {
 }
 const keys = new Set();
 const sim = { power: 0, cadence: 0 };
+// VTT (circuit en forêt) : impulsions des sauts, chutes, indicateur « Saute ! » (mtb-mode.js).
+const mtbMode = new MtbMode({ hud, audio, devices });
+const mtbPose = { pitch: 0, roll: 0, dy: 0 };
 let state = 'home'; // home | race | paused | end
 let mode = 'bike'; // bike | row | kayak
 let rowing = null; // { race, world, boats } en mode rameur
@@ -269,8 +279,9 @@ function setupRace() {
   bananaMeshes.clear();
   models = new Map();
   race = new Race(track, { laps: lapsFor(track.course) });
+  const style = track.course.theme === 'forest' ? 'mtb' : 'road'; // VTT et tenue de VTT en forêt
   for (const r of race.racers) {
-    const m = new Rider({ jersey: r.color, bike: r.bike, helmet: r.helmet, name: r.isPlayer ? '' : r.name, quality: QUALITY });
+    const m = new Rider({ jersey: r.color, bike: r.bike, helmet: r.helmet, name: r.isPlayer ? '' : r.name, quality: QUALITY, style });
     if (m.blob) m.blob.visible = !SHADOWS; // la pastille d'ombre ne sert que sans ombres portées
     models.set(r, m);
     raceObjects.add(m.group);
@@ -283,6 +294,7 @@ function setupRace() {
     raceObjects.add(mesh);
     return mesh;
   });
+  mtbMode.attach(race, track, models, scenery);
 
   race.addEventListener('go', () => hud.flash('Partez !', 1100, 'good'));
   race.addEventListener('pickup', ({ detail }) => {
@@ -410,8 +422,9 @@ const THEMES = {
   meadow: ['#4fae47', '#1d5a2a', '#9be37a'],
   alpine: ['#6a8fa8', '#24384a', '#cfe6ff'],
   coast: ['#33b2d6', '#0f5f84', '#9ff0ff'],
+  forest: ['#3f7a3a', '#14321c', '#b9e08a'],
 };
-const SURF_COLORS = { sand: '#f2cf7a', boardwalk: '#c08a55' };
+const SURF_COLORS = { sand: '#f2cf7a', boardwalk: '#c08a55', roots: '#8a5a32', rock: '#b8b2a6', gravel: '#d8cdb4', mud: '#5a3a1e', creek: '#5cc3ff' };
 const icon = (id) => `<svg class="ico" aria-hidden="true"><use href="#${id}"/></svg>`;
 const stars = (n, max = 5) => `<span class="stars" role="img" aria-label="Difficulté ${n} sur ${max}">${'<i class="on"></i>'.repeat(n)}${'<i></i>'.repeat(max - n)}</span>`;
 
@@ -433,6 +446,7 @@ function courseSvg(t, big = false) {
     meadow: '<ellipse cx="74" cy="22" rx="13" ry="8" fill="#5cc3ff" opacity=".55"/><circle cx="18" cy="80" r="5" fill="#2f7d33" opacity=".7"/><circle cx="26" cy="86" r="4" fill="#2f7d33" opacity=".7"/>',
     alpine: '<path d="M0 34 L16 14 L28 28 L42 8 L60 32 L74 16 L100 40 V0 H0z" fill="#e8f2ff" opacity=".22"/>',
     coast: '<path d="M0 86 Q25 80 50 86 T100 86 V100 H0z" fill="#0b4d73" opacity=".55"/><path d="M0 80 Q25 74 50 80 T100 80 V86 Q75 80 50 86 T0 86z" fill="#f2cf7a" opacity=".55"/>',
+    forest: '<g fill="#0e2a16" opacity=".75"><path d="M8 30 l6 -14 l6 14z"/><path d="M78 92 l7 -16 l7 16z"/><path d="M86 30 l5 -12 l5 12z"/><path d="M4 90 l5 -12 l5 12z"/><path d="M44 54 l5 -12 l5 12z"/></g>',
   }[theme];
   const [sx, sz] = pts[0];
   const start = `<g transform="translate(${(8 + sx * 84 - 4).toFixed(1)} ${(8 + sz * 84 - 4).toFixed(1)})"><rect width="8" height="8" rx="1.5" fill="#fff" stroke="#11151f" stroke-width="1"/><rect width="4" height="4" fill="#11151f"/><rect x="4" y="4" width="4" height="4" fill="#11151f"/></g>`;
@@ -462,6 +476,8 @@ function describeCourse(id) {
     const hot = [];
     if (maxGrade >= 8) hot.push(`pente max ${Math.round(maxGrade)} %`);
     if (hasSand) hot.push('sable');
+    if (c.mtb) hot.push(plural(c.mtb.jumps.length, 'saut'));
+    if (t.surf.includes('creek')) hot.push('gué');
     // Profil échantillonné (120 points) et bandes de revêtement.
     const range = Math.max(8, t.maxY - t.minY);
     const prof = [];
@@ -471,8 +487,8 @@ function describeCourse(id) {
     }
     const bands = [];
     for (const [a, b, type] of c.surfaces || []) if (SURF_COLORS[type]) bands.push([a, b, SURF_COLORS[type]]);
-    const surfaces = [...new Set(['asphalt', ...t.surf])].map((x) => SURFACES[x]?.label || x);
-    const difficulty = Math.max(1, Math.min(5, Math.round(maxGrade / 3) + (hasSand ? 1 : 0) + (gain / t.length > 0.025 ? 1 : 0)));
+    const surfaces = [...new Set([c.baseSurface || 'asphalt', ...t.surf])].map((x) => SURFACES[x]?.label || x);
+    const difficulty = Math.max(1, Math.min(5, Math.round(maxGrade / 3) + (hasSand || c.mtb ? 1 : 0) + (gain / t.length > 0.025 ? 1 : 0)));
     courseInfo.set(id, {
       id, svg: courseSvg(t), big: courseSvg(t, true), name: c.name, tagline: c.tagline, stats, hot, theme: c.theme,
       prof, bands, surfaces, difficulty, km: (t.length / 1000).toFixed(1), gain: Math.round(gain), laps: lapsFor(c),
@@ -489,7 +505,7 @@ function coursePreview(id) {
   return `<div class="pv" data-theme="${x.theme}">
     <div class="pv-map">${x.big}</div>
     <div class="pv-info">
-      <span class="pv-kicker">${machine} · circuit</span>
+      <span class="pv-kicker">${machine} · ${x.theme === 'forest' ? 'VTT' : 'circuit'}</span>
       <h3>${x.name}</h3>
       <p>${x.tagline}</p>
       <div class="pv-diff"><span>Difficulté</span>${stars(x.difficulty)}</div>
@@ -1220,7 +1236,11 @@ window.addEventListener('keydown', (e) => {
     else if (state === 'paused') resume();
     else if (state === 'end') goHome();
   } else if (code === 'Space' && state === 'race' && mode === 'bike') {
-    race.useItem(race.player);
+    // VTT : près d'un saut, Espace donne l'impulsion au lieu d'utiliser l'objet.
+    if (mtbMode.wantsKey()) mtbMode.key();
+    else race.useItem(race.player);
+  } else if (code === 'ArrowUp' && state === 'race' && mode === 'bike') {
+    mtbMode.key(); // VTT : chaque nouvel appui sur ↑ est une impulsion (sans effet ailleurs)
   } else if (code === 'Space' && state === 'race' && mode === 'kayak') {
     kayak.useItem();
   } else if (code === 'Enter' || code === 'NumpadEnter') {
@@ -1278,6 +1298,7 @@ function updateSim(dt) {
 // Un tapotement n'importe où sur la scène (pas sur un bouton) = un tour de pédalier ou un coup d'aviron.
 const TAP_IGNORE = 'button, a, input, select, textarea, label, .tc, .side-panel, .screen, [data-no-tap]';
 window.addEventListener('pointerdown', (e) => {
+  if (state === 'race' && mode === 'bike' && e.button <= 0 && !e.target.closest?.(TAP_IGNORE)) mtbMode.tap(); // VTT : double tapotement = impulsion
   if (!tapEnabled || state !== 'race' || devices.trainerActive) return;
   if (e.button > 0 || e.target.closest?.(TAP_IGNORE)) return;
   tapDrive.tap(performance.now());
@@ -1303,13 +1324,14 @@ function autoSteer() {
 
 function playerInput() {
   const trainer = devices.trainerActive;
-  return {
+  const input = {
     auto: autoSteer(),
     power: trainer ? devices.power : sim.power,
     cadence: trainer ? devices.cadence : sim.cadence,
     steer: (keys.has('ArrowRight') ? 1 : 0) - (keys.has('ArrowLeft') ? 1 : 0),
     drift: keys.has('ShiftLeft') || keys.has('ShiftRight'),
   };
+  return mtbMode.input(input, input); // VTT : impulsion pour les sauts (coup de puissance, touche, tapotement)
 }
 
 // Pente envoyée au trainer : terrain + effets des objets, puis vitesses virtuelles.
@@ -1353,7 +1375,7 @@ function syncScene(dt) {
     m.group.position.set(f.x, f.y + 0.03, f.z);
     // Le vélo pointe dans sa direction réelle (cap par rapport à la route) et s'incline dans les virages.
     const yaw = Math.atan2(f.tx, f.tz) - (r.heading || 0);
-    const pitch = -Math.atan(f.grade / 100);
+    let pitch = -Math.atan(f.grade / 100);
     let roll = r.lean || 0;
     if (r.slipping(t)) roll += Math.sin(t * 25) * 0.18;
     if (m.setPose) {
@@ -1368,6 +1390,13 @@ function syncScene(dt) {
       const omega = (r.yawRate || 0) + r.v * track.curvatureAt(r.s);
       m.setSteer(Math.max(-0.35, Math.min(0.35, Math.atan(omega / Math.max(r.v, 1.5)))));
     }
+    if (race.mtb) {
+      // VTT : virage relevé, saut, réception, chute (mtb-mode.js)
+      mtbMode.pose(r, m, dt, mtbPose);
+      pitch += mtbPose.pitch;
+      roll += mtbPose.roll;
+      m.group.position.y += mtbPose.dy;
+    }
     m.group.rotation.set(pitch, yaw, roll, 'YXZ');
     if (m.setMotion) m.setMotion(r.v, f.grade, r.power); // position aéro dans les descentes rapides
     m.setCrank(r.crank);
@@ -1378,9 +1407,11 @@ function syncScene(dt) {
     if (m.label) m.label.visible = camDist > 7;
   }
   const now = performance.now() / 1000;
+  const cam = camera.position;
   race.boxes.forEach((b, i) => {
     const mesh = boxMeshes[i];
-    mesh.visible = t >= b.respawnAt;
+    // Boîtes lointaines (au-delà de 140 m, dans la brume) non dessinées : beaucoup d'appels de dessin en moins.
+    mesh.visible = t >= b.respawnAt && (state === 'home' || mesh.position.distanceToSquared(cam) < 19600);
     mesh.rotation.y = now * 1.2 + i;
     mesh.position.y = mesh.userData.baseY + Math.sin(now * 2 + i) * 0.12;
   });
@@ -1390,10 +1421,11 @@ function cameraTarget(outPos, outLook) {
   const p = race.player;
   // La caméra suit en partie la direction du vélo : on voit le coureur tourner, pas glisser.
   const side = Math.sin(p.heading || 0);
+  const lift = mtbMode.cameraLift(); // VTT : la caméra suit un peu le saut
   const back = track.frame(p.s - 6.5, p.lateral * 0.85 - side * 3.2, tmpFrame);
-  outPos.set(back.x, back.y + 2.7, back.z);
+  outPos.set(back.x, back.y + 2.7 + lift, back.z);
   const ahead = track.frame(p.s + 7, p.lateral * 0.6 + side * 3.5, tmpFrame2);
-  outLook.set(ahead.x, ahead.y + 1.0, ahead.z);
+  outLook.set(ahead.x, ahead.y + 1.0 + lift * 0.8, ahead.z);
 }
 
 function snapCamera() {
@@ -1427,6 +1459,7 @@ function updateCamera(dt, nowMs) {
   camPos.lerp(desiredPos, 1 - Math.exp(-dt * 6));
   camLook.lerp(desiredLook, 1 - Math.exp(-dt * 9));
   camera.position.copy(camPos);
+  shake = Math.max(shake, mtbMode.takeShake(dt)); // VTT : réception et chute
   if (shake > 0) {
     camera.position.x += (Math.random() - 0.5) * shake * 0.5;
     camera.position.y += (Math.random() - 0.5) * shake * 0.5;
@@ -1489,6 +1522,7 @@ function frame(nowMs) {
     if (race.time < 0) hud.countdown(String(Math.ceil(-race.time)));
   }
   syncScene(state === 'paused' ? 0 : dt);
+  mtbMode.frame(state === 'paused' ? 0 : dt, state, { trainer: devices.trainerActive, touch: TOUCH });
   const terrain = updateGrade();
   updateCamera(dt, nowMs);
   updateSun();
@@ -1519,6 +1553,7 @@ function frame(nowMs) {
         draft: p.draft,
         offRoad: p.offRoad,
         surface: p.surface,
+        trail: !!race.mtb,
         autoSteer: autoSteer() && !keys.has('ArrowLeft') && !keys.has('ArrowRight'),
         keyboard: !devices.trainerActive,
         tap: tapEnabled,
@@ -1558,6 +1593,8 @@ window.__mcw = {
   loadCourse,
   get feltGrade() { return feltGrade; },
   audio,
+  mtb: mtbMode,
+  get scenery() { return scenery; },
 };
 
 renderCourses();

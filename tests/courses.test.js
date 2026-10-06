@@ -4,8 +4,8 @@ import assert from 'node:assert/strict';
 import { COURSES, COURSE_ORDER, SURFACES, courseById, road, surfaceAtFraction } from '../game/courses.js';
 import { buildProfile, profileGrade, elevationGain } from '../src/core/profile.js';
 
-test('trois circuits, dans l’ordre du menu', () => {
-  assert.deepEqual(COURSE_ORDER, ['vallee', 'col', 'plage']);
+test('quatre circuits, dans l’ordre du menu', () => {
+  assert.deepEqual(COURSE_ORDER, ['vallee', 'col', 'plage', 'foret']);
   for (const id of COURSE_ORDER) assert.equal(COURSES[id].id, id);
   assert.equal(courseById('inconnu').id, 'vallee');
 });

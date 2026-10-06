@@ -4,6 +4,7 @@ import { stepSpeed, bestDraftFactor, DEFAULTS } from '../src/core/physics.js';
 import { stepSteering, forwardSpeed, headingTowards } from '../src/core/steering.js';
 import { ROAD_HALF, LATERAL_LIMIT, mod } from './track.js';
 import { SURFACES } from './courses.js';
+import { MtbRules } from '../src/core/mtb.js';
 
 export const ITEMS = {
   turbo: { label: 'Turbo', icon: '🚀' },
@@ -70,13 +71,17 @@ export class Race extends EventTarget {
     this.racers = [];
     this.bananas = [];
     this.bananaId = 0;
+    // Demi-largeur de la route et écart latéral maximal de ce circuit (sentier de VTT étroit).
+    this.half = track.half ?? ROAD_HALF;
+    this.limit = track.lateralLimit ?? LATERAL_LIMIT;
+    const grid = Math.min(1.6, this.half - 0.5);
 
     // Grille de départ : deux par rangée, le joueur en deuxième ligne.
     const order = [AI_PROFILES[4], AI_PROFILES[3], null, AI_PROFILES[2], AI_PROFILES[1], AI_PROFILES[0]];
     order.forEach((p, i) => {
       const row = Math.floor(i / 2);
       const s = -4 - row * 4;
-      const lateral = i % 2 ? 1.6 : -1.6;
+      const lateral = i % 2 ? grid : -grid;
       if (!p) {
         this.player = new Racer({ id: 0, name: playerName, color: '#ff5a1f', helmet: '#ffffff', bike: '#16181d', isPlayer: true, s, lateral });
         this.racers.push(this.player);
@@ -85,13 +90,28 @@ export class Race extends EventTarget {
       }
     });
 
-    // Boîtes à objets : 8 rangées par tour, en quinconce (3 de front, puis 2 décalées).
+    // Boîtes à objets : 8 rangées par tour, en quinconce (3 de front, puis 2 décalées), resserrées sur un sentier.
     this.boxes = [];
+    const spread = Math.min(1, (this.half - 0.6) / (ROAD_HALF - 0.6));
     BOX_ROWS.forEach((frac, row) => {
       for (const lateral of row % 2 === 0 ? [-2.6, 0, 2.6] : [-1.3, 1.3]) {
-        this.boxes.push({ s: frac * track.length, lateral, respawnAt: 0 });
+        this.boxes.push({ s: frac * track.length, lateral: lateral * spread, respawnAt: 0 });
       }
     });
+
+    // VTT (src/core/mtb.js) : sauts avec impulsion, chutes hors de la piste, dérive dans les épingles.
+    this.mtb = null;
+    if (track.course.mtb) {
+      const f = {};
+      this.mtb = new MtbRules({
+        length: track.length,
+        half: this.half,
+        jumps: (track.course.mtb.jumps || []).map(([u, h, len]) => ({ s: u * track.length, h, len })),
+        random,
+        emit: (type, detail) => this.emit(type, detail),
+        yAt: (s) => track.frame(s, 0, f).y,
+      });
+    }
   }
 
   emit(type, detail) {
@@ -128,6 +148,7 @@ export class Race extends EventTarget {
     const p = this.player;
     p.power = input.power;
     p.cadence = input.cadence;
+    if (input.impulseAt !== undefined) p.impulseAt = input.impulseAt; // VTT : dernière impulsion (saut)
     if (t < 0) {
       // Compte à rebours : on peut déjà pédaler, mais on ne part pas.
       for (const r of this.racers) r.crank += (r.isPlayer ? r.cadence : 0) / 60 * Math.PI * 2 * dt;
@@ -138,6 +159,7 @@ export class Race extends EventTarget {
       if (r.isPlayer) this.steerPlayer(r, dt, input);
       else this.driveAI(r, dt);
       this.move(r, dt);
+      if (this.mtb) this.mtb.step(r, dt, t, { auto: r.isPlayer && this.autoPilot, skill: (r.basePower - 150) / 110 });
     }
     this.handleBoxes();
     this.handleBananas();
@@ -153,13 +175,16 @@ export class Race extends EventTarget {
   // de direction reprend la main tant qu'elle est tenue.
   steerPlayer(r, dt, input) {
     this.autoPilot = !!input.auto;
+    if (this.mtb && (r.air || this.mtb.down(r, this.time))) return; // en l'air ou à terre : pas de direction
     if (input.auto && !input.steer) {
       r.targetLateral = this.autoLine(r);
-      stepSteering(r, { targetHeading: headingTowards(r.lateral, r.targetLateral) }, r.v, this.track.curvatureAt(r.s), dt, LATERAL_LIMIT);
+      stepSteering(r, { targetHeading: headingTowards(r.lateral, r.targetLateral) }, r.v, this.track.curvatureAt(r.s), dt, this.limit);
       this.autoItem(r);
       return;
     }
-    stepSteering(r, { steer: input.steer, drift: input.drift }, r.v, this.track.curvatureAt(r.s), dt, LATERAL_LIMIT);
+    // VTT : sans tourner soi-même, le vélo file tout droit dans les virages serrés (et sort de la piste).
+    if (this.mtb && !input.auto) this.mtb.steer(r, { steer: input.steer, drift: input.drift }, r.v, this.track.curvatureAt(r.s), dt, this.limit);
+    else stepSteering(r, { steer: input.steer, drift: input.drift }, r.v, this.track.curvatureAt(r.s), dt, this.limit);
   }
 
   // Ligne choisie par le pilote automatique : boîte à objets à portée, sinon le milieu, en évitant les bananes.
@@ -181,9 +206,10 @@ export class Race extends EventTarget {
     for (const b of this.bananas) {
       const d = mod(b.s - r.s, L);
       if (d < 1 || d > 30 || Math.abs(target - b.lateral) > 1.5) continue;
-      target = b.lateral > 0 ? b.lateral - 1.9 : b.lateral + 1.9;
+      const dodge = Math.min(1.9, this.half * 0.8);
+      target = b.lateral > 0 ? b.lateral - dodge : b.lateral + dodge;
     }
-    const lim = ROAD_HALF - 0.7;
+    const lim = this.half - 0.7;
     return Math.max(-lim, Math.min(lim, target));
   }
 
@@ -213,10 +239,10 @@ export class Race extends EventTarget {
 
     // Changement de ligne de temps en temps.
     if (t >= r.nextLaneChange) {
-      r.targetLateral = (this.random() * 2 - 1) * (ROAD_HALF - 0.9);
+      r.targetLateral = (this.random() * 2 - 1) * (this.half - 0.9);
       r.nextLaneChange = t + 4 + this.random() * 8;
     }
-    stepSteering(r, { targetHeading: headingTowards(r.lateral, r.targetLateral) }, r.v, this.track.curvatureAt(r.s), dt, LATERAL_LIMIT);
+    if (!(this.mtb && r.air)) stepSteering(r, { targetHeading: headingTowards(r.lateral, r.targetLateral) }, r.v, this.track.curvatureAt(r.s), dt, this.limit);
 
     // Utilisation des objets avec un petit délai.
     if (r.item && r.useItemAt !== null && t >= r.useItemAt) this.useItem(r);
@@ -233,12 +259,19 @@ export class Race extends EventTarget {
       leaders.push({ gap, lateral: o.lateral - r.lateral });
     }
     r.draft = bestDraftFactor(leaders);
-    const grade = this.track.gradeAt(r.s);
-    const offRoad = Math.abs(r.lateral) > ROAD_HALF + 0.3;
-    const power = r.power + (r.turbo(t) ? TURBO_POWER : 0);
+    let grade = this.track.gradeAt(r.s);
+    const offRoad = Math.abs(r.lateral) > this.half + 0.3;
+    // VTT : à terre, on ne pédale plus ; en l'air, ni pédalage ni frottement des pneus.
+    const down = this.mtb ? this.mtb.down(r, t) : false;
+    const air = !!(this.mtb && r.air);
+    const power = down || air ? 0 : r.power + (r.turbo(t) ? TURBO_POWER : 0);
     // Résistance au roulement : herbe hors de la route, sinon selon le revêtement (le sable freine).
     const surface = this.track.surfaceAt(r.s);
-    const crr = offRoad ? GRASS_CRR : SURFACES[surface]?.crr ?? DEFAULTS.crr;
+    let crr = offRoad ? GRASS_CRR : SURFACES[surface]?.crr ?? DEFAULTS.crr;
+    if (air) {
+      crr = 0;
+      grade = 0;
+    }
     r.surface = offRoad ? 'grass' : surface;
     r.v = stepSpeed(r.v, power, grade, dt, { crr, cda: DEFAULTS.cda * r.draft });
     r.offRoad = offRoad;

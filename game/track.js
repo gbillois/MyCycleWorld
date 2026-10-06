@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { buildProfile } from '../src/core/profile.js';
 import { courseById, surfaceAtFraction } from './courses.js';
 
-export const ROAD_HALF = 4; // demi-largeur de la route (m)
+export const ROAD_HALF = 4; // demi-largeur de la route par défaut (m) ; chaque circuit peut avoir la sienne (track.half)
 export const LATERAL_LIMIT = ROAD_HALF + 2.5; // on peut rouler un peu dans l'herbe, pas plus
 
 const smooth = (t) => t * t * (3 - 2 * t);
@@ -15,6 +15,9 @@ export const mod = (a, n) => ((a % n) + n) % n;
 export class Track {
   constructor(course = courseById('vallee')) {
     this.course = course;
+    // Demi-largeur de la route de ce circuit (un sentier de VTT est étroit) et écart latéral maximal.
+    this.half = course.roadHalf ?? ROAD_HALF;
+    this.lateralLimit = this.half + 2.5;
     const pts = course.control.map(([x, z]) => new THREE.Vector3(x, 0, z));
     this.curve = new THREE.CatmullRomCurve3(pts, true, 'centripetal');
     this.length = this.curve.getLength();
@@ -152,13 +155,13 @@ export function makeTerrainHeight(track) {
   return (x, z) => {
     const near = track.nearest(x, z);
     const base = near.y - 0.3;
-    const t = smooth(Math.min(1, Math.max(0, (near.dist - ROAD_HALF - 3) / 45)));
+    const t = smooth(Math.min(1, Math.max(0, (near.dist - track.half - 3) / 45)));
     const far = Math.max(0, near.dist - 120) * 0.25;
     const h = base + t * (bumps(x, z) + 2 + far);
     const coast = track.course.features?.coast;
     if (!coast) return h;
     // Plage puis fond marin sous le niveau de la mer.
-    const k = smooth(Math.min(1, Math.max(0, (z - coast.z + 40) / 50))) * Math.min(1, Math.max(0, (near.dist - ROAD_HALF - 1) / 6));
+    const k = smooth(Math.min(1, Math.max(0, (z - coast.z + 40) / 50))) * Math.min(1, Math.max(0, (near.dist - track.half - 1) / 6));
     return h + (track.minY - 0.3 - (z - coast.z) * 0.06 - h) * k;
   };
 }
@@ -202,11 +205,11 @@ export function buildScenery(scene, track) {
 
   // Route, bordures rouges et blanches, ligne médiane pointillée.
   const ROAD_COLORS = { asphalt: ['#4a4d55', '#474a52'], boardwalk: ['#a87a4f', '#93683f'], sand: ['#e2cf9a', '#d9c48d'] };
-  const road = ribbon(track, -ROAD_HALF, ROAD_HALF, 0.02, 2, (k) => (ROAD_COLORS[track.surf[k * 2]] || ROAD_COLORS.asphalt)[k % 2]);
+  const road = ribbon(track, -track.half, track.half, 0.02, 2, (k) => (ROAD_COLORS[track.surf[k * 2]] || ROAD_COLORS.asphalt)[k % 2]);
   group.add(new THREE.Mesh(road, vc()));
   const curb = (k) => (k % 2 ? '#e8e8e8' : '#d6322b');
-  group.add(new THREE.Mesh(ribbon(track, ROAD_HALF, ROAD_HALF + 0.7, 0.05, 3, curb), vc()));
-  group.add(new THREE.Mesh(ribbon(track, -ROAD_HALF - 0.7, -ROAD_HALF, 0.05, 3, curb), vc()));
+  group.add(new THREE.Mesh(ribbon(track, track.half, track.half + 0.7, 0.05, 3, curb), vc()));
+  group.add(new THREE.Mesh(ribbon(track, -track.half - 0.7, -track.half, 0.05, 3, curb), vc()));
   const dashes = ribbon(track, -0.12, 0.12, 0.04, 3, () => '#f2f2f2');
   // On ne garde qu'un tronçon sur deux pour faire les pointillés.
   const dp = dashes.attributes.position.array;
@@ -263,7 +266,7 @@ export function buildScenery(scene, track) {
     const x = b.minX - 160 + r() * (w - 200);
     const z = b.minZ - 160 + r() * (d - 200);
     const near = track.nearest(x, z);
-    if (near.dist < ROAD_HALF + 6) continue;
+    if (near.dist < track.half + 6) continue;
     if (coast && z > coast.z - 30) continue;
     if (r() < 0.8) trees.push([x, z, 0.8 + r() * 0.8, r()]);
     else if (rocks.length < 70) rocks.push([x, z, 0.6 + r() * 1.6, r()]);
@@ -324,7 +327,7 @@ export function buildScenery(scene, track) {
     }
   });
   const start = track.frame(0);
-  const line = new THREE.Mesh(new THREE.PlaneGeometry(ROAD_HALF * 2, 1), new THREE.MeshLambertMaterial({ map: checker }));
+  const line = new THREE.Mesh(new THREE.PlaneGeometry(track.half * 2, 1), new THREE.MeshLambertMaterial({ map: checker }));
   line.rotation.set(-Math.PI / 2, Math.atan2(start.tx, start.tz), 0, 'YXZ');
   line.position.set(start.x, start.y + 0.06, start.z);
   group.add(line);
@@ -332,7 +335,7 @@ export function buildScenery(scene, track) {
   const postMat = new THREE.MeshLambertMaterial({ color: '#2b2f3a', flatShading: true });
   for (const side of [-1, 1]) {
     const post = new THREE.Mesh(new THREE.BoxGeometry(0.5, 6, 0.5), postMat);
-    post.position.set(side * (ROAD_HALF + 1), 3, 0);
+    post.position.set(side * (track.half + 1), 3, 0);
     arch.add(post);
   }
   const bannerTex = canvasTexture(512, 64, (ctx, cw, ch) => {
@@ -344,7 +347,7 @@ export function buildScenery(scene, track) {
     ctx.textBaseline = 'middle';
     ctx.fillText('MyCycleWorld · DÉPART', cw / 2, ch / 2 + 2);
   });
-  const banner = new THREE.Mesh(new THREE.BoxGeometry(ROAD_HALF * 2 + 2.5, 1.1, 0.3), [
+  const banner = new THREE.Mesh(new THREE.BoxGeometry(track.half * 2 + 2.5, 1.1, 0.3), [
     postMat, postMat, postMat, postMat,
     new THREE.MeshLambertMaterial({ map: bannerTex }),
     new THREE.MeshLambertMaterial({ map: bannerTex }),

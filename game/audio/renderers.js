@@ -59,6 +59,12 @@ export const RENDERERS = {
   sprintFail: (sr, r) => S.renderSprintFail(sr, r),
   whirlpool: (sr, r, o) => S.renderWhirlpool(sr, r, o),
   kayakSplash: (sr, r) => S.renderKayakSplash(sr, r),
+  // VTT
+  jumpChime: (sr, r) => S.renderJumpChime(sr, r),
+  land: (sr, r) => S.renderLand(sr, r),
+  crash: (sr, r) => S.renderCrash(sr, r),
+  squelch: (sr, r) => S.renderSquelch(sr, r),
+  woodpecker: (sr, r) => at32(S.renderWoodpecker(32000, r)),
   // Musique et réverbération
   drum: (sr, r, o) => S.renderDrum(sr, r, o),
   // Notes rendues à 32 kHz : timbre intact, un tiers de mémoire en moins (une note par hauteur et instrument)

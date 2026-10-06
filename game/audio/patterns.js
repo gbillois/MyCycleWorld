@@ -212,6 +212,7 @@ export const SCENE_BIRDS = {
   coast: [['swallow', 1], ['greatTit', 0.6], ['skylark', 0.6]],
   lake: [['reedWarbler', 2.5], ['coot', 1.2], ['blackbird', 1.5], ['chaffinch', 1], ['robin', 0.8]],
   river: [['dipper', 2], ['chaffinch', 1], ['robin', 1], ['blackbird', 0.8]],
+  forest: [['robin', 2.5], ['blackbird', 2.2], ['greatTit', 2], ['chaffinch', 1.8], ['dipper', 0.4]],
 };
 
 export function birdSong(species, r) {
@@ -256,6 +257,13 @@ export const SURFACE_MIX = {
   grass: { hiss: 0.25, rumble: 0.5, crunch: 1, wood: 0, sand: 0 },
   boardwalk: { hiss: 0.35, rumble: 0.3, crunch: 0, wood: 1, sand: 0 },
   sand: { hiss: 0.15, rumble: 0.35, crunch: 0.25, wood: 0, sand: 1 },
+  // Sentier de VTT : terre, racines, pierrier, gravier, boue, gué (eau : couche water)
+  dirt: { hiss: 0.2, rumble: 0.85, crunch: 0.45, wood: 0, sand: 0.25 },
+  roots: { hiss: 0.15, rumble: 1, crunch: 0.35, wood: 0.3, sand: 0.2 },
+  rock: { hiss: 0.25, rumble: 1, crunch: 0.9, wood: 0, sand: 0 },
+  gravel: { hiss: 0.3, rumble: 0.6, crunch: 1, wood: 0, sand: 0 },
+  mud: { hiss: 0, rumble: 0.55, crunch: 0, wood: 0, sand: 0.9, water: 0.3 },
+  creek: { hiss: 0, rumble: 0.4, crunch: 0.2, wood: 0, sand: 0, water: 1 },
 };
 
 export function surfaceMix(surface, offRoad = false) {
@@ -275,6 +283,7 @@ export function tyreParams(speed, surface, offRoad = false) {
     crunch: mix.crunch * level * 0.9,
     wood: mix.wood * level * 0.8,
     sand: mix.sand * Math.pow(k, 0.6) * 0.75,
+    water: (mix.water || 0) * Math.pow(Math.min(1, v / 6), 0.7) * 0.8, // eau brassée par les roues (gué, boue)
     hissFreq: 1400 + v * 170, // le chuintement monte avec la vitesse
     rumbleFreq: 90 + v * 9,
     crunchRate: 0.45 + Math.min(1.4, v / 9), // vitesse de lecture des craquements
