@@ -84,6 +84,32 @@ export class Devices extends EventTarget {
     await this.trainer.connect({ acceptAll, filters });
   }
 
+  // Appareils déjà choisis dans cette page (Web Bluetooth ne les retrouve pas après un rechargement) :
+  // même forme que l'état « reconnect » de l'appli iOS.
+  get known() {
+    const t = this.trainer.device ? this.trainer.name || 'Machine' : null;
+    const h = this.hr.device ? this.hr.name || 'Ceinture cardio' : null;
+    return t || h ? { trainer: t, hr: h, waiting: !!this.reconnecting } : null;
+  }
+
+  get canReconnect() {
+    return !this.demo && !!this.known;
+  }
+
+  // Reconnecte la machine et la ceinture déconnectées (rameur qui s'est mis en veille…).
+  async reconnect() {
+    if (!this.canReconnect || this.reconnecting) return false;
+    this.reconnecting = true;
+    this.changed('trainer');
+    const jobs = [];
+    if (this.trainer.device && !this.trainer.connected) jobs.push(this.trainer.reconnect());
+    if (this.hr.device && !this.hr.connected) jobs.push(this.hr.reconnect());
+    const results = await Promise.allSettled(jobs);
+    this.reconnecting = false;
+    this.changed('trainer');
+    return results.every((r) => r.status === 'fulfilled');
+  }
+
   async connectHeartRate() {
     this.changed('hr');
     await this.hr.connect();

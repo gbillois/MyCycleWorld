@@ -3,7 +3,7 @@
 // et envoie des ordres (pente, vitesses, vibration, ouverture des écrans natifs). Même interface que Devices
 // (voir devices.js).
 //
-// Protocole (version 1, révision 2)
+// Protocole (version 1, révision 3)
 //   jeu -> appli : window.webkit.messageHandlers.mcw.postMessage({ type, ... })
 //       ready   { protocol, minor }  le jeu est chargé, l'appli peut envoyer l'état
 //       grade   { value }     pente du terrain en %, AVANT vitesses virtuelles (l'appli les applique ;
@@ -14,6 +14,8 @@
 //       openNative { screen, profile? }  révision 2, seulement si l'appli l'annonce dans capabilities :
 //                             ouvre un écran natif par-dessus le jeu (settings | devices | cockpit | inspector
 //                             | log), après avoir choisi le profil matériel s'il est donné (zwift | technogym | ble)
+//       reconnect             révision 3, si annoncé : reconnecter la machine et la ceinture déjà connues
+//                             (connexions en attente qui aboutissent dès que l'appareil se réveille)
 //   appli -> jeu : window.mcwNative.state({...}) et window.mcwNative.button(nom, appuyé)
 //       état v1 : v, demo, trainer { connected, controllable, controlled, controlReady, name, status },
 //                 hr { connected, name }, controllers [noms], power, cadence, speed, heartRate, gear
@@ -23,10 +25,12 @@
 //       révision 2 : capabilities [noms des commandes facultatives comprises par l'appli, par exemple
 //                 'openNative']. Une appli plus ancienne ne l'envoie pas : le jeu garde alors son comportement
 //                 d'avant (page « Connecter » avec le message renvoyant vers l'onglet « Appareils »).
+//       révision 3 : reconnect { trainer?, hr? (noms des appareils déjà connus), waiting (reconnexion en
+//                 attente) }, absent quand l'appli ne connaît aucun appareil.
 import { KeyEmitter, loadKeymap } from '../src/core/keymap.js';
 
 const PROTOCOL = 1;
-const MINOR = 2;
+const MINOR = 3;
 
 const MACHINE_KINDS = new Set(['bike', 'cross', 'rower', 'treadmill', 'power']);
 const HARDWARE_IDS = new Set(['zwift', 'technogym', 'ble']);
@@ -53,6 +57,7 @@ export class NativeDevices extends EventTarget {
     this.controllers = [];
     this.hardware = null; // profil matériel choisi dans l'appli (zwift | technogym | ble), null si inconnu
     this.capabilities = new Set(); // commandes facultatives annoncées par l'appli (révision 2)
+    this.known = null; // appareils déjà connus (révision 3)
     // Mêmes formes que les objets de Devices (et Trainer), pour que l'écran d'accueil du jeu n'ait rien à savoir.
     this.trainer = {
       connected: false,
@@ -111,6 +116,9 @@ export class NativeDevices extends EventTarget {
     // Plus de manette connectée : on relâche les touches qu'elles tenaient.
     if (!this.controllers.length) this.keyEmitter.releaseAll();
     if (this.gears && Number.isInteger(s.gear) && s.gear !== this.gears.gear) this.gears.shift(s.gear - this.gears.gear);
+    // Révision 3 : appareils déjà connus (bouton « Reconnecter » de la pause et du choix du niveau).
+    const r = s.reconnect && typeof s.reconnect === 'object' ? s.reconnect : null;
+    this.known = r ? { trainer: typeof r.trainer === 'string' ? r.trainer : null, hr: typeof r.hr === 'string' ? r.hr : null, waiting: !!r.waiting } : null;
     this.dispatchEvent(new Event('change'));
   }
 
@@ -133,6 +141,17 @@ export class NativeDevices extends EventTarget {
 
   // Le profil matériel se choisit dans l'écran « Appareils » de l'appli (voir this.hardware et openNative).
   setHardware() {}
+
+  // Reconnecte la machine et la ceinture déjà connues ; false si l'appli ne sait pas le faire.
+  get canReconnect() {
+    return this.capabilities.has('reconnect') && !!this.known;
+  }
+
+  reconnect() {
+    if (!this.canReconnect) return false;
+    this.post({ type: 'reconnect' });
+    return true;
+  }
 
   // L'appli sait ouvrir ses écrans natifs (appareils, cockpit, diagnostic) par-dessus le jeu.
   get canOpenNative() {

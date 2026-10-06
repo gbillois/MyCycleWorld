@@ -50,7 +50,7 @@ test('détection de la WebView de l’appli', () => {
 
 test('au démarrage, le jeu annonce qu’il est prêt', () => {
   const { posted, win } = setup();
-  assert.deepEqual(posted, [{ type: 'ready', protocol: 1, minor: 2 }]);
+  assert.deepEqual(posted, [{ type: 'ready', protocol: 1, minor: 3 }]);
   assert.equal(typeof win.mcwNative.state, 'function');
   assert.equal(typeof win.mcwNative.button, 'function');
 });
@@ -270,4 +270,19 @@ test('état invalide ignoré, connexion impossible depuis le jeu', async () => {
   win.mcwNative.state('x');
   assert.equal(devices.trainerActive, false);
   await assert.rejects(() => devices.connectTrainer(), /Appareils/);
+});
+
+test('révision 3 : reconnexion des appareils déjà connus', () => {
+  const { posted, win, devices } = setup();
+  win.mcwNative.state({ ...STATE, trainer: { connected: false }, capabilities: ['openNative'] });
+  assert.equal(devices.known, null);
+  assert.equal(devices.reconnect(), false, 'rien de connu');
+  win.mcwNative.state({ ...STATE, trainer: { connected: false }, capabilities: ['openNative'], reconnect: { trainer: 'Rower RWX', waiting: false } });
+  assert.deepEqual(devices.known, { trainer: 'Rower RWX', hr: null, waiting: false });
+  assert.equal(devices.canReconnect, false, 'appli sans la commande reconnect');
+  win.mcwNative.state({ ...STATE, trainer: { connected: false }, capabilities: ['openNative', 'reconnect'], reconnect: { trainer: 'Rower RWX', hr: 7, waiting: true } });
+  assert.deepEqual(devices.known, { trainer: 'Rower RWX', hr: null, waiting: true });
+  posted.length = 0;
+  assert.equal(devices.reconnect(), true);
+  assert.deepEqual(posted, [{ type: 'reconnect' }]);
 });

@@ -84,8 +84,8 @@ final class GameBridgeTests: XCTestCase {
         XCTAssertEqual(trainer["controlled"] as? Bool, false)
         XCTAssertEqual(trainer["name"] as? String, "KICKR \"Core\"")
         XCTAssertNil(object["speed"], "une mesure absente n'est pas envoyée")
-        XCTAssertEqual(object["minor"] as? Int, 2)
-        XCTAssertEqual(object["capabilities"] as? [String], ["openNative"], "l'appli annonce l'ouverture des écrans natifs")
+        XCTAssertEqual(object["minor"] as? Int, 3)
+        XCTAssertEqual(object["capabilities"] as? [String], ["openNative", "reconnect"], "l'appli annonce l'ouverture des écrans natifs et la reconnexion")
         XCTAssertNil(object["machineKind"], "champs machine facultatifs : absents quand inconnus")
         XCTAssertNil(object["strokeRate"])
     }
@@ -137,5 +137,16 @@ final class GameBridgeTests: XCTestCase {
         XCTAssertNil(GameScript.button(ButtonEvent(button: "", down: true)))
         XCTAssertNil(GameScript.button(ButtonEvent(button: "é", down: true)))
         XCTAssertNil(GameScript.button(ButtonEvent(button: String(repeating: "A", count: 33), down: true)))
+    }
+
+    func testReconnectCommandAndState() throws {
+        XCTAssertEqual(GameCommand(body: ["type": "reconnect"]), .reconnect)
+        var state = sampleState()
+        XCTAssertNil(try XCTUnwrap(JSONSerialization.jsonObject(with: Data(state.json()!.utf8)) as? [String: Any])["reconnect"])
+        state.reconnect = .init(trainer: "Rower RWX", hr: nil, waiting: true)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(state.json()!.utf8)) as? [String: Any])
+        let r = try XCTUnwrap(object["reconnect"] as? [String: Any])
+        XCTAssertEqual(r["trainer"] as? String, "Rower RWX")
+        XCTAssertEqual(r["waiting"] as? Bool, true)
     }
 }

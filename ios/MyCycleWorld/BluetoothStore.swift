@@ -63,6 +63,9 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
     /// Types mémorisés par machine (identifiant CoreBluetooth) : choisi à la main ou dernier détecté.
     private static let chosenKindsKey = "mycycleworld.kind.chosen"
     private static let seenKindsKey = "mycycleworld.kind.seen"
+    /// Dernière machine et dernière ceinture connectées (identifiant et nom), pour la reconnexion.
+    private static let knownTrainerKey = "mycycleworld.known.trainer"
+    private static let knownHeartKey = "mycycleworld.known.heart"
     static let pilotIdle = "Tester le pilotage"
 
     @Published private(set) var bluetoothState = "Bluetooth non démarré"
@@ -97,6 +100,11 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
     /// Type détecté à la connexion, et type choisi à la main pour la machine connectée (nil = automatique).
     @Published private(set) var detectedKind: MachineKind?
     @Published private(set) var kindOverride: MachineKind?
+    /// Noms de la dernière machine et de la dernière ceinture connues (reconnexion depuis le jeu).
+    @Published private(set) var knownTrainerName: String?
+    @Published private(set) var knownHeartName: String?
+    /// Une reconnexion automatique attend qu'un appareil connu se réveille.
+    @Published private(set) var waitingReconnect = false
     @Published private(set) var trainerServices: [String] = []
     @Published private(set) var trainerPackets = 0
     @Published private(set) var trainerLastPacket: Date?
@@ -132,6 +140,13 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
     private var demoTick = 0
     private var demoDistance = 0.0
     private var requestScan = false
+    /// Reconnexion demandée avant que le Bluetooth soit prêt.
+    private var requestReconnect = false
+    /// Appareils en attente de reconnexion automatique (connexion sans délai : iOS la mène à bien dès que
+    /// l'appareil réapparaît, même des minutes plus tard).
+    private var waiting: Set<UUID> = [] { didSet { waitingReconnect = !waiting.isEmpty } }
+    /// Déconnexions voulues (bouton, échec, délai) : pas de reconnexion automatique après celles-là.
+    private var intentional: Set<UUID> = []
     private var supportedPowerStep = 1.0, supportedResistanceStep = 0.1
     var activeConnectionCount: Int { devices.filter(\.connected).count }
     var trainerRow: DeviceRow? { devices.first { $0.role == .trainer && $0.connected } }
@@ -150,6 +165,13 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         super.init()
         tickTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.tick() }
         if ProcessInfo.processInfo.arguments.contains("--demo") { setDemo(true) }
+        knownTrainerName = known(BluetoothStore.knownTrainerKey)?.name
+        knownHeartName = known(BluetoothStore.knownHeartKey)?.name
+        // Machine ou ceinture déjà connue : connexion en attente dès le lancement, aboutit quand elle se réveille.
+        if !demo, knownTrainerName != nil || knownHeartName != nil {
+            requestReconnect = true
+            central = CBCentralManager(delegate: self, queue: .main)
+        }
     }
     func log(_ message: String) {
         logs.append("\(Date().formatted(date: .omitted, time: .standard))  \(message)")
@@ -190,10 +212,12 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         default: bluetoothState = "Initialisation Bluetooth…"
         }
         if poweredOn && requestScan { scan() }
+        if poweredOn && requestReconnect { requestReconnect = false; reconnectKnown() }
         if !poweredOn && !demo {
             scanning = false
             for c in connections.values { c.connectionTimer?.invalidate(); c.cancelWrites(); c.state = "Déconnecté"; c.chars = [:]; c.buttons = [] }
             resetTrainer(); heartID = nil; heart = nil; heartContact = nil; metrics = BikeReading(); refresh()
+            waiting = []; requestReconnect = true // reconnexion quand le Bluetooth revient
         }
         log(bluetoothState)
     }
@@ -210,8 +234,10 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         connections[peripheral.identifier] = c
         refresh()
     }
-    func connect(_ id: UUID, role: DeviceRole) {
+    /// `auto` : reconnexion d'un appareil connu, sans délai d'expiration (iOS attend qu'il se réveille).
+    func connect(_ id: UUID, role: DeviceRole, auto: Bool = false) {
         guard !demo, poweredOn, let c = connections[id], c.peripheral.state == .disconnected else { return }
+        intentional.remove(id)
         if role == .trainer, let old = trainerID, old != id { disconnect(old) }
         if role == .heart, let old = heartID, old != id { disconnect(old) }
         c.cancelWrites(); c.seenUnknownTypes = []; c.deviceModel = nil; c.firmware = nil
@@ -228,6 +254,13 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         c.peripheral.delegate = self
         central?.connect(c.peripheral)
         c.connectionTimer?.invalidate()
+        if auto {
+            waiting.insert(id)
+            c.state = "En attente : réveille l’appareil"
+            log("Reconnexion automatique de \(c.name) : elle aboutira dès que l’appareil se réveille (un coup de rame, de pédale…).")
+            refresh(); return
+        }
+        waiting.remove(id)
         c.connectionTimer = Timer.scheduledTimer(withTimeInterval: 20, repeats: false) { [weak self] _ in
             guard let self, c.peripheral.state == .connecting else { return }
             self.log("Connexion expirée : \(c.name)"); self.disconnect(id)
@@ -236,6 +269,14 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
     }
     func disconnect(_ id: UUID) {
         guard let c = connections[id] else { return }
+        intentional.insert(id)
+        if waiting.remove(id) != nil, c.peripheral.state == .connecting {
+            // Reconnexion en attente annulée : iOS ne prévient pas toujours.
+            central?.cancelPeripheralConnection(c.peripheral)
+            if trainerID == id { resetTrainer() }
+            if heartID == id { heartID = nil }
+            c.state = "Déconnecté"; intentional.remove(id); refresh(); return
+        }
         c.connectionTimer?.invalidate(); c.cancelWrites(); c.buttons = []; c.state = "Déconnexion…"
         if trainerID == id { resetTrainer() }
         if heartID == id { heartID = nil; heart = nil; heartContact = nil; updateMetrics() }
@@ -243,6 +284,8 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
     }
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         guard let c = connections[peripheral.identifier] else { return }
+        waiting.remove(peripheral.identifier)
+        if c.role == .trainer || c.role == .heart { rememberKnown(c) }
         c.connectionTimer?.invalidate(); c.state = "Découverte des services…"
         // Machine : tous les services, pour le test de connexion (CoreBluetooth n'a pas besoin de liste).
         peripheral.discoverServices(c.role == .trainer ? nil : UUIDs.services); refresh()
@@ -251,9 +294,26 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) { disconnected(peripheral, error) }
     private func disconnected(_ peripheral: CBPeripheral, _ error: Error?) {
         guard let c = connections[peripheral.identifier] else { return }
+        let id = peripheral.identifier
+        let wanted = intentional.remove(id) != nil
+        let role = c.role
+        waiting.remove(id)
         c.connectionTimer?.invalidate(); c.cancelWrites(); c.state = "Déconnecté"; c.chars = [:]; c.buttons = []; c.handshakeSent = false; c.handshake = false
         if trainerID == peripheral.identifier { resetTrainer() }
         if heartID == peripheral.identifier { heartID = nil; heart = nil; heartContact = nil; updateMetrics() }
+        // Machine ou ceinture perdue sans qu'on l'ait demandé (rameur qui se met en veille, hors de portée) :
+        // connexion remise en attente, elle reviendra toute seule dès que l'appareil se réveille.
+        if !wanted, !demo, poweredOn, let role, role == .trainer || role == .heart {
+            log("\(c.name) déconnecté\(error.map { ": " + $0.localizedDescription } ?? "").")
+            refresh()
+            Timer.scheduledTimer(withTimeInterval: 1.5, repeats: false) { [weak self] _ in
+                guard let self, self.connections[id] === c, c.peripheral.state == .disconnected, !self.intentional.contains(id) else { return }
+                if role == .trainer, let other = self.trainerID, other != id { return }
+                if role == .heart, let other = self.heartID, other != id { return }
+                self.connect(id, role: role, auto: true)
+            }
+            return
+        }
         log("\(c.name) déconnecté\(error.map { ": " + $0.localizedDescription } ?? ""). Reconnexion manuelle disponible."); refresh()
     }
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
@@ -718,6 +778,42 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         }
     }
 
+    /// Reconnecte la dernière machine et la dernière ceinture connues (bouton du jeu, lancement de l'appli) :
+    /// connexions en attente, sans délai, qui aboutissent dès que les appareils se réveillent.
+    func reconnectKnown() {
+        guard !demo else { return }
+        guard let central, poweredOn else {
+            requestReconnect = true
+            if central == nil { central = CBCentralManager(delegate: self, queue: .main) }
+            return
+        }
+        for (key, role) in [(BluetoothStore.knownTrainerKey, DeviceRole.trainer), (BluetoothStore.knownHeartKey, DeviceRole.heart)] {
+            guard let k = known(key) else { continue }
+            if let c = connections[k.id], c.peripheral.state != .disconnected { continue }
+            if connections[k.id] == nil {
+                guard let p = central.retrievePeripherals(withIdentifiers: [k.id]).first else {
+                    log("\(k.name) : appareil introuvable, relance une recherche."); continue
+                }
+                connections[k.id] = Connection(p, name: k.name, rssi: 0)
+            }
+            connect(k.id, role: role, auto: true)
+        }
+        refresh()
+    }
+    private struct Known: Codable {
+        var id: UUID
+        var name: String
+    }
+    private func known(_ key: String) -> Known? {
+        UserDefaults.standard.data(forKey: key).flatMap { try? JSONDecoder().decode(Known.self, from: $0) }
+    }
+    private func rememberKnown(_ c: Connection) {
+        let key = c.role == .heart ? BluetoothStore.knownHeartKey : BluetoothStore.knownTrainerKey
+        guard let data = try? JSONEncoder().encode(Known(id: c.peripheral.identifier, name: c.name)) else { return }
+        UserDefaults.standard.set(data, forKey: key)
+        if c.role == .heart { knownHeartName = c.name } else { knownTrainerName = c.name }
+    }
+
     /// Type choisi à la main pour la machine connectée (nil = automatique), mémorisé pour cette machine.
     func setKindOverride(_ kind: MachineKind?) {
         guard let id = trainerID else { return }
@@ -771,6 +867,7 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         stopScan()
         for c in connections.values { c.connectionTimer?.invalidate(); c.cancelWrites(); if c.peripheral.state != .disconnected { central?.cancelPeripheralConnection(c.peripheral) } }
         connections.removeAll(); devices = []; resetTrainer(); heartID = nil; heart = nil; metrics = BikeReading(); heartContact = nil
+        waiting = []; intentional = []
         demo = enabled; gears = VirtualGears(); terrain = 0; mode = "Simulation"; demoTick = 0; demoDistance = 0
         if enabled {
             controlReady = true; simulationSupported = true; ergSupported = true; resistanceSupported = true
@@ -780,6 +877,7 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
             controlStatus = "Démo prête · aucun appareil réel connecté"; tick()
         }
         log(enabled ? "Mode démo activé : mesures simulées" : "Mode Bluetooth réel activé")
+        if !enabled { reconnectKnown() } // retour au réel : machine et ceinture connues en attente
     }
     private func tick() {
         if demo {

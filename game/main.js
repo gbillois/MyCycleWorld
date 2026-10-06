@@ -1055,8 +1055,49 @@ function markConnectedMachine() {
   }
 }
 
+// Machine déjà connue (rameur qui s'est mis en veille…) : bandeau « Reconnecter » dans la pause et avant
+// le lancement d'un niveau. Sur iOS, la reconnexion attend que la machine se réveille, sans délai.
+const escHtml = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+let machineBarKey = '';
+function renderMachineBars() {
+  const k = devices.known;
+  const t = devices.trainer;
+  let key = '';
+  let html = '';
+  if (t.connected) {
+    key = `on|${t.name}`;
+    html = `<span class="mb-dot on"></span><span class="mb-text"><b>${escHtml(t.name)}</b> connectée</span>`;
+  } else if (k?.trainer || k?.hr) {
+    const name = escHtml(k.trainer || k.hr);
+    key = `off|${name}|${k.waiting}|${devices.canReconnect}`;
+    const text = k.waiting
+      ? `<b>${name}</b> · se reconnecte à son réveil (un coup de rame ou de pédale)`
+      : `<b>${name}</b> déconnectée`;
+    const btn = devices.canReconnect ? `<button type="button" class="btn small" data-reconnect>${k.waiting ? 'Relancer' : 'Reconnecter'}</button>` : '';
+    html = `<span class="mb-dot ${k.waiting ? 'wait' : 'off'}"></span><span class="mb-text">${text}</span>${btn}`;
+  }
+  if (key === machineBarKey) return;
+  machineBarKey = key;
+  for (const bar of document.querySelectorAll('[data-machine-bar]')) {
+    bar.innerHTML = html;
+    bar.hidden = !html;
+  }
+}
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest?.('[data-reconnect]');
+  if (!btn) return;
+  btn.disabled = true;
+  Promise.resolve(devices.reconnect())
+    .catch((err) => hud.flash(`Reconnexion impossible : ${err?.message || err}`, 2600, 'bad'))
+    .finally(() => {
+      machineBarKey = '';
+      renderMachineBars();
+    });
+});
+
 function refreshDevices() {
   markConnectedMachine();
+  renderMachineBars();
   const t = devices.trainer;
   if (!busy.trainer) {
     if (t.connected) {

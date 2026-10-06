@@ -1555,3 +1555,16 @@ body.touch, body.touch #hud, body.touch #rowHud { -webkit-user-select: none; use
   padding: 4px 10px; border-radius: 999px; font: 700 12px/1 var(--f-ui); letter-spacing: 0.04em; text-transform: uppercase;
   color: #06210f; background: #3ccf7a; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
 }
+
+/* Bandeau machine (pause, choix du niveau) : connectée, ou déconnectée avec « Reconnecter » */
+.machine-bar { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; padding: 8px 10px 8px 12px; border-radius: 14px; background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.12); font-size: 14px; text-align: left; }
+.machine-bar[hidden] { display: none; }
+.pause-card .machine-bar { margin: 10px 0; }
+.machine-bar .mb-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.machine-bar .btn { flex: none; width: auto; margin: 0; }
+.machine-bar .mb-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: #9aa3b5; }
+.machine-bar .mb-dot.on { background: #3ccf7a; box-shadow: 0 0 8px rgba(60, 207, 122, 0.8); }
+.machine-bar .mb-dot.off { background: #ff5a5a; }
+.machine-bar .mb-dot.wait { background: #ffbf3c; animation: mb-pulse 1.2s ease-in-out infinite; }
+@keyframes mb-pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .machine-bar .mb-dot.wait { animation: none; } }

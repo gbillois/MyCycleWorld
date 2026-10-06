@@ -216,6 +216,10 @@ final class GameBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         state.pace = m.pace
         state.stepRate = m.stepRate
         state.resistance = m.resistance
+        // Révision 3 : appareils déjà connus, pour le bouton « Reconnecter » du jeu.
+        if store.knownTrainerName != nil || store.knownHeartName != nil {
+            state.reconnect = GameState.Reconnect(trainer: store.knownTrainerName, hr: store.knownHeartName, waiting: store.waitingReconnect)
+        }
         return state
     }
 
@@ -264,6 +268,9 @@ final class GameBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
             // puis l'écran natif s'ouvre par-dessus le jeu.
             if let profile { store.setProfile(profile) }
             onOpenNative(screen)
+        case .reconnect:
+            // Pause ou choix du niveau : « Reconnecter » la machine (rameur qui s'est mis en veille…).
+            store.reconnectKnown()
         }
     }
 

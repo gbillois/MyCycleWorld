@@ -4,6 +4,7 @@ import Foundation
 // avec `swift test`. Le côté JavaScript est dans game/native.js (protocole version 1, révision 2 :
 // révision 1 = champs facultatifs pour les elliptiques et rameurs ; révision 2 = l'appli annonce ses
 // commandes en plus (capabilities) et le jeu peut ouvrir les écrans natifs depuis ses Options).
+// Révision 3 : reconnexion des machines déjà connues (commande « reconnect » et état « reconnect »).
 // Chaque ajout est facultatif : un jeu plus ancien l'ignore, une appli plus ancienne aussi.
 
 /// Appui ou relâchement d'un bouton de manette Zwift, à transmettre au jeu.
@@ -39,9 +40,12 @@ enum GameCommand: Equatable {
     case vibrate
     /// Ouvrir un écran natif, en choisissant d'abord le profil matériel s'il est donné.
     case openNative(NativeScreen, profile: HardwareProfile?)
+    /// Reconnecter la machine et la ceinture déjà connues (révision 3) : connexion en attente, aboutit dès
+    /// que l'appareil se réveille.
+    case reconnect
 
     /// Commandes que cette appli comprend en plus du protocole 1 d'origine, annoncées au jeu dans l'état.
-    static let capabilities = ["openNative"]
+    static let capabilities = ["openNative", "reconnect"]
     static let gradeRange: ClosedRange<Double> = -25...30
 
     init?(body: Any) {
@@ -54,6 +58,8 @@ enum GameCommand: Equatable {
             self = .takeControl
         case "vibrate":
             self = .vibrate
+        case "reconnect":
+            self = .reconnect
         case "grade":
             guard let value = GameCommand.number(dict["value"]), value.isFinite else { return nil }
             self = .grade(min(GameCommand.gradeRange.upperBound, max(GameCommand.gradeRange.lowerBound, value)))
@@ -92,11 +98,17 @@ struct GameState: Encodable, Equatable {
         var connected: Bool
         var name: String?
     }
+    /// Appareils déjà connus (révision 3) : noms, et reconnexion automatique en attente.
+    struct Reconnect: Encodable, Equatable {
+        var trainer: String?
+        var hr: String?
+        var waiting: Bool
+    }
 
     var v = 1
     /// Révision du protocole 1 : 1 = champs machine ci-dessous (facultatifs, absents quand inconnus),
     /// 2 = liste `capabilities`.
-    var minor = 2
+    var minor = 3
     /// Commandes facultatives que l'appli comprend (par exemple « openNative ») : le jeu n'affiche les
     /// entrées correspondantes que si elles y figurent.
     var capabilities: [String] = GameCommand.capabilities
@@ -120,6 +132,8 @@ struct GameState: Encodable, Equatable {
     var pace: Int?
     var stepRate: Int?
     var resistance: Double?
+    /// Révision 3 : machine et ceinture déjà connues, absent s'il n'y en a pas.
+    var reconnect: Reconnect?
 
     /// JSON de l'état, ou nil si une valeur n'est pas encodable (par exemple un NaN).
     func json() -> String? {
