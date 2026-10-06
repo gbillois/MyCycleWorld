@@ -12,6 +12,8 @@ import { Forest, deciduousGeometry, pineGeometry, bushGeometry, rockGeometry, wi
 import { makeWater, waterNormalTexture } from './water.js';
 import { mergeGeometries, colored, paint, indexify } from './geom.js';
 import { rng } from './track.js';
+import { BuildingSet, SIGN } from './buildings.js';
+import { gantry, footbridge, pontoonDeck } from './architecture.js';
 
 const C = (hex) => new THREE.Color(hex);
 const smoothstep = (a, b, x) => {
@@ -448,7 +450,7 @@ function curtainTexture() {
 }
 
 // Portes sprint (arche orange lumineuse et rideau) et porte glisse (passerelle basse en bois).
-function buildChallenges(river, height, group, { cast, detailed }) {
+function buildChallenges(river, height, group, { cast, detailed, bset }) {
   const f = {};
   const o = {};
   const solids = [];
@@ -501,6 +503,20 @@ function buildChallenges(river, height, group, { cast, detailed }) {
       curtain.renderOrder = 4;
       group.add(curtain);
       curtains.set(g.id, curtain);
+    } else if (bset) {
+      // Graphismes détaillés : passerelle de corde (planches, mains courantes, filets, culées en pierre)
+      const span = hw + 4;
+      const deckY = wy + 1.2;
+      footbridge(bset, f.x, wy, f.z, Math.atan2(-f.rz, f.rx), {
+        span, deckY: 1.2, groundAt: (lat) => height(f.x + f.rx * lat, f.z + f.rz * lat, o),
+      });
+      const pl = new THREE.PlaneGeometry(4.2, 1.05).rotateY(yaw + Math.PI).translate(f.x - f.tx * 1.15, deckY + 2.35, f.z - f.tz * 1.15);
+      banners.push(pl);
+      pl.userData.glide = true;
+      for (const side of [-1, 1]) {
+        const [px, pz] = at(side * 1.9);
+        solids.push(colored(new THREE.BoxGeometry(0.08, 2.0, 0.08).translate(px - f.tx * 1.15, deckY + 1.65, pz - f.tz * 1.15), '#4b3a28'));
+      }
     } else {
       // Passerelle basse en bois : tablier, garde-corps, câbles vers les rives, bande jaune et noire dessous
       const span = hw + 4;
@@ -580,7 +596,7 @@ function buildChallenges(river, height, group, { cast, detailed }) {
 }
 
 // Départ (ponton sur la rive gauche, arche « DÉPART ») et arrivée (arche « ARRIVÉE » et spectateurs).
-function buildStartFinish(river, height, group, { cast, detailed, shared, quality }) {
+function buildStartFinish(river, height, group, { cast, detailed, shared, quality, bset }) {
   const f = {};
   const o = {};
   const solids = [];
@@ -594,6 +610,23 @@ function buildStartFinish(river, height, group, { cast, detailed, shared, qualit
     const yaw = Math.atan2(f.tx, f.tz);
     const span = hw + 1.6;
     const topY = wy + 7.5;
+    if (bset) {
+      // Graphismes détaillés : portique en treillis, banderoles, chrono ; ponton flottant en planches
+      gantry(bset, f.x, wy, f.z, yaw, {
+        span, h: 6.7, bh: 1.6, front: key === 'start' ? SIGN.start : SIGN.finish, back: key === 'start' ? SIGN.start : SIGN.finish,
+        repeat: Math.max(1, Math.round((span * 2) / 6.5)), clock: key === 'finish', flags: true, pillarSign: [SIGN.flag0, SIGN.flag1],
+        foot: (sd) => Math.min(height(f.x - f.rx * sd * (span + 0.45), f.z - f.rz * sd * (span + 0.45), o), wy) - wy,
+      });
+      bset.site(key, f.x, wy, f.z);
+      if (key === 'start') {
+        for (let k = -14; k <= 6; k += 2) {
+          river.frame(s + k, 0, f);
+          const lat = -(river.halfWidthAt(s + k) - 1.6) - 0.9;
+          pontoonDeck(bset, f.x + f.rx * lat, f.y, f.z + f.rz * lat, Math.atan2(f.tx, f.tz), 2.06, 3.4, k % 6 === 0);
+        }
+      }
+      continue;
+    }
     for (const side of [-1, 1]) {
       const px = f.x + f.rx * side * span;
       const pz = f.z + f.rz * side * span;
@@ -622,13 +655,20 @@ function buildStartFinish(river, height, group, { cast, detailed, shared, qualit
       }
     }
   }
-  const m = new THREE.Mesh(merged(solids), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55 }));
-  m.castShadow = cast;
-  m.receiveShadow = detailed;
-  group.add(m);
+  if (solids.length) {
+    const m = new THREE.Mesh(merged(solids), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55 }));
+    m.castShadow = cast;
+    m.receiveShadow = detailed;
+    group.add(m);
+  }
   startTex.wrapS = finishTex.wrapS = THREE.RepeatWrapping;
-  group.add(new THREE.Mesh(mergeUv(banners.filter((b) => b.userData.key === 'start')), new THREE.MeshStandardMaterial({ map: startTex, roughness: 0.6 })));
-  group.add(new THREE.Mesh(mergeUv(banners.filter((b) => b.userData.key === 'finish')), new THREE.MeshStandardMaterial({ map: finishTex, roughness: 0.6 })));
+  if (banners.length) {
+    group.add(new THREE.Mesh(mergeUv(banners.filter((b) => b.userData.key === 'start')), new THREE.MeshStandardMaterial({ map: startTex, roughness: 0.6 })));
+    group.add(new THREE.Mesh(mergeUv(banners.filter((b) => b.userData.key === 'finish')), new THREE.MeshStandardMaterial({ map: finishTex, roughness: 0.6 })));
+  } else {
+    startTex.dispose();
+    finishTex.dispose();
+  }
   // Spectateurs sur les deux rives à l'arrivée (graphismes détaillés)
   if (detailed) {
     const r = rng(77);
@@ -806,8 +846,11 @@ export function buildKayakWorld(scene, river, { quality = 'high', renderer = nul
   const water = buildWater(river, theme, mood, { detailed, maps: terrain.maps, shared });
   group.add(water.mesh);
   const gates = buildGates(river, height, group, { cast });
-  const challenges = buildChallenges(river, height, group, { cast, detailed });
-  buildStartFinish(river, height, group, { cast, detailed, shared, quality });
+  // Bâtiments des graphismes détaillés (portiques, ponton, passerelle) : une matière, quelques maillages
+  const bset = detailed ? new BuildingSet({ quality, shared }) : null;
+  const challenges = buildChallenges(river, height, group, { cast, detailed, bset });
+  buildStartFinish(river, height, group, { cast, detailed, shared, quality, bset });
+  if (bset) bset.build(group);
   buildRocks(river, height, group, { detailed, quality, cast });
   const forest = buildTrees(river, height, theme, group, { detailed, quality, shared });
   let grass = null;
@@ -851,6 +894,7 @@ export function buildKayakWorld(scene, river, { quality = 'high', renderer = nul
       sky.position.copy(camera.position);
       if (forest) forest.update(camera.position.x, camera.position.z, camera.position.y);
       if (grass) grass.update(camera);
+      if (bset) bset.update(camera);
       if (water.normal) water.normal.offset.set(0, -time * 0.12);
     },
     dispose() {

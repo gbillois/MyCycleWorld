@@ -11,6 +11,8 @@ import { mergeGeometries, colored, paint, indexify } from './geom.js';
 import { makeLabel } from './models.js';
 import { rng } from './track.js';
 import { ROW } from '../src/core/rowing.js';
+import { BuildingSet, SIGN } from './buildings.js';
+import { boathouse, grandstand, gantry } from './architecture.js';
 
 const C = (hex) => new THREE.Color(hex);
 const smoothstep = (a, b, x) => {
@@ -406,8 +408,8 @@ function buildSimpleRowingWorld(scene, { lanes = 6, distance = ROW.distance, qua
 
 // --- Bassin, graphismes détaillés ---
 // Lac naturel : rives en pente douce (terrain texturé), roseaux, herbe et fleurs, forêt avec niveaux de
-// détail, hangar à bateaux au départ, tribune et arche à l'arrivée, brume au bout du lac, montagnes,
-// eau avec reflet plan en qualité high (arbres, tribune et bateaux s'y reflètent).
+// détail, hangar à bateaux au départ, tribune et portique à l'arrivée (architecture.js), brume au bout du lac,
+// montagnes, eau avec reflet plan en qualité high (arbres, tribune et bateaux s'y reflètent).
 export function buildRowingWorld(scene, opts = {}) {
   if (opts.detailed === false) return buildSimpleRowingWorld(scene, opts);
   const { lanes = 6, distance = ROW.distance, quality = 'high', renderer = null } = opts;
@@ -429,6 +431,7 @@ export function buildRowingWorld(scene, opts = {}) {
   const s3 = new THREE.Vector3();
   const shared = { uTime: { value: 0 }, uWind: { value: 0.8 }, noise: noiseTexture() };
   const mood = MOODS.lake;
+  const bset = new BuildingSet({ quality, shared });
 
   // Ciel, brume, lumières, reflets
   const prevFog = scene.fog;
@@ -677,34 +680,13 @@ export function buildRowingWorld(scene, opts = {}) {
     group.add(shadowedMesh(mergeGeometries(poles), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6 })));
   }
 
-  // Arche d'arrivée au-dessus du bassin
-  const archMat = new THREE.MeshStandardMaterial({ color: '#ff5a1f', roughness: 0.45 });
-  const archParts = [-1, 1].map((side) => new THREE.BoxGeometry(0.8, 9, 0.8).translate(side * (half + 2), 4.5, distance));
-  const posts = new THREE.Mesh(mergeUv(archParts), archMat);
-  posts.castShadow = true;
-  group.add(posts);
-  const bannerTex = signTexture('ARRIVÉE', '#ffffff', '#ff5a1f');
-  bannerTex.wrapS = THREE.RepeatWrapping;
-  bannerTex.repeat.x = Math.round((width + 5) / 3.6);
-  const bannerMat = new THREE.MeshStandardMaterial({ map: bannerTex });
-  const beam = new THREE.Mesh(new THREE.BoxGeometry(width + 5, 1.8, 0.5), [archMat, archMat, archMat, archMat, bannerMat, bannerMat]);
-  beam.position.set(0, 9, distance);
-  beam.castShadow = true;
-  group.add(beam);
+  // Portique d'arrivée en treillis au-dessus du bassin
+  gantry(bset, 0, 0, distance, 0, { span: half + 1.6, h: 8.1, bh: 1.8, front: SIGN.finish, back: SIGN.finish, repeat: Math.round((width + 3) / 7), clock: true, flags: true, pillarSign: [SIGN.flag0, SIGN.flag2], foot: () => -0.8 });
 
   // Tribune et spectateurs sur la berge droite, à l'arrivée
   const stand = new THREE.Group();
-  const steps = [];
-  for (let k = 0; k < 6; k++) steps.push(colored(new THREE.BoxGeometry(5, 0.8 * (k + 1), 60).translate(k * 2.2, 0.4 * (k + 1), 0), k % 2 ? '#c9c4b8' : '#bdb7aa'));
-  for (const z of [-30, 30]) steps.push(colored(new THREE.BoxGeometry(14, 5.4, 0.4).translate(5.5, 2.7, z), '#a9a397'));
-  for (const z of [-29, -10, 10, 29]) steps.push(colored(new THREE.BoxGeometry(0.3, 9.5, 0.3).translate(12, 4.75, z), '#5a5f6a'));
-  const stepMesh = shadowedMesh(mergeGeometries(steps), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 }));
-  stand.add(stepMesh);
-  const roof = new THREE.Mesh(new THREE.BoxGeometry(16, 0.4, 62), new THREE.MeshStandardMaterial({ color: '#2b6cff', roughness: 0.5 }));
-  roof.position.set(6, 9.5, 0);
-  roof.rotation.z = -0.12;
-  roof.castShadow = true;
-  stand.add(roof);
+  // Gradins, bancs, structure et toit en porte-à-faux (architecture.js)
+  grandstand(bset, bank + 8, 1.0, standZ);
   // Public de la tribune (people.js, coordonnées monde : la tribune est posée en (bank + 8, 1, standZ))
   const seats = [];
   for (let k = 0; k < 6; k++) for (let z = -28; z <= 28; z += 1.1) if (r() < 0.8) seats.push([bank + 8 + k * 2.2 + (r() - 0.5) * 0.6, 1.0 + 0.8 * (k + 1), standZ + z + (r() - 0.5) * 0.4, -Math.PI / 2 + (r() - 0.5) * 0.3, r()]);
@@ -712,20 +694,11 @@ export function buildRowingWorld(scene, opts = {}) {
   stand.position.set(bank + 8, 1.0, standZ);
   group.add(stand);
 
-  // Hangar à bateaux au départ (rive gauche) avec son ponton
-  const bh = [];
-  const W = 14;
-  const D = 10;
-  bh.push(colored(new THREE.BoxGeometry(D, 4.2, W).translate(0, 2.1, 0), '#8a5a36'));
-  for (let i = -6; i <= 6; i += 1.5) bh.push(colored(new THREE.BoxGeometry(D + 0.06, 4.2, 0.12).translate(0, 2.1, i), '#6e4528'));
-  bh.push(colored(new THREE.CylinderGeometry(D * 0.62, D * 0.62, W + 1.2, 3, 1).rotateX(Math.PI / 2).rotateZ(Math.PI / 2).scale(1, 0.55, 1).translate(0, 5.6, 0), '#3d3a38'));
-  for (const z of [-3.6, 0, 3.6]) bh.push(colored(new THREE.BoxGeometry(0.15, 3.2, 3.0).translate(D / 2 + 0.05, 1.6, z), '#2e2a26'));
-  bh.push(colored(new THREE.BoxGeometry(12, 0.25, W + 4).translate(D / 2 + 6, 0.35, 0), '#9b7a55'));
-  for (let i = 0; i < 8; i++) bh.push(colored(new THREE.CylinderGeometry(0.12, 0.12, 2.4, 6).translate(D / 2 + 1 + (i % 4) * 3.4, -0.8, i < 4 ? -W / 2 - 1.5 : W / 2 + 1.5), '#5a4330'));
-  for (let i = 0; i < 3; i++) bh.push(colored(new THREE.SphereGeometry(1, 10, 6).scale(0.25, 0.16, 4).translate(D / 2 + 4 + i * 0.7, 0.62 + i * 0.32, -2 + i * 1.6), ['#f4f4f2', '#ffd23f', '#e0384b'][i]));
-  const boathouse = shadowedMesh(mergeGeometries(bh.map((g) => (g.index ? g : indexify(g)))), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 }));
-  boathouse.position.set(-bank - 14, 0.95, -30);
-  group.add(boathouse);
+  // Hangar à bateaux au départ (rive gauche), ponton et râteliers
+  boathouse(bset, -bank - 14, 0.95, -30, Math.PI / 2, rng(61));
+  bset.site('boathouse', -bank - 14, 0.95, -30);
+  bset.site('stand', bank + 8, 1.0, standZ);
+  bset.build(group);
 
   // Brume au bout du lac : grands voiles doux posés sur l'eau
   const mistTex = canvasTexture(256, 128, (cx, w, h) => {
@@ -759,6 +732,7 @@ export function buildRowingWorld(scene, opts = {}) {
       skyU.uTime.value = time;
       sky.position.copy(camera.position);
       forest.update(camera.position.x, camera.position.z, camera.position.y);
+      bset.update(camera);
     },
     dispose() {
       for (const root of [group, sky]) {

@@ -1522,7 +1522,7 @@ body.touch, body.touch #hud, body.touch #rowHud { -webkit-user-select: none; use
 
 /* Bouton Pause du jeu : sous la mini-carte, en haut à droite (le bouton tactile d'origine est remplacé) */
 .game-pause {
-  position: fixed; z-index: 30; top: calc(206px + var(--st)); right: calc(14px + var(--sr));
+  position: fixed; z-index: 30; top: calc(252px + var(--st)); right: calc(14px + var(--sr));
   width: 52px; height: 52px; display: grid; place-items: center; font-size: 20px; color: #fff; cursor: pointer;
   border-radius: 16px; border: 2px solid rgba(255, 255, 255, 0.35); background: rgba(12, 16, 30, 0.72);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
@@ -1530,4 +1530,5 @@ body.touch, body.touch #hud, body.touch #rowHud { -webkit-user-select: none; use
 .game-pause:hover, .game-pause:focus-visible { border-color: #fff; background: rgba(255, 90, 31, 0.85); outline: none; }
 .game-pause[hidden] { display: none; }
 .tc.pause { display: none !important; }
-@media (max-width: 760px), (max-height: 560px) { .game-pause { top: calc(124px + var(--st)); width: 46px; height: 46px; } }
+@media (max-width: 760px), (max-height: 560px) { .game-pause { top: calc(160px + var(--st)); width: 46px; height: 46px; } }
+/* Le bouton Pause passe sous le badge météo (mini-carte, puis météo, puis Pause) */

@@ -1,11 +1,13 @@
 // Éléments de décor propres à chaque circuit (graphismes détaillés) :
 // ferme et animaux (Vallée Verte), village de chalets (Col des Chalets), plage, mer et passerelle (Côte des Dunes).
 // Chaque fonction réserve sa place (les arbres l'évitent) et renvoie éventuellement une fonction d'animation.
-// Les bâtiments fixes sont fusionnés (une instruction de dessin par lieu), les animaux sont instanciés.
+// Les bâtiments (architecture.js) vont dans l'ensemble de bâtiments du décor (ctx.bset : quelques instructions
+// de dessin pour tout le circuit, détails masqués au loin), les animaux sont instanciés.
 import * as THREE from 'three';
-import { ROAD_HALF } from './track.js';
+import { ROAD_HALF, rng } from './track.js';
 import { mergeGeometries, colored, paint, indexify } from './geom.js';
 import { makeWater } from './water.js';
+import { barn, silo, farmhouse, tractor, hayBale, chalet, church, fountain, cafe, beachHut, lifeguardTower, streetLamp } from './architecture.js';
 
 const smoothstep = (a, b, x) => {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
@@ -13,92 +15,32 @@ const smoothstep = (a, b, x) => {
 };
 const C = (hex) => new THREE.Color(hex);
 const MAT = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0 });
-const GLASS = new THREE.MeshStandardMaterial({ color: '#9fd0ef', roughness: 0.15, metalness: 0.2 });
-
 // --- Petites briques géométriques (couleur dans les sommets) ---
 const box = (w, h, d, color, x = 0, y = 0, z = 0) => colored(new THREE.BoxGeometry(w, h, d).translate(x, y + h / 2, z), color);
 const cyl = (r, h, color, x = 0, y = 0, z = 0, seg = 12) => colored(new THREE.CylinderGeometry(r, r, h, seg).translate(x, y + h / 2, z), color);
 
-// Prisme triangulaire (pignon) : base w en bas, sommet h, profondeur d le long de Z.
-function prism(w, h, d, color, x = 0, y = 0, z = 0) {
-  const a = [-w / 2, 0];
-  const b = [w / 2, 0];
-  const c = [0, h];
-  const z0 = -d / 2;
-  const z1 = d / 2;
-  const v = (p, zz) => [p[0] + x, p[1] + y, zz + z];
-  const tri = (p, q, r) => [...p, ...q, ...r];
-  const pos = [
-    ...tri(v(a, z1), v(b, z1), v(c, z1)),
-    ...tri(v(b, z0), v(a, z0), v(c, z0)),
-    ...tri(v(a, z0), v(a, z1), v(c, z1)), ...tri(v(a, z0), v(c, z1), v(c, z0)),
-    ...tri(v(b, z1), v(b, z0), v(c, z0)), ...tri(v(b, z1), v(c, z0), v(c, z1)),
-    ...tri(v(a, z0), v(b, z0), v(b, z1)), ...tri(v(a, z0), v(b, z1), v(a, z1)),
-  ];
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.computeVertexNormals();
-  return colored(indexify(g), color);
-}
+// Orientation d'un bâtiment posé au bord de la route, façade (+Z local) tournée vers elle.
+const faceYaw = (f, side) => Math.atan2(-side * f.rx, -side * f.rz);
 
-// Toit à deux pans (faîtage le long de Z) posé à la hauteur y, avec débord côté gouttière.
-function gableRoof(w, h, d, color, y, overhang = 0.5, thick = 0.16) {
-  const half = w / 2;
-  const ang = Math.atan2(h, half);
-  const len = Math.hypot(half, h) + overhang;
-  const parts = [];
-  for (const s of [-1, 1]) {
-    const g = new THREE.BoxGeometry(len, thick, d + overhang * 2);
-    g.rotateZ(-s * ang);
-    // Milieu du pan, décalé vers la gouttière de la moitié du débord, posé sur le pignon.
-    const cx = s * (half / 2 + (Math.cos(ang) * overhang) / 2);
-    const cy = y + h / 2 - (Math.sin(ang) * overhang) / 2 + thick / (2 * Math.cos(ang));
-    g.translate(cx, cy, 0);
-    parts.push(colored(g, color));
+// Altitude d'assise d'un bâtiment (w × d, tourné de yaw) : un peu sous la moyenne des coins et du centre, sans
+// dépasser le coin le plus bas de plus de quelques décimètres (le socle descend sous terre).
+function baseAt(heightAt, x, z, yaw, w, d) {
+  const c = Math.cos(yaw);
+  const sn = Math.sin(yaw);
+  let lo = Infinity;
+  let sum = 0;
+  for (const [a, b] of [[-w / 2, -d / 2], [w / 2, -d / 2], [-w / 2, d / 2], [w / 2, d / 2], [0, 0]]) {
+    const h = heightAt(x + a * c + b * sn, z - a * sn + b * c);
+    lo = Math.min(lo, h);
+    sum += h;
   }
-  return parts;
-}
-
-// Positionne une géométrie locale (avant = +Z) au bord de la route, face à elle.
-function placeFacingRoad(mesh, f, side, y) {
-  mesh.position.set(f.x, y, f.z);
-  mesh.rotation.y = Math.atan2(-side * f.rx, -side * f.rz);
+  return Math.min(lo + 0.35, sum / 5 - 0.15);
 }
 
 function shadowed(mesh, cast = true) {
   mesh.castShadow = cast;
   mesh.receiveShadow = true;
   return mesh;
-}
-
-// Lot de géométries fixes fusionnées en un seul maillage (même matière, couleurs dans les sommets).
-class Batch {
-  constructor() {
-    this.parts = [];
-    this.glass = [];
-    this.obj = new THREE.Object3D();
-  }
-  // Matrice d'une pièce posée au bord de la route, face à elle (comme placeFacingRoad).
-  facing(f, side, y, extraYaw = 0) {
-    placeFacingRoad(this.obj, f, side, y);
-    this.obj.rotation.y += extraYaw;
-    this.obj.updateMatrix();
-    return this.obj.matrix.clone();
-  }
-  at(x, y, z, yaw = 0) {
-    this.obj.position.set(x, y, z);
-    this.obj.rotation.set(0, yaw, 0);
-    this.obj.updateMatrix();
-    return this.obj.matrix.clone();
-  }
-  add(geo, matrix, glass = false) {
-    const g = (geo.index ? geo : indexify(geo)).applyMatrix4(matrix);
-    (glass ? this.glass : this.parts).push(g);
-  }
-  build(group, cast = true) {
-    if (this.parts.length) group.add(shadowed(new THREE.Mesh(mergeGeometries(this.parts), MAT), cast));
-    if (this.glass.length) group.add(shadowed(new THREE.Mesh(mergeGeometries(this.glass), GLASS), false));
-  }
 }
 
 // --- Clôture générique (piquets + 2 lisses) le long d'une liste de points ---
@@ -304,57 +246,31 @@ export function addFarm(group, ctx, cfg) {
     reserve(f.x, f.z, 22);
   }
 
-  const batch = new Batch();
-  // Grange rouge
+  const B = ctx.bset;
+  // Grange rouge à toit brisé (appentis du côté opposé au silo)
   const barnPos = track.frame(sm, L(ROAD_HALF + 58));
   reserve(barnPos.x, barnPos.z, 26);
-  const barn = [];
-  barn.push(box(12, 6, 9, '#b8382e'));
-  barn.push(prism(12, 4, 9, '#b8382e', 0, 6, 0));
-  barn.push(...gableRoof(12, 4, 9.2, '#5f6166', 6, 0.6));
-  for (const x of [-6, 6]) for (const z of [-4.5, 4.5]) barn.push(box(0.3, 6, 0.3, '#f4f1ea', x, 0, z));
-  barn.push(box(4.2, 4.6, 0.12, '#f4f1ea', 0, 0, 4.56), box(3.8, 4.2, 0.14, '#9c2f27', 0, 0.2, 4.6));
-  const xg = new THREE.BoxGeometry(0.22, 5.4, 0.1);
-  barn.push(colored(xg.clone().rotateZ(0.72).translate(0, 2.3, 4.7), '#f4f1ea'), colored(xg.clone().rotateZ(-0.72).translate(0, 2.3, 4.7), '#f4f1ea'));
-  barn.push(box(1.8, 1.6, 0.12, '#f4f1ea', 0, 7.0, 4.56), box(1.5, 1.3, 0.14, '#3a2a22', 0, 7.15, 4.6));
-  barn.push(box(12.4, 0.5, 9.4, '#8e8a80', 0, -0.4, 0)); // soubassement
-  batch.add(mergeGeometries(barn), batch.facing(barnPos, side, heightAt(barnPos.x, barnPos.z) - 0.2));
-
-  // Silo
+  const yawB = faceYaw(barnPos, side);
   const siloPos = track.frame(sm + 12, L(ROAD_HALF + 66));
-  const silo = [cyl(2, 11, '#c9d2db', 0, 0, 0, 20), colored(new THREE.SphereGeometry(2, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2).translate(0, 11, 0), '#9aa6b2')];
-  for (const y of [2.5, 5.5, 8.5]) silo.push(colored(new THREE.TorusGeometry(2.03, 0.08, 6, 24).rotateX(Math.PI / 2).translate(0, y, 0), '#8e99a6'));
-  batch.add(mergeGeometries(silo), batch.at(siloPos.x, heightAt(siloPos.x, siloPos.z) - 0.2, siloPos.z));
-
-  // Maison de la ferme
+  const siloX = (siloPos.x - barnPos.x) * Math.cos(yawB) - (siloPos.z - barnPos.z) * Math.sin(yawB);
+  barn(B, barnPos.x, baseAt(heightAt, barnPos.x, barnPos.z, yawB, 12, 15), barnPos.z, yawB, rng(401), { lean: siloX > 0 ? -1 : 1 });
+  B.site('barn', barnPos.x, heightAt(barnPos.x, barnPos.z), barnPos.z);
+  // Silo
+  silo(B, siloPos.x, heightAt(siloPos.x, siloPos.z) - 0.1, siloPos.z, rng(402));
+  // Corps de ferme en pierre
   const housePos = track.frame(s1 + 16, L(ROAD_HALF + 26));
   reserve(housePos.x, housePos.z, 14);
-  const house = [box(8, 3.6, 6.5, '#f6ead2'), prism(8, 2.6, 6.5, '#f6ead2', 0, 3.6, 0), ...gableRoof(8, 2.6, 6.7, '#c8553f', 3.6, 0.5)];
-  house.push(box(1.1, 2.1, 0.1, '#5a3f2e', -2, 0, 3.27), box(0.6, 1.4, 0.6, '#c8553f', 2.2, 5.4, -1));
-  for (const x of [0.4, 2.4]) house.push(box(1.2, 1.2, 0.08, '#f4f1ea', x, 1.3, 3.25));
-  const houseM = batch.facing(housePos, side, heightAt(housePos.x, housePos.z) - 0.2);
-  batch.add(mergeGeometries(house), houseM);
-  for (const x of [0.4, 2.4]) batch.add(colored(new THREE.BoxGeometry(1, 1, 0.1).translate(x, 1.9, 3.28), '#ffffff'), houseM, true);
-
+  const yawH = faceYaw(housePos, side);
+  farmhouse(B, housePos.x, baseAt(heightAt, housePos.x, housePos.z, yawH, 9, 7), housePos.z, yawH, rng(403));
+  B.site('farmhouse', housePos.x, heightAt(housePos.x, housePos.z), housePos.z);
   // Tracteur
   const tPos = track.frame(sm - 14, L(ROAD_HALF + 50));
-  const tractor = [box(1.2, 0.9, 2.2, '#2f8f3a', 0, 0.55, 0.1), box(1.0, 0.6, 1.2, '#2f8f3a', 0, 1.4, -0.4), box(1.3, 0.08, 1.4, '#1f5f27', 0, 2.25, -0.4)];
-  for (const x of [-0.6, 0.6]) for (const z of [-1.0, 0.2]) tractor.push(box(0.06, 0.8, 0.06, '#1d1e22', x, 1.45, z));
-  tractor.push(cyl(0.06, 0.8, '#3a3a3a', 0.35, 1.45, 0.9, 6));
-  for (const s of [-1, 1]) {
-    tractor.push(colored(new THREE.CylinderGeometry(0.72, 0.72, 0.42, 18).rotateZ(Math.PI / 2).translate(s * 0.78, 0.72, -0.6), '#1d1e22'));
-    tractor.push(colored(new THREE.CylinderGeometry(0.38, 0.38, 0.6, 10).rotateZ(Math.PI / 2).translate(s * 0.78, 0.72, -0.6), '#e2b43c'));
-    tractor.push(colored(new THREE.CylinderGeometry(0.42, 0.42, 0.3, 16).rotateZ(Math.PI / 2).translate(s * 0.68, 0.42, 0.95), '#1d1e22'));
-  }
-  batch.add(mergeGeometries(tractor), batch.facing(tPos, side, heightAt(tPos.x, tPos.z), 1.1));
-
+  tractor(B, tPos.x, heightAt(tPos.x, tPos.z), tPos.z, faceYaw(tPos, side) + 1.1);
   // Bottes de foin près de la grange
   for (let k = 0; k < 6; k++) {
     const bp = track.frame(sm + 18 + (k % 3) * 1.7, L(ROAD_HALF + 48 + Math.floor(k / 3) * 1.5));
-    const bale = paint(new THREE.CylinderGeometry(0.75, 0.75, 1.2, 16).rotateZ(Math.PI / 2), (c, x, y, z) => c.set('#e2bd58').multiplyScalar(0.85 + 0.15 * Math.sin(Math.atan2(y, z) * 40)));
-    batch.add(bale, batch.at(bp.x, heightAt(bp.x, bp.z) + 0.72, bp.z, Math.atan2(bp.tx, bp.tz)));
+    hayBale(B, bp.x, heightAt(bp.x, bp.z) - 0.03, bp.z, Math.atan2(bp.tx, bp.tz));
   }
-  batch.build(group, true);
 
   return herd(group, track, heightAt, ['cow', 'cow', 'cow', 'cow', 'cow', 'sheep', 'sheep', 'sheep', 'sheep', 'sheep', 'sheep', 'sheep', 'horse', 'horse'], zone, rnd, cast);
 }
@@ -363,71 +279,62 @@ export function addFarm(group, ctx, cfg) {
 // Col des Chalets : village de chalets sur le plateau, église, fontaine, guirlandes, vaches à cloche
 // =====================================================================
 
-function chaletGeometry(k) {
-  const wood = ['#8b5a33', '#7a4b2a', '#9b6a3e'][k % 3];
-  const wall = ['#efe7d6', '#e8dcc6', '#d9d4c8'][k % 3];
-  const g = [];
-  g.push(box(7.2, 1.2, 6.2, '#9a968c', 0, -1.0, 0)); // soubassement en pierre
-  g.push(box(6.6, 2.7, 5.6, wall, 0, 0.2, 0));
-  g.push(box(6.9, 2.4, 5.9, wood, 0, 2.9, 0));
-  g.push(prism(6.9, 2.6, 5.9, wood, 0, 5.3, 0));
-  g.push(...gableRoof(6.9, 2.6, 5.9, '#4a3a30', 5.3, 0.9, 0.2));
-  g.push(box(6.9, 0.12, 1.1, wood, 0, 3.0, 3.45)); // balcon
-  g.push(box(6.9, 0.85, 0.1, wood, 0, 3.12, 3.95));
-  g.push(box(6.5, 0.28, 0.3, '#3f7d2e', 0, 3.97, 3.9));
-  for (let i = -3; i <= 3; i++) g.push(colored(new THREE.SphereGeometry(0.13, 6, 4).translate(i * 0.9, 4.3, 3.9), ['#e0384b', '#ff6fa0', '#ffd23f'][(i + 3 + k) % 3]));
-  g.push(box(1.0, 2.0, 0.1, '#5a3a24', -1.8, 0.2, 2.82));
-  g.push(box(0.7, 1.2, 0.7, '#9a968c', 2.2, 7.0, -1.0)); // cheminée
-  for (const x of [0.5, 2.2]) g.push(box(0.9, 0.9, 0.06, '#2a3a4a', x, 1.1, 2.82), box(0.3, 0.9, 0.06, '#2f6b3a', x - 0.62, 1.1, 2.84), box(0.3, 0.9, 0.06, '#2f6b3a', x + 0.62, 1.1, 2.84));
-  for (const x of [-2, 0, 2]) g.push(box(0.8, 0.9, 0.06, '#2a3a4a', x, 3.3, 2.97));
-  return mergeGeometries(g);
-}
-
-function churchGeometry() {
-  const g = [];
-  g.push(box(8, 6, 14, '#f5f2ea', 0, 0, -2));
-  g.push(prism(8, 4, 14, '#f5f2ea', 0, 6, -2));
-  g.push(...gableRoof(8, 4, 14.2, '#5c5f66', 6, 0.5).map((p) => p.translate(0, 0, -2)));
-  g.push(box(3.4, 15, 3.4, '#f5f2ea', 0, 0, 6.2));
-  g.push(colored(new THREE.ConeGeometry(2.6, 6.5, 8).translate(0, 18.25, 6.2), '#3f7d6b'));
-  g.push(colored(new THREE.CylinderGeometry(0.75, 0.75, 0.1, 20).rotateX(Math.PI / 2).translate(0, 12.5, 7.95), '#2a2c33'));
-  g.push(box(1.4, 3.0, 0.1, '#5a3a24', 0, 0, 7.92));
-  g.push(colored(new THREE.ConeGeometry(0.08, 1.2, 6).translate(0, 22, 6.2), '#c9a227'));
-  return mergeGeometries(g);
-}
-
 export function addAlpineVillage(group, ctx, cfg) {
   const { track, heightAt, reserve, rnd } = ctx;
   const s0 = cfg.from * track.length;
   const s1 = cfg.to * track.length;
   const f = {};
   let k = 0;
-  const batch = new Batch();
+  const B = ctx.bset;
+  const sm = (s0 + s1) / 2;
   for (let s = s0 + 6; s < s1 - 6; s += 21) {
     for (const side of [-1, 1]) {
       if ((k + (side > 0 ? 1 : 0)) % 5 === 4) {
         k++;
         continue; // quelques trous dans les rangées
       }
-      const lat = side * (ROAD_HALF + 9 + rnd() * 3);
-      track.frame(s + (side > 0 ? 9 : 0), lat, f);
-      const corners = [[-3.6, -3.1], [3.6, -3.1], [-3.6, 3.1], [3.6, 3.1]].map(([dx, dz]) => heightAt(f.x + dx, f.z + dz));
-      const base = Math.min(...corners);
-      batch.add(chaletGeometry(k), batch.facing(f, side > 0 ? 1 : -1, base + 1.0));
-      reserve(f.x, f.z, 11);
+      const lat = side * (ROAD_HALF + 10 + rnd() * 3);
+      const sc = s + (side > 0 ? 9 : 0);
+      // Place de la fontaine et café à droite, parvis de l'église à gauche
+      if ((side > 0 && sc > sm - 12 && sc < sm + 27) || (side < 0 && Math.abs(sc - sm) < 11)) {
+        k++;
+        continue;
+      }
+      track.frame(sc, lat, f);
+      const yaw = faceYaw(f, side);
+      chalet(B, f.x, baseAt(heightAt, f.x, f.z, yaw, 9, 9.5), f.z, yaw, rng(700 + k * 13));
+      reserve(f.x, f.z, 12);
       k++;
     }
   }
-  // Église et fontaine au milieu du village
-  const sm = (s0 + s1) / 2;
+  // Église, fontaine sur sa place pavée, café et sa terrasse au milieu du village
   const cp = track.frame(sm, -(ROAD_HALF + 24));
-  batch.add(churchGeometry(), batch.facing(cp, -1, heightAt(cp.x, cp.z) - 0.3));
-  reserve(cp.x, cp.z, 18);
+  const yawC = faceYaw(cp, -1);
+  church(B, cp.x, heightAt(cp.x, cp.z) - 0.3, cp.z, yawC, rng(801));
+  B.site('church', cp.x, heightAt(cp.x, cp.z), cp.z);
+  reserve(cp.x, cp.z, 20);
+  const pv = track.frame(sm, -(ROAD_HALF + 12));
+  ctx.bare(pv.x, pv.z, 2.5);
   const fp = track.frame(sm, ROAD_HALF + 8);
-  const fountain = [cyl(1.7, 0.6, '#a9a497', 0, 0, 0, 20), cyl(1.5, 0.05, '#4aa8d8', 0, 0.5, 0, 20), cyl(0.22, 1.5, '#a9a497', 0, 0.5, 0, 10), cyl(0.6, 0.18, '#a9a497', 0, 1.9, 0, 14)];
-  batch.add(mergeGeometries(fountain), batch.at(fp.x, heightAt(fp.x, fp.z) - 0.05, fp.z));
-  batch.build(group, true);
-  reserve(fp.x, fp.z, 5);
+  fountain(B, fp.x, heightAt(fp.x, fp.z) - 0.05, fp.z, rng(802));
+  reserve(fp.x, fp.z, 6.5);
+  ctx.bare(fp.x, fp.z, 5.5);
+  const kp = track.frame(sm + 17, ROAD_HALF + 12.5);
+  const yawK = faceYaw(kp, 1);
+  cafe(B, kp.x, baseAt(heightAt, kp.x, kp.z, yawK, 9, 8), kp.z, yawK, rng(803));
+  B.site('cafe', kp.x, heightAt(kp.x, kp.z), kp.z);
+  reserve(kp.x, kp.z, 12);
+  const tp = track.frame(sm + 17, ROAD_HALF + 5.5);
+  ctx.bare(tp.x, tp.z, 4.5);
+  // Lampadaires le long de la rue, en quinconce
+  let li = 0;
+  for (let s = s0 + 14; s < s1 - 8; s += 26, li++) {
+    const side = li % 2 ? 1 : -1;
+    if (side > 0 && Math.abs(s - sm) < 9) continue;
+    const lp = track.frame(s, side * (ROAD_HALF + 1.7));
+    streetLamp(B, lp.x, heightAt(lp.x, lp.z), lp.z, faceYaw(lp, side));
+    reserve(lp.x, lp.z, 1.2);
+  }
 
   // Guirlandes de fanions au-dessus de la route
   const flags = [];
@@ -579,7 +486,7 @@ export function addCoast(group, scene, ctx, cfg) {
   ctx.towels = towels; // bronzeurs posés dessus (people.js)
 
   // Poste de secours
-  const batch = new Batch();
+  const B = ctx.bset;
   const sandS = track.course.surfaces.find((sf) => sf[2] === 'sand');
   if (sandS) {
     const sMid = ((sandS[0] + sandS[1]) / 2) * track.length;
@@ -587,15 +494,12 @@ export function addCoast(group, scene, ctx, cfg) {
     const side = c.rz > 0 ? 1 : -1;
     const room = coastZ(cfg, c.x) - c.z;
     const p = track.frame(sMid, side * Math.min(room - 6, ROAD_HALF + 9));
-    const tower = [];
-    for (const x of [-0.9, 0.9]) for (const z of [-0.9, 0.9]) tower.push(box(0.15, 2.6, 0.15, '#e8e2d4', x, 0, z));
-    tower.push(box(2.4, 0.2, 2.4, '#e8e2d4', 0, 2.6, 0), box(1.9, 1.5, 1.9, '#e0384b', 0, 2.8, 0), box(2.5, 0.15, 2.5, '#ffffff', 0, 4.3, 0));
-    tower.push(cyl(0.04, 2.2, '#e8e2d4', 1.1, 4.4, 1.1, 6), box(0.8, 0.5, 0.03, '#ffd23f', 1.5, 6.0, 1.1));
-    batch.add(mergeGeometries(tower), batch.at(p.x, heightAt(p.x, p.z), p.z, Math.PI));
+    lifeguardTower(B, p.x, heightAt(p.x, p.z), p.z, Math.PI);
+    B.site('lifeguard', p.x, heightAt(p.x, p.z), p.z);
     reserve(p.x, p.z, 4);
   }
 
-  // Cabines de plage colorées côté terre, le long de la route de plage
+  // Cabines de plage rayées côté terre, le long de la route de plage
   const huts = [];
   for (let s = 0; s < track.length; s += 9) {
     if (track.surfaceAt(s) !== 'sand' || rnd() > 0.6) continue;
@@ -605,15 +509,11 @@ export function addCoast(group, scene, ctx, cfg) {
     if (!ctx.free(p.x, p.z, ROAD_HALF + 3)) continue;
     huts.push([p, land, huts.length]);
   }
-  const hutColors = ['#ff6b6b', '#4dabf7', '#ffd43b', '#69db7c', '#f783ac', '#ffa94d'];
   for (const [p, land, k] of huts) {
-    const color = hutColors[k % hutColors.length];
-    const hut = [box(1.8, 2.2, 1.8, color), prism(2.0, 0.9, 2.0, '#ffffff', 0, 2.2, 0), box(0.8, 1.6, 0.06, '#ffffff', 0, 0.1, 0.92)];
-    for (let i = -2; i <= 2; i++) hut.push(box(0.08, 2.2, 0.04, '#ffffff', i * 0.4, 0, 0.91));
-    batch.add(mergeGeometries(hut), batch.facing(p, land, heightAt(p.x, p.z)));
+    beachHut(B, p.x, heightAt(p.x, p.z), p.z, faceYaw(p, land), rng(900 + k), k);
+    if (k === 0) B.site('hut', p.x, heightAt(p.x, p.z), p.z);
     reserve(p.x, p.z, 2.5);
   }
-  batch.build(group, true);
 
   // Voiliers au large (instanciés, bercés par la houle)
   const hull = [colored(new THREE.BoxGeometry(1.4, 0.6, 4.2).translate(0, 0.1, 0), '#ffffff'), cyl(0.06, 6, '#d9d9d9', 0, 0.4, -0.3, 6)];
