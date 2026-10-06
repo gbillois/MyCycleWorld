@@ -15,6 +15,7 @@ import { Music } from './music.js';
 import { soundSpots, rowingSpots } from './spots.js';
 import { countdownStep, passEvent, musicIntensity } from './patterns.js';
 import { bindVolumeControls } from './ui.js';
+import { WeatherSounds } from './weather.js';
 
 // Effets disponibles par sfx(nom, options) : rendu, options du rendu, niveau, bus, réverbération.
 // duck : la musique se met un instant en retrait sous cet effet (quelques dB, retour en douceur).
@@ -52,6 +53,8 @@ export const SFX = {
   duck: { r: 'duck', gain: 0.6, pool: true, bus: 'ambience' },
   gull: { r: 'gull', gain: 0.55, pool: true, bus: 'ambience' },
   'church-bell': { r: 'church', o: { nominal: 440 }, gain: 0.8, wet: 0.5, bus: 'ambience' },
+  // Météo : tonnerre (near 0.7 = proche avec craquement, 0.3 = lointain), discret dans le mix calme
+  thunder: { r: 'thunder', o: (x) => ({ near: x.near > 0.5 ? 0.7 : 0.3 }), gain: 0.55, wet: 0.45, bus: 'ambience', pool: true },
 };
 
 const UI_SOUNDS = { focus: 'tick', confirm: 'confirm', back: 'back', open: 'open', close: 'close', slider: 'tick' };
@@ -93,6 +96,7 @@ class GameAudio {
     this.boats = new RivalBoats(e);
     this.hull = new HullSounds(e);
     this.music = new Music(e);
+    this.weather = new WeatherSounds(e, (n, o) => this.sfx(n, o));
     const b = e.bank;
     for (const k of PRELOAD) b.load('ui', { kind: k }, 3).catch(() => {});
     for (const n of ['beep', 'go', 'horn', 'pickup', 'turbo', 'banana', 'skid', 'bump', 'lap', 'final-lap', 'gear']) this.buffer(n, {}, 2);
@@ -171,7 +175,7 @@ class GameAudio {
 
   // --- Image par image ---
   // info : { dt, mode: 'bike'|'row'|'kayak', state: 'home'|'race'|'paused'|'end', camera, track, race, rowing,
-  //          gear, player: { speed } (kayak), scene }
+  //          gear, player: { speed } (kayak), scene, weather: { on, rain, wet, wind, head, gust, theme } }
   update(info) {
     const e = this.engine;
     if (!e.ctx || !this.ambience) return;
@@ -215,6 +219,7 @@ class GameAudio {
       this.lastGear = info.gear;
     }
     this.ambience.update(dt, { speed: this.speed || 0, state });
+    this.weather.update(dt, info.weather, this.speed || 0, state, mode);
     this.stats.updates++;
     this.stats.ms += performance.now() - t0;
   }

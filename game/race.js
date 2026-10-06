@@ -70,6 +70,8 @@ export class Race extends EventTarget {
     this.racers = [];
     this.bananas = [];
     this.bananaId = 0;
+    // Météo (game/weather.js) : { tailwindAt(s), crrFactor, steer } ; null = temps neutre (comportement d'origine).
+    this.weather = null;
 
     // Grille de départ : deux par rangée, le joueur en deuxième ligne.
     const order = [AI_PROFILES[4], AI_PROFILES[3], null, AI_PROFILES[2], AI_PROFILES[1], AI_PROFILES[0]];
@@ -155,11 +157,11 @@ export class Race extends EventTarget {
     this.autoPilot = !!input.auto;
     if (input.auto && !input.steer) {
       r.targetLateral = this.autoLine(r);
-      stepSteering(r, { targetHeading: headingTowards(r.lateral, r.targetLateral) }, r.v, this.track.curvatureAt(r.s), dt, LATERAL_LIMIT);
+      stepSteering(r, { targetHeading: headingTowards(r.lateral, r.targetLateral) }, r.v, this.track.curvatureAt(r.s), dt, LATERAL_LIMIT, this.weather?.steer);
       this.autoItem(r);
       return;
     }
-    stepSteering(r, { steer: input.steer, drift: input.drift }, r.v, this.track.curvatureAt(r.s), dt, LATERAL_LIMIT);
+    stepSteering(r, { steer: input.steer, drift: input.drift }, r.v, this.track.curvatureAt(r.s), dt, LATERAL_LIMIT, this.weather?.steer);
   }
 
   // Ligne choisie par le pilote automatique : boîte à objets à portée, sinon le milieu, en évitant les bananes.
@@ -216,7 +218,7 @@ export class Race extends EventTarget {
       r.targetLateral = (this.random() * 2 - 1) * (ROAD_HALF - 0.9);
       r.nextLaneChange = t + 4 + this.random() * 8;
     }
-    stepSteering(r, { targetHeading: headingTowards(r.lateral, r.targetLateral) }, r.v, this.track.curvatureAt(r.s), dt, LATERAL_LIMIT);
+    stepSteering(r, { targetHeading: headingTowards(r.lateral, r.targetLateral) }, r.v, this.track.curvatureAt(r.s), dt, LATERAL_LIMIT, this.weather?.steer);
 
     // Utilisation des objets avec un petit délai.
     if (r.item && r.useItemAt !== null && t >= r.useItemAt) this.useItem(r);
@@ -240,7 +242,10 @@ export class Race extends EventTarget {
     const surface = this.track.surfaceAt(r.s);
     const crr = offRoad ? GRASS_CRR : SURFACES[surface]?.crr ?? DEFAULTS.crr;
     r.surface = offRoad ? 'grass' : surface;
-    r.v = stepSpeed(r.v, power, grade, dt, { crr, cda: DEFAULTS.cda * r.draft });
+    // Météo : vent le long de la route (de dos > 0) et route mouillée (roulement un peu plus dur).
+    const w = this.weather;
+    r.tailwind = w ? w.tailwindAt(r.s) : 0;
+    r.v = stepSpeed(r.v, power, grade, dt, { crr: w ? crr * w.crrFactor : crr, cda: DEFAULTS.cda * r.draft, tailwind: r.tailwind });
     r.offRoad = offRoad;
     r.prevS = r.s;
     const lapBefore = Math.floor(r.s / L);

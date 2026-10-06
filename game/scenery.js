@@ -1559,7 +1559,8 @@ export function buildScenery(scene, track, { quality = 'high', renderer = null }
     scene.fog = null;
   };
 
-  return { group, sky, heightAt, lake, update, dispose, wet: shared.uWet, center: new THREE.Vector3(cx, (track.minY + track.maxY) / 2, cz) };
+  // wet / wind : uniforms partagés que la météo (weather.js) fait varier (route mouillée, vent dans les arbres).
+  return { group, sky, heightAt, lake, update, dispose, wet: shared.uWet, wind: shared.uWind, center: new THREE.Vector3(cx, (track.minY + track.maxY) / 2, cz) };
 }
 
 // Banderole de l'arche : deux faces (avant et arrière) fusionnées en une géométrie.

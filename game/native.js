@@ -165,6 +165,9 @@ export class NativeDevices extends EventTarget {
 
   // felt = pente ressentie (vitesses comprises), terrain = pente avant vitesses : l'appli applique les siennes
   // (et la convertit en niveau de résistance sur un elliptique ou un rameur).
+  // Météo : le protocole n'a pas de champ vent. Le jeu fond donc le vent dans `terrain` (pente équivalente
+  // à la traînée en plus ou en moins, voir windGrade dans src/core/weather.js) : rien à changer côté appli,
+  // et un vélo, un elliptique ou un rameur le ressentent tous. Le 3e argument (détail du vent) est ignoré ici.
   sendGrade(felt, terrain) {
     const value = Number.isFinite(terrain) ? terrain : felt;
     if (Number.isFinite(value)) this.post({ type: 'grade', value });

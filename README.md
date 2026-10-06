@@ -52,6 +52,18 @@ Options communes de `sfx(nom, options)` : `gain`, `rate`, `pan`, `pos: { x, y, z
 
 Les montres Garmin récentes (Forerunner 245, 255, 265, 955…) peuvent diffuser la fréquence cardiaque du poignet en Bluetooth avec le service cardio standard : le jeu les voit comme une ceinture cardio. Sur la montre, activer « Diffuser la fréquence cardiaque » (menu Capteurs ou Fréquence cardiaque au poignet, ou le raccourci « Diffusion FC » des commandes ; pendant une activité : « Diffuser pendant l'activité »), puis connecter la montre comme ceinture cardio dans le jeu (web) ou dans Réglages de l'appli > Appareils (iOS). La diffusion n'accepte souvent qu'un appareil à la fois : fermer les autres applis qui s'y connectent. Les modèles plus anciens (Forerunner 235 et avant) diffusent seulement en ANT+, illisible par iOS et par le navigateur.
 
+## Météo
+
+**Options > Météo** : Aléatoire (par défaut), Toujours beau, Pluie, Vent ou Désactivée (enregistré dans `localStorage`, `mycycleworld.weather` ; `?weather=random|fair|rain|wind|off` et `?seed=` pour les tests). L'aperçu des circuits annonce le temps probable.
+
+- **Tirage** (`src/core/weather.js`, module pur testé dans `tests/weather.test.js`) : au départ, une graine tire le temps selon le climat du décor : prairie surtout belle (15 % d'averses, vent faible), montagne plus venteuse avec des rafales et des averses fréquentes (40 %), côte avec une brise de mer régulière qui souffle de la mer vers la terre. Le temps évolue pendant la course : averses qui arrivent (les nuages d'abord) puis s'arrêtent, rafales, vent qui tourne un peu.
+- **Vent** : sa composante le long de la route (tangente du tracé) change le long de la boucle. Dans le modèle de vitesse, la traînée se calcule sur la vitesse de l'air (`v − vent arrière`), aspiration comprise : le vent de dos aide, le vent de face freine. Le HUD affiche « Vent de face 18 km/h » ou « Vent de dos » avec une flèche, et la part du vent dans la pente ressentie (« terrain +2.0 % · vent +1.1 % »).
+- **Pluie** : la route se mouille vite et sèche lentement (flaques plus nombreuses, enrobé sombre et brillant), un peu plus de résistance au roulement (+12 % trempée) et moins d'adhérence dans les virages (inclinaison et réactivité réduites). Bannière « Il commence à pleuvoir : la route glisse ».
+- **Home trainer** : un vélo en mode simulation FTMS reçoit le vent dans le champ « vitesse du vent » de Set Indoor Bike Simulation (positif = de face ; le trainer calcule la traînée) et la pente sans le vent. Un elliptique ou un rameur pilotés en résistance, et l'appli iOS (le protocole du pont n'a pas de champ vent, rien à changer côté appli), reçoivent la pente équivalente au vent ajoutée à la pente du terrain.
+- **Rendu** (`game/weather.js`) : ciel qui se couvre, nuages poussés par le vent, brume et lumière plus ternes, arbres et herbe plus agités par vent fort, pluie autour de la caméra (une géométrie, traînées animées dans le shader), ronds de gouttes sur la route et dans les flaques, gerbes derrière les roues ; trois appels de dessin au plus et seulement sous la pluie. Graphisme simple : pluie réduite, ciel et brume assombris.
+- **Son** (`game/audio/weather.js`) : pluie sur les feuilles et sur la route, grondement des fortes averses, vent selon sa force (plus fort de face), tonnerre rare sous forte pluie, chuintement des pneus sur route mouillée.
+- **Aviron** : vent seulement (lac abrité), effet doux sur la vitesse des bateaux (± 1,2 % par m/s). **Kayak** : pas de météo (la rivière a déjà son courant et ses rapides).
+
 ## Développer
 
 Aucun build. Servir le dossier en local (le Bluetooth exige https ou localhost) :

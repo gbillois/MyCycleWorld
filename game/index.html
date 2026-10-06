@@ -194,6 +194,17 @@
             </div>
             <span class="opt-hint">Automatique : le vélo suit la route, attrape les boîtes, évite les bananes et utilise les objets tout seul (machines sans boutons). ← → reprennent la main à tout moment. « Selon le matériel » l'active sur elliptique et rameur, et sur une machine Technogym ou Bluetooth standard sans manette Zwift.</span>
           </div>
+          <div class="opt-row">
+            <span class="opt-label">Météo</span>
+            <div class="seg seg-wrap" role="group" aria-label="Météo">
+              <button type="button" class="seg-btn" data-weather="random">Aléatoire</button>
+              <button type="button" class="seg-btn" data-weather="fair">Toujours beau</button>
+              <button type="button" class="seg-btn" data-weather="rain">Pluie</button>
+              <button type="button" class="seg-btn" data-weather="wind">Vent</button>
+              <button type="button" class="seg-btn" data-weather="off">Désactivée</button>
+            </div>
+            <span class="opt-hint">Aléatoire : chaque course tire son temps selon le décor (averses et rafales en montagne, brise de mer sur la côte, plutôt beau en prairie). Le vent de dos aide, le vent de face freine, et ton home trainer le ressent ; la pluie mouille la route (flaques, moins d'adhérence). Désactivée : ni vent ni pluie.</span>
+          </div>
         </div>
         <h3 class="sec-title">Son</h3>
         <div class="options sound-options">
@@ -342,6 +353,11 @@
     </div>
     <div class="hud-map hud-card"><canvas id="minimap" class="minimap" aria-label="Mini-carte du circuit"></canvas></div>
     <div class="hud-effects" id="hEffects"></div>
+    <div class="hud-weather hud-card" id="hWeather" hidden>
+      <span class="wx-sky" id="hWxSky" aria-hidden="true">☀️</span>
+      <span class="wx-rain" id="hWxRainBox" title="Pluie"><i id="hWxRain"></i></span>
+      <span class="wx-wind" id="hWxWind" data-k="calm"><svg class="wx-arrow" id="hWxArrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5 19 11.5h-4.6V21.5H9.6V11.5H5z"/></svg><span id="hWxText">Vent calme</span></span>
+    </div>
     <div class="hud-dock">
       <div class="hud-hint" id="hHint"></div>
       <div class="hud-bottom">

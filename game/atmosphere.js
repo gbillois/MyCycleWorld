@@ -182,6 +182,10 @@ export function makeSkyDome(mood, quality = 'high') {
       uTime: { value: 0 },
       uCover: { value: mood.clouds },
       uCirrus: { value: mood.cirrus },
+      // Météo (game/weather.js) : décalage des nuages poussés par le vent, ciel couvert qui assombrit
+      // les nuages et voile le soleil. Valeurs neutres par défaut : ciel d'origine.
+      uCloudOff: { value: new THREE.Vector2() },
+      uShade: { value: 0 },
     },
     defines: { CLOUD_OCTAVES: octaves },
     vertexShader: /* glsl */ `
@@ -195,7 +199,8 @@ export function makeSkyDome(mood, quality = 'high') {
     fragmentShader: /* glsl */ `
       ${SKY_GLSL}
       uniform sampler2D uNoise;
-      uniform float uTime, uCover, uCirrus;
+      uniform float uTime, uCover, uCirrus, uShade;
+      uniform vec2 uCloudOff;
       varying vec3 vDir;
       void main() {
         vec3 d = normalize( vDir );
@@ -204,7 +209,7 @@ export function makeSkyDome(mood, quality = 'high') {
         if ( d.y > 0.0 ) {
           // Couche de cumulus : projection sur un plan, deux échelles de bruit, éclairage vers le soleil.
           vec2 p = d.xz / ( d.y + 0.06 );
-          vec2 wind = vec2( uTime * 0.0016, uTime * 0.0006 );
+          vec2 wind = vec2( uTime * 0.0016, uTime * 0.0006 ) + uCloudOff;
           float n = texture2D( uNoise, p * 0.075 + wind ).r;
           #if CLOUD_OCTAVES > 1
             n = n * 0.72 + texture2D( uNoise, p * 0.37 - wind * 1.7 ).g * 0.28;
@@ -220,7 +225,8 @@ export function makeSkyDome(mood, quality = 'high') {
           float shade = clamp( 0.5 + ( n - n2 ) * 4.0, 0.0, 1.0 );
           vec3 lit = mix( vec3( 0.58, 0.64, 0.75 ), vec3( 1.12, 1.1, 1.05 ), shade );
           lit = mix( lit, uHorizon * 1.02, 1.0 - smoothstep( 0.02, 0.35, d.y ) ); // perspective aérienne
-          lit += uSunColor * pow( s, 12.0 ) * ( 1.0 - dens ) * 0.9; // liseré lumineux face au soleil
+          lit += uSunColor * pow( s, 12.0 ) * ( 1.0 - dens ) * 0.9 * ( 1.0 - uShade ); // liseré lumineux face au soleil
+          lit *= 1.0 - uShade * 0.5; // ciel couvert : nuages gris et épais
           float fade = smoothstep( 0.015, 0.16, d.y );
           // Cirrus : voiles étirés très haut.
           vec2 pc = d.xz / ( d.y + 0.2 );
@@ -230,7 +236,7 @@ export function makeSkyDome(mood, quality = 'high') {
           col = mix( col, lit, dens * fade * 0.95 );
         }
         // Disque du soleil (HDR : le halo lumineux et les reflets de lentille s'en servent).
-        col += uSunColor * smoothstep( 0.99965, 0.99985, s ) * 22.0;
+        col += uSunColor * smoothstep( 0.99965, 0.99985, s ) * 22.0 * max( 0.0, 1.0 - uShade * 1.25 );
         gl_FragColor = vec4( col, 1.0 );
         #include <tonemapping_fragment>
         #include <colorspace_fragment>

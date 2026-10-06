@@ -431,7 +431,8 @@ test('effets : bip du compte à rebours à 660 Hz, corne grave et riche, porte d
 const relBand = (buf, sr, f0, f1) => 10 * Math.log10(bandEnergy(buf, sr, f0, f1, 24) / bandEnergy(buf, sr, 200, 2000, 24));
 
 test('qualité : chaque effet commence et finit en douceur, sans composante continue', async () => {
-  const names = Object.keys(RENDERERS).filter((n) => !['crowd', 'applause', 'impulse', 'noise', 'water', 'lapping', 'insects', 'crunch'].includes(n));
+  // Les nappes jouées en boucle (eau, pluie…) se raccordent sans fondu : elles sont exclues.
+  const names = Object.keys(RENDERERS).filter((n) => !['crowd', 'applause', 'impulse', 'noise', 'water', 'lapping', 'insects', 'crunch', 'rain'].includes(n));
   for (const name of names) {
     const opts = name === 'drum' ? { kind: 'snare' } : name === 'note' ? { instrument: 'synth', midi: 64 } : name === 'ui' ? { kind: 'tick' } : name === 'song' ? { species: 'robin' } : name === 'church' ? { nominal: 440, dur: 3 } : {};
     const { channels } = await renderSound(name, SR, 3, opts);
