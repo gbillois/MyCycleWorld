@@ -1,4 +1,5 @@
 // Ceinture cardio (Heart Rate Service standard 0x180D).
+import { HEART_RATE_NAME_PREFIXES } from '../core/hardware.js';
 import { hex } from './bytes.js';
 import {
   SERVICES,
@@ -43,8 +44,9 @@ export class HeartRateMonitor extends EventTarget {
   async connect() {
     info(SRC, 'Ouverture du sélecteur Bluetooth (ceinture cardio)...');
     this.device = await this.requestDevice({
-      filters: [{ services: [SERVICES.HR] }],
-      optionalServices: [SERVICES.BATTERY, SERVICES.DIS],
+      // Service cardio, ou nom connu (une montre Garmin en diffusion FC ne l'annonce pas toujours).
+      filters: [{ services: [SERVICES.HR] }, ...HEART_RATE_NAME_PREFIXES.map((namePrefix) => ({ namePrefix }))],
+      optionalServices: [SERVICES.HR, SERVICES.BATTERY, SERVICES.DIS],
     });
     info(SRC, `Appareil choisi : "${this.device.name || '(sans nom)'}"`);
     this.device.addEventListener('gattserverdisconnected', () => {

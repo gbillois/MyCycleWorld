@@ -329,6 +329,7 @@ function setupRace() {
 
 function show(id) {
   for (const s of ['loading', 'home', 'pause', 'end']) $(s).hidden = s !== id;
+  $('gamePause').hidden = state !== 'race' || id !== null;
   const racing = state === 'race' || state === 'paused' || state === 'end';
   hud.show(racing && mode === 'bike');
   $('rowHud').hidden = !(racing && mode === 'row');
@@ -1286,6 +1287,31 @@ function updateSim(dt) {
     sim.cadence = Math.max(0, sim.cadence - SIM.cadenceFall * dt);
   }
 }
+
+// Bouton Pause à l'écran (même effet que Échap ou le bouton B de la manette).
+$('gamePause').addEventListener('click', (e) => {
+  e.stopPropagation();
+  window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', key: 'Escape', bubbles: true }));
+  window.dispatchEvent(new KeyboardEvent('keyup', { code: 'Escape', key: 'Escape', bubbles: true }));
+});
+
+// iOS : pas de zoom au double tapotement ni au pincement (on tapote vite pour pédaler). Si un zoom a
+// quand même eu lieu, on réapplique la balise viewport pour revenir à l'échelle 1.
+for (const ev of ['gesturestart', 'gesturechange', 'dblclick']) document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
+let lastTouchEnd = 0;
+document.addEventListener('touchend', (e) => {
+  const now = performance.now();
+  if (now - lastTouchEnd < 350 && !e.target.closest?.('input, textarea, select')) e.preventDefault();
+  lastTouchEnd = now;
+}, { passive: false });
+window.visualViewport?.addEventListener('resize', () => {
+  if (window.visualViewport.scale <= 1.01) return;
+  const meta = document.querySelector('meta[name="viewport"]');
+  if (!meta) return;
+  const content = meta.content;
+  meta.content = `${content}, minimum-scale=1`;
+  requestAnimationFrame(() => (meta.content = content));
+});
 
 // Un tapotement n'importe où sur la scène (pas sur un bouton) = un tour de pédalier ou un coup d'aviron.
 const TAP_IGNORE = 'button, a, input, select, textarea, label, .tc, .side-panel, .screen, [data-no-tap]';

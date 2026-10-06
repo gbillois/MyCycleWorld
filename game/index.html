@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="theme-color" content="#0a0e1c">
   <title>MyCycleWorld · Course</title>
   <meta name="description" content="Prototype jouable : course façon kart sur ton vrai vélo et ton home trainer connecté.">
@@ -429,6 +429,8 @@
     </div>
   </div>
   <div id="kFlash" aria-hidden="true"></div>
+  <!-- Bouton Pause toujours visible en course (vélo, aviron, kayak ; souris et doigt) -->
+  <button class="game-pause" id="gamePause" hidden aria-label="Pause"><svg class="ico" aria-hidden="true"><use href="#i-pause"/></svg></button>
   <div id="banner" class="banner" aria-live="polite"></div>
 
   <section id="pause" class="screen dim" hidden>

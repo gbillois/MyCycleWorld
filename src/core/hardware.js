@@ -56,3 +56,11 @@ export function hardwareById(id) {
 export function looksTechnogym(name = '') {
   return TECHNOGYM_NAME_PREFIXES.some((p) => name.startsWith(p));
 }
+
+// Cardio : montres et ceintures qui n'annoncent pas toujours le service cardio avant la connexion
+// (montres Garmin en « diffusion FC », Polar, Wahoo TICKR, COROS, Suunto…). Valable dans tous les profils.
+export const HEART_RATE_NAME_PREFIXES = ['Forerunner', 'fenix', 'Fenix', 'FENIX', 'Venu', 'vivoactive', 'vívoactive', 'Epix', 'epix', 'Instinct', 'Enduro', 'Garmin', 'HRM', 'Polar', 'TICKR', 'Wahoo TICKR', 'COROS', 'Suunto', 'WHOOP', 'Scosche', 'RHYTHM', 'Coospo', 'CooSpo', 'Magene', 'XOSS', 'Decathlon'];
+
+export function looksHeartRate(name = '') {
+  return HEART_RATE_NAME_PREFIXES.some((p) => name.startsWith(p));
+}

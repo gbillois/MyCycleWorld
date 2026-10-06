@@ -72,6 +72,16 @@ enum HardwareProfile: String, CaseIterable, Identifiable, Codable {
         role == .trainer ? machineLabel : role.rawValue
     }
 
+    /// Montres et ceintures cardio qui n'annoncent pas toujours le service cardio avant la connexion
+    /// (montres Garmin en « diffusion FC », Polar, Wahoo TICKR, COROS, Suunto…). Mêmes noms que le web.
+    static let heartRateNamePrefixes = ["Forerunner", "fenix", "Fenix", "FENIX", "Venu", "vivoactive", "vívoactive", "Epix", "epix", "Instinct", "Enduro", "Garmin", "HRM", "Polar", "TICKR", "Wahoo TICKR", "COROS", "Suunto", "WHOOP", "Scosche", "RHYTHM", "Coospo", "CooSpo", "Magene", "XOSS", "Decathlon"]
+    /// Identifiants fabricant de montres et ceintures cardio : Garmin (0x0087), Polar (0x006B).
+    static let heartRateCompanyIDs: Set<UInt16> = [0x0087, 0x006B]
+
+    static func looksHeartRate(_ name: String) -> Bool {
+        heartRateNamePrefixes.contains { name.hasPrefix($0) }
+    }
+
     static func looksTechnogym(_ name: String) -> Bool {
         technogymNamePrefixes.contains { name.hasPrefix($0) }
     }
@@ -89,7 +99,9 @@ enum HardwareProfile: String, CaseIterable, Identifiable, Codable {
             || services.contains(where: { HardwareProfile.zwiftServices.contains($0) }) { return .controller }
         if services.contains(HardwareProfile.ftms) || services.contains(HardwareProfile.cyclingPower) { return .trainer }
         if self == .technogym && (company == HardwareProfile.technogymCompanyID || HardwareProfile.looksTechnogym(name)) { return .trainer }
-        if services.contains(HardwareProfile.heartRate) { return .heart }
+        // Cardio dans tous les profils : service annoncé, nom connu ou fabricant de montres et ceintures.
+        if services.contains(HardwareProfile.heartRate) || HardwareProfile.looksHeartRate(name)
+            || company.map({ HardwareProfile.heartRateCompanyIDs.contains($0) }) == true { return .heart }
         return nil
     }
 }

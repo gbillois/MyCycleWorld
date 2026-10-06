@@ -96,3 +96,10 @@ test('rameur : cadence de secours (moyenne, puis compteur de coups)', async () =
   [0, 2300, 4600, 6900].forEach((ms, i) => u.strokeRateFrom({ strokeCount: i }, ms));
   assert.ok(Math.abs(u.strokeRateFrom({ strokeCount: 3 }, 6900) - 26) < 1.5);
 });
+
+test('cardio : montres et ceintures reconnues par leur nom, dans tous les profils', async () => {
+  const { looksHeartRate } = await import('../src/core/hardware.js');
+  assert.ok(looksHeartRate('Forerunner 255'));
+  assert.ok(looksHeartRate('Polar H10 1234'));
+  assert.ok(!looksHeartRate('KICKR CORE'));
+});

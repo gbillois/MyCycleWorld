@@ -1492,3 +1492,19 @@ body.touch #kayakHud .k-challenge { left: calc(74px + var(--sl)); } /* à droite
 .pause-options .opt-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 6px 0; }
 .pause-options .opt-label { min-width: 110px; }
 .pause-options .vol { flex: 1; min-width: 160px; }
+
+/* Pas de zoom au double tapotement (tapoter pour pédaler, boutons tactiles) ni de sélection de texte en jeu */
+html, body { touch-action: manipulation; -webkit-text-size-adjust: 100%; }
+body.touch, body.touch #hud, body.touch #rowHud { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+
+/* Bouton Pause du jeu : sous la mini-carte, en haut à droite (le bouton tactile d'origine est remplacé) */
+.game-pause {
+  position: fixed; z-index: 30; top: calc(206px + var(--st)); right: calc(14px + var(--sr));
+  width: 52px; height: 52px; display: grid; place-items: center; font-size: 20px; color: #fff; cursor: pointer;
+  border-radius: 16px; border: 2px solid rgba(255, 255, 255, 0.35); background: rgba(12, 16, 30, 0.72);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+.game-pause:hover, .game-pause:focus-visible { border-color: #fff; background: rgba(255, 90, 31, 0.85); outline: none; }
+.game-pause[hidden] { display: none; }
+.tc.pause { display: none !important; }
+@media (max-width: 760px), (max-height: 560px) { .game-pause { top: calc(124px + var(--st)); width: 46px; height: 46px; } }

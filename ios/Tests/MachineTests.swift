@@ -237,6 +237,14 @@ final class HardwareProfileTests: XCTestCase {
         XCTAssertNil(ble.role(name: "MYCYCLING", services: [], manufacturer: []))
         XCTAssertNil(zwift.role(name: "TV", services: ["1812"], manufacturer: [0x6d, 0x02]))
         XCTAssertEqual(HardwareProfile.companyID([0x6d, 0x02]), 0x026D)
+        // Cardio dans tous les profils, même sans service annoncé (montre Garmin en diffusion FC).
+        for p in HardwareProfile.allCases {
+            XCTAssertEqual(p.role(name: "Forerunner 255", services: [], manufacturer: []), .heart)
+            XCTAssertEqual(p.role(name: "", services: [], manufacturer: [0x87, 0x00, 1]), .heart)
+            XCTAssertTrue(p.shows(.heart))
+        }
+        // Un trainer Garmin (Tacx) annonce FTMS : il reste un trainer.
+        XCTAssertEqual(tg.role(name: "Tacx Neo", services: ["1826"], manufacturer: [0x87, 0x00]), .trainer)
     }
 
     func testListFilterAndLabels() {

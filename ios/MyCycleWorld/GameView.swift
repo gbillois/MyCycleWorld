@@ -101,6 +101,11 @@ private struct GameWebView: UIViewRepresentable {
         web.scrollView.backgroundColor = .black
         web.scrollView.isScrollEnabled = false
         web.scrollView.bounces = false
+        // Pas de zoom : on tapote vite l'écran pour pédaler, un double tapotement ne doit jamais agrandir le jeu.
+        web.scrollView.minimumZoomScale = 1
+        web.scrollView.maximumZoomScale = 1
+        web.scrollView.bouncesZoom = false
+        web.scrollView.pinchGestureRecognizer?.isEnabled = false
         web.navigationDelegate = context.coordinator
         #if DEBUG
         web.isInspectable = true
