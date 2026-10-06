@@ -17,7 +17,8 @@ import { keepScreenOn } from '../src/core/wakelock.js';
 import { TouchControls, wantsTouch } from './touch.js';
 import { TitleMenu } from './menu.js';
 import { RowingRace, formatSplit, splitFromSpeed } from '../src/core/rowing.js';
-import { buildRowingWorld, Boat } from './rowing-scene.js';
+import { buildRowingWorld } from './rowing-scene.js';
+import { Boat } from './boat.js';
 import { HARDWARE_ORDER, hardwareById } from '../src/core/hardware.js';
 import { MACHINE_LABELS } from '../src/ble/trainer.js';
 import { onLog, logText, formatEntry } from '../src/ble/log.js';
@@ -221,7 +222,7 @@ function setupRace() {
   models = new Map();
   race = new Race(track, { laps: lapsFor(track.course) });
   for (const r of race.racers) {
-    const m = new Rider({ jersey: r.color, bike: r.bike, helmet: r.helmet, name: r.isPlayer ? '' : r.name });
+    const m = new Rider({ jersey: r.color, bike: r.bike, helmet: r.helmet, name: r.isPlayer ? '' : r.name, quality: QUALITY });
     if (m.blob) m.blob.visible = !SHADOWS; // la pastille d'ombre ne sert que sans ombres portées
     models.set(r, m);
     raceObjects.add(m.group);
@@ -1038,6 +1039,7 @@ function syncScene(dt) {
       m.setSteer(Math.max(-0.35, Math.min(0.35, Math.atan(omega / Math.max(r.v, 1.5)))));
     }
     m.group.rotation.set(pitch, yaw, roll, 'YXZ');
+    if (m.setMotion) m.setMotion(r.v, f.grade, r.power); // position aéro dans les descentes rapides
     m.setCrank(r.crank);
     m.spinWheels((r.v * dt) / 0.34);
     // Un adversaire collé à la caméra masquerait la route : on le cache, ainsi que son étiquette.
