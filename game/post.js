@@ -115,59 +115,17 @@ function cssVignette(canvas) {
   return el;
 }
 
-// Régulation de la résolution : 2 s au-dessus de 20 ms par image => on baisse ; longtemps fluide => on remonte.
-function makeGovernor(renderer, onChange, maxRatio, minRatio) {
-  const auto = !navigator.webdriver && !new URLSearchParams(location.search).has('fixedres');
-  let ratio = renderer.getPixelRatio();
-  let last = performance.now();
-  let acc = 0;
-  let n = 0;
-  let calm = 0;
-  let ceiling = maxRatio;
-  return () => {
-    if (!auto) return;
-    const now = performance.now();
-    const dt = now - last;
-    last = now;
-    if (dt > 250 || document.hidden) return; // onglet en pause, chargement : on ignore
-    acc += dt;
-    n++;
-    if (acc < 2000) return;
-    const avg = acc / n;
-    acc = 0;
-    n = 0;
-    if (avg > 21 && ratio > minRatio) {
-      // Trop lent : on baisse, et on ne remontera pas au-dessus de ce palier.
-      ceiling = Math.min(ceiling, ratio);
-      ratio = Math.max(minRatio, ratio * 0.85);
-      calm = 0;
-      onChange(ratio);
-    } else if (avg < 17.6) {
-      calm++;
-      if (calm >= 5 && ratio < ceiling - 0.01) {
-        ratio = Math.min(ceiling, ratio * 1.1);
-        calm = 0;
-        onChange(ratio);
-      }
-    } else calm = 0;
-  };
-}
-
 // Construit la chaîne d'effets. Renvoie { render(), setSize(w, h), dispose() } ou null (rendu direct).
 export async function createPost(renderer, scene, camera, quality) {
   if (quality === 'low') return null;
   installGrade();
   renderer.toneMapping = THREE.CustomToneMapping;
   renderer.toneMappingExposure = 1.0;
-  const maxRatio = renderer.getPixelRatio();
-  const minRatio = Math.min(maxRatio, quality === 'high' ? 1 : 0.75);
 
   if (quality !== 'high') {
     const vignette = cssVignette(renderer.domElement);
-    const governor = makeGovernor(renderer, (r) => renderer.setPixelRatio(r), maxRatio, minRatio);
     return {
       render() {
-        governor();
         renderer.render(scene, camera);
       },
       setSize() {},
@@ -196,15 +154,10 @@ export async function createPost(renderer, scene, camera, quality) {
     const camDir = new THREE.Vector3();
     const size = new THREE.Vector2();
     const t0 = performance.now();
-    const governor = makeGovernor(renderer, (r) => {
-      renderer.setPixelRatio(r);
-      composer.setPixelRatio(r);
-    }, maxRatio, minRatio);
     return {
       composer,
       bloom,
       render() {
-        governor();
         // Position du soleil à l'écran (pour les reflets de lentille).
         camera.getWorldDirection(camDir);
         const facing = camDir.dot(SUN_DIR);
@@ -216,7 +169,9 @@ export async function createPost(renderer, scene, camera, quality) {
         u.uTime.value = (performance.now() - t0) / 1000;
         composer.render();
       },
+      // La résolution est réglée par le régulateur de main.js (src/core/framerate.js) : on la suit.
       setSize(w, h) {
+        composer.setPixelRatio(renderer.getPixelRatio());
         composer.setSize(w, h);
       },
       dispose() {

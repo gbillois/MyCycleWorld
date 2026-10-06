@@ -169,7 +169,7 @@ resize();
 
 // Fluidité : 60 images/s au plus, résolution abaissée automatiquement si la machine peine (?fps=1 affiche le compteur).
 const governor = new FrameGovernor({
-  min: QUALITY === 'high' ? 0.5 : 0.6,
+  min: Math.min(1, 0.75 / BASE_RATIO), // jamais sous 0.75 pixel physique par pixel CSS
   onScale: (k) => {
     if (params.has('fixedres')) return; // captures d'écran et tests : résolution fixe
     renderer.setPixelRatio(BASE_RATIO * k);
