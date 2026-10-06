@@ -27,7 +27,7 @@ test('réglages : valeurs par défaut demandées', () => {
 });
 
 test('réglages : JSON abîmé, valeurs hors bornes, stockage indisponible', () => {
-  assert.deepEqual(normalizeSettings({ master: 140, music: -5, ambience: '35', sfx: 'abc', muted: 'oui' }), { master: 100, music: 0, ambience: 35, sfx: 80, ui: 60, muted: false });
+  assert.deepEqual(normalizeSettings({ master: 140, music: -5, ambience: '35', sfx: 'abc', muted: 'oui' }), { master: 100, music: 0, ambience: 35, sfx: 80, ui: 60, muted: false, windNoise: false });
   const st = memStorage();
   st.setItem(STORAGE_KEY, '{pas du json');
   assert.deepEqual(loadSettings(st), { ...DEFAULTS });
