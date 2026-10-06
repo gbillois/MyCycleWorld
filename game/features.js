@@ -1,9 +1,11 @@
 // Éléments de décor propres à chaque circuit (graphismes détaillés) :
 // ferme et animaux (Vallée Verte), village de chalets (Col des Chalets), plage, mer et passerelle (Côte des Dunes).
 // Chaque fonction réserve sa place (les arbres l'évitent) et renvoie éventuellement une fonction d'animation.
+// Les bâtiments fixes sont fusionnés (une instruction de dessin par lieu), les animaux sont instanciés.
 import * as THREE from 'three';
 import { ROAD_HALF } from './track.js';
 import { mergeGeometries, colored, paint, indexify } from './geom.js';
+import { makeWater } from './water.js';
 
 const smoothstep = (a, b, x) => {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
@@ -67,6 +69,36 @@ function shadowed(mesh, cast = true) {
   mesh.castShadow = cast;
   mesh.receiveShadow = true;
   return mesh;
+}
+
+// Lot de géométries fixes fusionnées en un seul maillage (même matière, couleurs dans les sommets).
+class Batch {
+  constructor() {
+    this.parts = [];
+    this.glass = [];
+    this.obj = new THREE.Object3D();
+  }
+  // Matrice d'une pièce posée au bord de la route, face à elle (comme placeFacingRoad).
+  facing(f, side, y, extraYaw = 0) {
+    placeFacingRoad(this.obj, f, side, y);
+    this.obj.rotation.y += extraYaw;
+    this.obj.updateMatrix();
+    return this.obj.matrix.clone();
+  }
+  at(x, y, z, yaw = 0) {
+    this.obj.position.set(x, y, z);
+    this.obj.rotation.set(0, yaw, 0);
+    this.obj.updateMatrix();
+    return this.obj.matrix.clone();
+  }
+  add(geo, matrix, glass = false) {
+    const g = (geo.index ? geo : indexify(geo)).applyMatrix4(matrix);
+    (glass ? this.glass : this.parts).push(g);
+  }
+  build(group, cast = true) {
+    if (this.parts.length) group.add(shadowed(new THREE.Mesh(mergeGeometries(this.parts), MAT), cast));
+    if (this.glass.length) group.add(shadowed(new THREE.Mesh(mergeGeometries(this.glass), GLASS), false));
+  }
 }
 
 // --- Clôture générique (piquets + 2 lisses) le long d'une liste de points ---
@@ -143,36 +175,66 @@ function horseGeometries() {
 }
 
 // Troupeau qui broute et se promène dans une zone (coordonnées le long de la route : s et décalage latéral).
+// Un maillage instancié par espèce pour les corps et un pour les têtes : quelques instructions de dessin.
 function herd(group, track, heightAt, kinds, zone, rnd, cast) {
   const geos = { cow: cowGeometries(false), brown: cowGeometries(true), sheep: sheepGeometries(), horse: horseGeometries() };
-  const animals = [];
+  const counts = {};
+  for (const k of kinds) counts[k] = (counts[k] || 0) + 1;
   const f = {};
-  for (const kind of kinds) {
+  // Sphère englobante de la zone (les animaux n'en sortent pas).
+  const mid = track.frame((zone.s0 + zone.s1) / 2, (zone.l0 + zone.l1) / 2);
+  const sphere = new THREE.Sphere(new THREE.Vector3(mid.x, heightAt(mid.x, mid.z), mid.z), Math.hypot(zone.s1 - zone.s0, zone.l1 - zone.l0) / 2 + 8);
+  const meshes = {};
+  for (const [kind, n] of Object.entries(counts)) {
     const g = geos[kind];
-    const a = new THREE.Group();
-    const body = shadowed(new THREE.Mesh(g.body, MAT), cast);
-    const head = shadowed(new THREE.Mesh(g.head, MAT), cast);
-    head.position.copy(g.neck);
-    a.add(body, head);
-    group.add(a);
-    const st = {
-      a, head,
-      s: zone.s0 + rnd() * (zone.s1 - zone.s0),
-      lat: zone.l0 + rnd() * (zone.l1 - zone.l0),
-      yaw: rnd() * Math.PI * 2,
-      target: null,
-      timer: rnd() * 6,
-      phase: rnd() * 10,
-      speed: kind === 'horse' ? 0.9 : kind === 'sheep' ? 0.45 : 0.35,
-    };
-    animals.push(st);
+    const body = shadowed(new THREE.InstancedMesh(g.body, MAT, n), cast);
+    const head = shadowed(new THREE.InstancedMesh(g.head, MAT, n), cast);
+    for (const m of [body, head]) {
+      m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      m.boundingSphere = sphere;
+      group.add(m);
+    }
+    meshes[kind] = { body, head, neck: g.neck, used: 0 };
   }
+  for (const [kind, g] of Object.entries(geos)) {
+    if (counts[kind]) continue;
+    g.body.dispose();
+    g.head.dispose();
+  }
+  const animals = kinds.map((kind) => ({
+    kind,
+    slot: meshes[kind].used++,
+    s: zone.s0 + rnd() * (zone.s1 - zone.s0),
+    lat: zone.l0 + rnd() * (zone.l1 - zone.l0),
+    yaw: rnd() * Math.PI * 2,
+    pitch: 0,
+    target: null,
+    timer: rnd() * 6,
+    phase: rnd() * 10,
+    speed: kind === 'horse' ? 0.9 : kind === 'sheep' ? 0.45 : 0.35,
+  }));
+  const m4 = new THREE.Matrix4();
+  const hm = new THREE.Matrix4();
+  const hw = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  const v = new THREE.Vector3();
+  const one = new THREE.Vector3(1, 1, 1);
   const place = (st) => {
+    const ms = meshes[st.kind];
     track.frame(st.s, st.lat, f);
-    st.a.position.set(f.x, heightAt(f.x, f.z), f.z);
-    st.a.rotation.y = Math.atan2(f.tx, f.tz) + st.yaw;
+    m4.compose(v.set(f.x, heightAt(f.x, f.z), f.z), q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, Math.atan2(f.tx, f.tz) + st.yaw), one);
+    ms.body.setMatrixAt(st.slot, m4);
+    hm.makeRotationX(st.pitch).setPosition(ms.neck);
+    ms.head.setMatrixAt(st.slot, hw.multiplyMatrices(m4, hm));
+  };
+  const flush = () => {
+    for (const ms of Object.values(meshes)) {
+      ms.body.instanceMatrix.needsUpdate = true;
+      ms.head.instanceMatrix.needsUpdate = true;
+    }
   };
   animals.forEach(place);
+  flush();
   return (dt, time) => {
     for (const st of animals) {
       st.timer -= dt;
@@ -192,19 +254,20 @@ function herd(group, track, heightAt, kinds, zone, rnd, cast) {
         if (d < 0.3) st.timer = 0;
         else {
           const want = Math.atan2(-dl, ds); // cap relatif à la route (+ = vers la gauche)
-          let diff = Math.atan2(Math.sin(want - st.yaw), Math.cos(want - st.yaw));
+          const diff = Math.atan2(Math.sin(want - st.yaw), Math.cos(want - st.yaw));
           st.yaw += Math.max(-1.2 * dt, Math.min(1.2 * dt, diff));
           if (Math.abs(diff) < 0.6) {
             st.s += Math.cos(st.yaw) * st.speed * dt;
             st.lat -= Math.sin(st.yaw) * st.speed * dt;
           }
         }
-        st.head.rotation.x = Math.sin(time * 6 + st.phase) * 0.05;
+        st.pitch = Math.sin(time * 6 + st.phase) * 0.05;
       } else {
-        st.head.rotation.x = 0.55 + Math.sin(time * 1.7 + st.phase) * 0.12; // tête baissée, broute
+        st.pitch = 0.55 + Math.sin(time * 1.7 + st.phase) * 0.12; // tête baissée, broute
       }
       place(st);
     }
+    flush();
   };
 }
 
@@ -241,6 +304,7 @@ export function addFarm(group, ctx, cfg) {
     reserve(f.x, f.z, 22);
   }
 
+  const batch = new Batch();
   // Grange rouge
   const barnPos = track.frame(sm, L(ROAD_HALF + 58));
   reserve(barnPos.x, barnPos.z, 26);
@@ -253,31 +317,24 @@ export function addFarm(group, ctx, cfg) {
   const xg = new THREE.BoxGeometry(0.22, 5.4, 0.1);
   barn.push(colored(xg.clone().rotateZ(0.72).translate(0, 2.3, 4.7), '#f4f1ea'), colored(xg.clone().rotateZ(-0.72).translate(0, 2.3, 4.7), '#f4f1ea'));
   barn.push(box(1.8, 1.6, 0.12, '#f4f1ea', 0, 7.0, 4.56), box(1.5, 1.3, 0.14, '#3a2a22', 0, 7.15, 4.6));
-  const barnMesh = shadowed(new THREE.Mesh(mergeGeometries(barn), MAT), true);
-  placeFacingRoad(barnMesh, barnPos, side, heightAt(barnPos.x, barnPos.z) - 0.2);
-  group.add(barnMesh);
+  barn.push(box(12.4, 0.5, 9.4, '#8e8a80', 0, -0.4, 0)); // soubassement
+  batch.add(mergeGeometries(barn), batch.facing(barnPos, side, heightAt(barnPos.x, barnPos.z) - 0.2));
 
   // Silo
   const siloPos = track.frame(sm + 12, L(ROAD_HALF + 66));
   const silo = [cyl(2, 11, '#c9d2db', 0, 0, 0, 20), colored(new THREE.SphereGeometry(2, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2).translate(0, 11, 0), '#9aa6b2')];
   for (const y of [2.5, 5.5, 8.5]) silo.push(colored(new THREE.TorusGeometry(2.03, 0.08, 6, 24).rotateX(Math.PI / 2).translate(0, y, 0), '#8e99a6'));
-  const siloMesh = shadowed(new THREE.Mesh(mergeGeometries(silo), MAT), true);
-  siloMesh.position.set(siloPos.x, heightAt(siloPos.x, siloPos.z) - 0.2, siloPos.z);
-  group.add(siloMesh);
+  batch.add(mergeGeometries(silo), batch.at(siloPos.x, heightAt(siloPos.x, siloPos.z) - 0.2, siloPos.z));
 
   // Maison de la ferme
   const housePos = track.frame(s1 + 16, L(ROAD_HALF + 26));
   reserve(housePos.x, housePos.z, 14);
   const house = [box(8, 3.6, 6.5, '#f6ead2'), prism(8, 2.6, 6.5, '#f6ead2', 0, 3.6, 0), ...gableRoof(8, 2.6, 6.7, '#c8553f', 3.6, 0.5)];
   house.push(box(1.1, 2.1, 0.1, '#5a3f2e', -2, 0, 3.27), box(0.6, 1.4, 0.6, '#c8553f', 2.2, 5.4, -1));
-  const houseMesh = shadowed(new THREE.Mesh(mergeGeometries(house), MAT), true);
-  placeFacingRoad(houseMesh, housePos, side, heightAt(housePos.x, housePos.z) - 0.2);
-  for (const x of [0.4, 2.4]) {
-    const win = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 0.1), GLASS);
-    win.position.set(x, 1.9, 3.28);
-    houseMesh.add(win);
-  }
-  group.add(houseMesh);
+  for (const x of [0.4, 2.4]) house.push(box(1.2, 1.2, 0.08, '#f4f1ea', x, 1.3, 3.25));
+  const houseM = batch.facing(housePos, side, heightAt(housePos.x, housePos.z) - 0.2);
+  batch.add(mergeGeometries(house), houseM);
+  for (const x of [0.4, 2.4]) batch.add(colored(new THREE.BoxGeometry(1, 1, 0.1).translate(x, 1.9, 3.28), '#ffffff'), houseM, true);
 
   // Tracteur
   const tPos = track.frame(sm - 14, L(ROAD_HALF + 50));
@@ -289,19 +346,15 @@ export function addFarm(group, ctx, cfg) {
     tractor.push(colored(new THREE.CylinderGeometry(0.38, 0.38, 0.6, 10).rotateZ(Math.PI / 2).translate(s * 0.78, 0.72, -0.6), '#e2b43c'));
     tractor.push(colored(new THREE.CylinderGeometry(0.42, 0.42, 0.3, 16).rotateZ(Math.PI / 2).translate(s * 0.68, 0.42, 0.95), '#1d1e22'));
   }
-  const tractorMesh = shadowed(new THREE.Mesh(mergeGeometries(tractor), MAT), true);
-  placeFacingRoad(tractorMesh, tPos, side, heightAt(tPos.x, tPos.z));
-  tractorMesh.rotation.y += 1.1;
-  group.add(tractorMesh);
+  batch.add(mergeGeometries(tractor), batch.facing(tPos, side, heightAt(tPos.x, tPos.z), 1.1));
 
   // Bottes de foin près de la grange
   for (let k = 0; k < 6; k++) {
     const bp = track.frame(sm + 18 + (k % 3) * 1.7, L(ROAD_HALF + 48 + Math.floor(k / 3) * 1.5));
-    const bale = shadowed(new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.75, 1.2, 16).rotateZ(Math.PI / 2), new THREE.MeshStandardMaterial({ color: '#e6c25c', roughness: 1 })), true);
-    bale.position.set(bp.x, heightAt(bp.x, bp.z) + 0.72, bp.z);
-    bale.rotation.y = Math.atan2(bp.tx, bp.tz);
-    group.add(bale);
+    const bale = paint(new THREE.CylinderGeometry(0.75, 0.75, 1.2, 16).rotateZ(Math.PI / 2), (c, x, y, z) => c.set('#e2bd58').multiplyScalar(0.85 + 0.15 * Math.sin(Math.atan2(y, z) * 40)));
+    batch.add(bale, batch.at(bp.x, heightAt(bp.x, bp.z) + 0.72, bp.z, Math.atan2(bp.tx, bp.tz)));
   }
+  batch.build(group, true);
 
   return herd(group, track, heightAt, ['cow', 'cow', 'cow', 'cow', 'cow', 'sheep', 'sheep', 'sheep', 'sheep', 'sheep', 'sheep', 'sheep', 'horse', 'horse'], zone, rnd, cast);
 }
@@ -344,11 +397,12 @@ function churchGeometry() {
 }
 
 export function addAlpineVillage(group, ctx, cfg) {
-  const { track, heightAt, reserve, rnd, cast } = ctx;
+  const { track, heightAt, reserve, rnd } = ctx;
   const s0 = cfg.from * track.length;
   const s1 = cfg.to * track.length;
   const f = {};
   let k = 0;
+  const batch = new Batch();
   for (let s = s0 + 6; s < s1 - 6; s += 21) {
     for (const side of [-1, 1]) {
       if ((k + (side > 0 ? 1 : 0)) % 5 === 4) {
@@ -359,9 +413,7 @@ export function addAlpineVillage(group, ctx, cfg) {
       track.frame(s + (side > 0 ? 9 : 0), lat, f);
       const corners = [[-3.6, -3.1], [3.6, -3.1], [-3.6, 3.1], [3.6, 3.1]].map(([dx, dz]) => heightAt(f.x + dx, f.z + dz));
       const base = Math.min(...corners);
-      const mesh = shadowed(new THREE.Mesh(chaletGeometry(k), MAT), cast || true);
-      placeFacingRoad(mesh, f, side > 0 ? 1 : -1, base + 1.0);
-      group.add(mesh);
+      batch.add(chaletGeometry(k), batch.facing(f, side > 0 ? 1 : -1, base + 1.0));
       reserve(f.x, f.z, 11);
       k++;
     }
@@ -369,15 +421,12 @@ export function addAlpineVillage(group, ctx, cfg) {
   // Église et fontaine au milieu du village
   const sm = (s0 + s1) / 2;
   const cp = track.frame(sm, -(ROAD_HALF + 24));
-  const church = shadowed(new THREE.Mesh(churchGeometry(), MAT), true);
-  placeFacingRoad(church, cp, -1, heightAt(cp.x, cp.z) - 0.3);
-  group.add(church);
+  batch.add(churchGeometry(), batch.facing(cp, -1, heightAt(cp.x, cp.z) - 0.3));
   reserve(cp.x, cp.z, 18);
   const fp = track.frame(sm, ROAD_HALF + 8);
   const fountain = [cyl(1.7, 0.6, '#a9a497', 0, 0, 0, 20), cyl(1.5, 0.05, '#4aa8d8', 0, 0.5, 0, 20), cyl(0.22, 1.5, '#a9a497', 0, 0.5, 0, 10), cyl(0.6, 0.18, '#a9a497', 0, 1.9, 0, 14)];
-  const fMesh = shadowed(new THREE.Mesh(mergeGeometries(fountain), MAT), true);
-  fMesh.position.set(fp.x, heightAt(fp.x, fp.z) - 0.05, fp.z);
-  group.add(fMesh);
+  batch.add(mergeGeometries(fountain), batch.at(fp.x, heightAt(fp.x, fp.z) - 0.05, fp.z));
+  batch.build(group, true);
   reserve(fp.x, fp.z, 5);
 
   // Guirlandes de fanions au-dessus de la route
@@ -431,25 +480,6 @@ export function coastZ(cfg, x) {
   return cfg.z + 6 * Math.sin(x * 0.013) + 4 * Math.sin(x * 0.031 + 1);
 }
 
-function palmGeometry() {
-  const parts = [];
-  const trunk = new THREE.CylinderGeometry(0.16, 0.26, 6, 8, 8).translate(0, 3, 0);
-  const p = trunk.attributes.position;
-  for (let i = 0; i < p.count; i++) p.setX(i, p.getX(i) + Math.pow(p.getY(i) / 6, 2) * 1.2);
-  trunk.computeVertexNormals();
-  parts.push(paint(trunk, (c, x, y) => c.copy(C('#8a6a45')).lerp(C('#b08d5e'), (Math.sin(y * 9) + 1) / 2 * 0.5)));
-  for (let k = 0; k < 8; k++) {
-    const a = (k / 8) * Math.PI * 2;
-    const frond = new THREE.ConeGeometry(0.42, 3.4, 4).scale(1, 1, 0.18).translate(0, 1.7, 0);
-    frond.rotateX(Math.PI / 2 - 0.55);
-    frond.rotateY(a);
-    frond.translate(1.2, 6, 0);
-    parts.push(paint(indexify(frond), (c, x, y) => c.copy(C('#2f7a35')).lerp(C('#7cc35a'), smoothstep(5, 6.4, y))));
-  }
-  parts.push(colored(new THREE.SphereGeometry(0.35, 8, 6).translate(1.2, 5.9, 0), '#6b4a2a'));
-  return mergeGeometries(parts);
-}
-
 function umbrellaGeometry() {
   const cone = new THREE.ConeGeometry(1.3, 0.5, 12, 1, true).translate(0, 2.3, 0);
   paint(cone, (c, x, y, z) => c.set(Math.floor(((Math.atan2(z, x) + Math.PI) / (Math.PI * 2)) * 12) % 2 ? '#ffffff' : '#bdbdbd'));
@@ -457,7 +487,7 @@ function umbrellaGeometry() {
 }
 
 export function addCoast(group, scene, ctx, cfg) {
-  const { track, heightAt, reserve, rnd, cast, seaY } = ctx;
+  const { track, heightAt, reserve, rnd, seaY } = ctx;
   const b = track.bounds;
   const cx = (b.minX + b.maxX) / 2;
   const m4 = new THREE.Matrix4();
@@ -465,51 +495,15 @@ export function addCoast(group, scene, ctx, cfg) {
   const v = new THREE.Vector3();
   const sc = new THREE.Vector3();
 
-  // Mer (couleur selon la profondeur) et écume le long du rivage
+  // Mer : shader d'eau (profondeur lue dans la carte du terrain, écume sur le rivage, houle)
   const sea = new THREE.PlaneGeometry(7000, 3200, 140, 64).rotateX(-Math.PI / 2);
-  const zMid = cfg.z + 1560;
-  sea.translate(cx, 0, zMid);
-  paint(sea, (c, x, y, z) => {
-    const d = z - coastZ(cfg, x);
-    c.copy(C('#43d0d8')).lerp(C('#1f9bc4'), smoothstep(4, 40, d)).lerp(C('#13598f'), smoothstep(60, 600, d));
+  sea.translate(cx, 0, cfg.z + 1560);
+  const seaMesh = makeWater(sea, {
+    mood: ctx.mood, maps: ctx.maps, waterY: seaY, shared: ctx.shared, chop: 0.36, swell: 1, foam: 1,
+    shallow: '#3cc2c6', deep: '#0d4f80', sand: '#d8c493', depthScale: 0.22,
   });
-  const seaMesh = new THREE.Mesh(sea, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.1, metalness: 0.05, transparent: true, opacity: 0.93 }));
   seaMesh.position.y = seaY;
-  seaMesh.receiveShadow = true;
   group.add(seaMesh);
-  const foamTex = (() => {
-    const cv = document.createElement('canvas');
-    cv.width = 16;
-    cv.height = 128;
-    const g = cv.getContext('2d');
-    for (let y = 0; y < 128; y++) {
-      const a = (Math.sin(y / 128 * Math.PI * 6) + 1) / 2;
-      g.fillStyle = `rgba(255,255,255,${0.25 + a * 0.55})`;
-      g.fillRect(0, y, 16, 1);
-    }
-    const t = new THREE.CanvasTexture(cv);
-    t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    return t;
-  })();
-  const foamPos = [];
-  const foamUv = [];
-  const foamIdx = [];
-  let n = 0;
-  for (let x = b.minX - 900; x <= b.maxX + 900; x += 5) {
-    const z = coastZ(cfg, x);
-    foamPos.push(x, seaY + 0.05, z - 1.5, x, seaY + 0.05, z + 2.5);
-    foamUv.push(0, x / 20, 1, x / 20);
-    if (n) foamIdx.push((n - 1) * 2, n * 2, (n - 1) * 2 + 1, (n - 1) * 2 + 1, n * 2, n * 2 + 1);
-    n++;
-  }
-  const foamGeo = new THREE.BufferGeometry();
-  foamGeo.setAttribute('position', new THREE.Float32BufferAttribute(foamPos, 3));
-  foamGeo.setAttribute('uv', new THREE.Float32BufferAttribute(foamUv, 2));
-  foamGeo.setIndex(foamIdx);
-  foamGeo.computeVertexNormals();
-  const foam = new THREE.Mesh(foamGeo, new THREE.MeshBasicMaterial({ map: foamTex, transparent: true, depthWrite: false, side: THREE.DoubleSide }));
-  foam.renderOrder = 2;
-  group.add(foam);
 
   // Passerelle en bois sur pilotis : garde-corps et pieux sur les tronçons « boardwalk »
   const posts = [];
@@ -550,9 +544,8 @@ export function addCoast(group, scene, ctx, cfg) {
     if (y < seaY + 0.6) continue;
     palms.push([p.x, y, p.z, 0.8 + rnd() * 0.5, rnd()]);
   }
-  const palmMesh = new THREE.InstancedMesh(palmGeometry(), MAT, palms.length);
-  palms.forEach(([x, y, z, s, k], i) => palmMesh.setMatrixAt(i, m4.compose(v.set(x, y - 0.1, z), q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, k * 6.28), sc.setScalar(s))));
-  group.add(shadowed(palmMesh, cast));
+  // Les palmiers rejoignent la forêt commune (niveaux de détail, vent).
+  ctx.palms.push(...palms);
 
   // Plage : parasols, serviettes, poste de secours (entre la route de plage et la mer)
   const umbrellas = [];
@@ -585,6 +578,7 @@ export function addCoast(group, scene, ctx, cfg) {
   group.add(shadowed(umbMesh, true), shadowed(towelMesh, false));
 
   // Poste de secours
+  const batch = new Batch();
   const sandS = track.course.surfaces.find((sf) => sf[2] === 'sand');
   if (sandS) {
     const sMid = ((sandS[0] + sandS[1]) / 2) * track.length;
@@ -596,10 +590,7 @@ export function addCoast(group, scene, ctx, cfg) {
     for (const x of [-0.9, 0.9]) for (const z of [-0.9, 0.9]) tower.push(box(0.15, 2.6, 0.15, '#e8e2d4', x, 0, z));
     tower.push(box(2.4, 0.2, 2.4, '#e8e2d4', 0, 2.6, 0), box(1.9, 1.5, 1.9, '#e0384b', 0, 2.8, 0), box(2.5, 0.15, 2.5, '#ffffff', 0, 4.3, 0));
     tower.push(cyl(0.04, 2.2, '#e8e2d4', 1.1, 4.4, 1.1, 6), box(0.8, 0.5, 0.03, '#ffd23f', 1.5, 6.0, 1.1));
-    const tMesh = shadowed(new THREE.Mesh(mergeGeometries(tower), MAT), true);
-    tMesh.position.set(p.x, heightAt(p.x, p.z), p.z);
-    tMesh.rotation.y = Math.PI;
-    group.add(tMesh);
+    batch.add(mergeGeometries(tower), batch.at(p.x, heightAt(p.x, p.z), p.z, Math.PI));
     reserve(p.x, p.z, 4);
   }
 
@@ -618,36 +609,37 @@ export function addCoast(group, scene, ctx, cfg) {
     const color = hutColors[k % hutColors.length];
     const hut = [box(1.8, 2.2, 1.8, color), prism(2.0, 0.9, 2.0, '#ffffff', 0, 2.2, 0), box(0.8, 1.6, 0.06, '#ffffff', 0, 0.1, 0.92)];
     for (let i = -2; i <= 2; i++) hut.push(box(0.08, 2.2, 0.04, '#ffffff', i * 0.4, 0, 0.91));
-    const m = shadowed(new THREE.Mesh(mergeGeometries(hut), MAT), true);
-    placeFacingRoad(m, p, land, heightAt(p.x, p.z));
-    group.add(m);
+    batch.add(mergeGeometries(hut), batch.facing(p, land, heightAt(p.x, p.z)));
     reserve(p.x, p.z, 2.5);
   }
+  batch.build(group, true);
 
-  // Voiliers au large
+  // Voiliers au large (instanciés, bercés par la houle)
+  const hull = [colored(new THREE.BoxGeometry(1.4, 0.6, 4.2).translate(0, 0.1, 0), '#ffffff'), cyl(0.06, 6, '#d9d9d9', 0, 0.4, -0.3, 6)];
+  const sail = new THREE.BufferGeometry();
+  sail.setAttribute('position', new THREE.Float32BufferAttribute([0, 0.9, -0.2, 0, 6.2, -0.3, 0, 0.9, -2.4], 3));
+  sail.computeVertexNormals();
+  hull.push(colored(indexify(sail), '#ffffff'));
+  const boatMesh = new THREE.InstancedMesh(mergeGeometries(hull), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, side: THREE.DoubleSide }), 6);
+  boatMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  boatMesh.frustumCulled = false;
   const boats = [];
+  const tintB = ['#ffffff', '#fff3c4', '#ffd6cc'].map(C);
   for (let i = 0; i < 6; i++) {
     const x = b.minX + rnd() * (b.maxX - b.minX);
     const z = coastZ(cfg, x) + 120 + rnd() * 420;
-    const hull = [colored(new THREE.BoxGeometry(1.4, 0.6, 4.2).translate(0, 0.1, 0), '#ffffff'), cyl(0.06, 6, '#d9d9d9', 0, 0.4, -0.3, 6)];
-    const sail = new THREE.BufferGeometry();
-    sail.setAttribute('position', new THREE.Float32BufferAttribute([0, 0.9, -0.2, 0, 6.2, -0.3, 0, 0.9, -2.4], 3));
-    sail.computeVertexNormals();
-    hull.push(colored(indexify(sail), ['#ffffff', '#ffd23f', '#ff6b6b'][i % 3]));
-    const m = new THREE.Mesh(mergeGeometries(hull), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, side: THREE.DoubleSide }));
-    m.position.set(x, seaY, z);
-    m.rotation.y = rnd() * Math.PI * 2;
-    group.add(m);
-    boats.push({ m, phase: rnd() * 10, drift: (rnd() - 0.5) * 0.6 });
+    boats.push({ x, z, yaw: rnd() * Math.PI * 2, phase: rnd() * 10, drift: (rnd() - 0.5) * 0.6 });
+    boatMesh.setColorAt(i, tintB[i % 3]);
   }
+  group.add(boatMesh);
+  const be = new THREE.Euler();
 
   return (dt, t) => {
-    foamTex.offset.y = Math.sin(t * 0.5) * 0.08;
-    foamTex.offset.x = (t * 0.02) % 1;
-    for (const bt of boats) {
-      bt.m.position.y = seaY + Math.sin(t * 0.9 + bt.phase) * 0.12;
-      bt.m.rotation.z = Math.sin(t * 0.7 + bt.phase) * 0.05;
-      bt.m.position.x += bt.drift * dt;
-    }
+    boats.forEach((bt, i) => {
+      bt.x += bt.drift * dt;
+      be.set(0, bt.yaw, Math.sin(t * 0.7 + bt.phase) * 0.05, 'YXZ');
+      boatMesh.setMatrixAt(i, m4.compose(v.set(bt.x, seaY + Math.sin(t * 0.9 + bt.phase) * 0.12, bt.z), q.setFromEuler(be), sc.set(1, 1, 1)));
+    });
+    boatMesh.instanceMatrix.needsUpdate = true;
   };
 }

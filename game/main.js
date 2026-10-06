@@ -1,7 +1,9 @@
 // MyCycleWorld, prototype jouable : scène 3D, boucle de jeu, écrans, clavier/manettes, pente au trainer.
 import * as THREE from 'three';
 import { Track, buildScenery, minimapPath } from './track.js';
-import { buildScenery as buildDetailedScenery, SUN_DIR, disposeTree } from './scenery.js';
+import { buildScenery as buildDetailedScenery, disposeTree } from './scenery.js';
+import { followSun } from './atmosphere.js';
+import { createPost } from './post.js';
 import { COURSE_ORDER, courseById, SURFACES } from './courses.js';
 import { elevationGain } from '../src/core/profile.js';
 import { RiderModel, createItemBox, createBanana } from './models.js';
@@ -108,7 +110,8 @@ if (DETAILED) {
     sun.castShadow = true;
     const size = QUALITY === 'high' ? 2048 : 1024;
     sun.shadow.mapSize.set(size, size);
-    Object.assign(sun.shadow.camera, { left: -45, right: 45, top: 45, bottom: -45, near: 1, far: 420 });
+    const box = QUALITY === 'high' ? 36 : 30; // zone serrée, centrée devant la caméra (followSun)
+    Object.assign(sun.shadow.camera, { left: -box, right: box, top: box, bottom: -box, near: 1, far: 420 });
     sun.shadow.bias = -0.0004;
     sun.shadow.normalBias = 0.03;
   }
@@ -147,27 +150,8 @@ const Rider = DETAILED ? DetailedRider : RiderModel;
 const hud = new Hud(track);
 const menu = new TitleMenu($('home'));
 
-// Halo lumineux léger sur ordinateur (post-traitement chargé seulement si besoin).
-let post = null;
-if (DETAILED && QUALITY === 'high') {
-  try {
-    const [{ EffectComposer }, { RenderPass }, { UnrealBloomPass }, { OutputPass }] = await Promise.all([
-      import('three/addons/postprocessing/EffectComposer.js'),
-      import('three/addons/postprocessing/RenderPass.js'),
-      import('three/addons/postprocessing/UnrealBloomPass.js'),
-      import('three/addons/postprocessing/OutputPass.js'),
-    ]);
-    const target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 });
-    const composer = new EffectComposer(renderer, target);
-    composer.addPass(new RenderPass(scene, camera));
-    const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.22, 0.6, 0.92);
-    composer.addPass(bloom);
-    composer.addPass(new OutputPass());
-    post = { composer, bloom };
-  } catch (e) {
-    console.warn('Post-traitement indisponible, rendu direct.', e);
-  }
-}
+// Post-traitement des graphismes détaillés (voir post.js) : halo, étalonnage filmique, vignettage.
+const post = DETAILED ? await createPost(renderer, scene, camera, QUALITY) : null;
 
 // Écran tactile : boutons à l'écran (ils envoient les mêmes touches que le clavier).
 const TOUCH = wantsTouch(params);
@@ -176,7 +160,7 @@ if (TOUCH) document.body.classList.add('touch');
 
 function resize() {
   renderer.setSize(window.innerWidth, window.innerHeight, false);
-  if (post) post.composer.setSize(window.innerWidth, window.innerHeight);
+  if (post) post.setSize(window.innerWidth, window.innerHeight);
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
 }
@@ -706,10 +690,7 @@ function frameRowing(dt, nowMs) {
     camera.fov = 62;
     camera.updateProjectionMatrix();
   }
-  if (sun) {
-    sun.target.position.set(r.player.laneX, 0, r.player.s);
-    sun.position.copy(sun.target.position).addScaledVector(SUN_DIR, 220);
-  }
+  if (sun) followSun(sun, tmpVec.set(r.player.laneX, 0, r.player.s), camera);
   rowing.world.update(dt, camera);
   if (nowMs - (frameRowing.last || 0) > 100) {
     frameRowing.last = nowMs;
@@ -1259,9 +1240,9 @@ function updateSun() {
   if (!sun) return;
   const p = race.player;
   const f = track.frame(p.s, p.lateral, tmpFrame);
-  sun.target.position.set(f.x, f.y, f.z);
-  sun.position.copy(sun.target.position).addScaledVector(SUN_DIR, 220);
+  followSun(sun, tmpVec.set(f.x, f.y, f.z), camera);
 }
+const tmpVec = new THREE.Vector3();
 
 let lastFrame = performance.now();
 function frame(nowMs) {
@@ -1278,7 +1259,7 @@ function frame(nowMs) {
   updateSim(dt);
   if (mode === 'row') {
     frameRowing(dt, nowMs);
-    if (post) post.composer.render();
+    if (post) post.render();
     else renderer.render(scene, camera);
     requestAnimationFrame(frame);
     return;
@@ -1329,7 +1310,7 @@ function frame(nowMs) {
     frame.lastHome = nowMs;
     refreshDevices();
   }
-  if (post) post.composer.render();
+  if (post) post.render();
   else renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
