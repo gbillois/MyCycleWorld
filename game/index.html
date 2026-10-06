@@ -193,6 +193,40 @@
             <span class="opt-hint">Automatique : le vélo suit la route, attrape les boîtes, évite les bananes et utilise les objets tout seul (machines sans boutons). ← → reprennent la main à tout moment. « Selon le matériel » l'active sur elliptique et rameur, et sur une machine Technogym ou Bluetooth standard sans manette Zwift.</span>
           </div>
         </div>
+        <h3 class="sec-title">Son</h3>
+        <div class="options sound-options">
+          <div class="opt-row">
+            <span class="opt-label">Son</span>
+            <div class="seg" role="group" aria-label="Son">
+              <button type="button" class="seg-btn" data-mute="on">Activé</button>
+              <button type="button" class="seg-btn" data-mute="off">Coupé</button>
+            </div>
+            <span class="opt-hint" id="soundHint">Tout est synthétisé en direct : oiseaux, vent, vagues, cloches, foule et musique changent à chaque partie. Au clavier, la touche M coupe ou rétablit le son.</span>
+          </div>
+          <div class="opt-row vol-row">
+            <label class="opt-label" for="volMaster">Volume général</label>
+            <div class="vol"><input type="range" id="volMaster" min="0" max="100" step="5" value="80" data-vol="master"><output data-vol-out="master" for="volMaster">80 %</output></div>
+          </div>
+          <div class="opt-row vol-row">
+            <label class="opt-label" for="volMusic">Musique</label>
+            <div class="vol"><input type="range" id="volMusic" min="0" max="100" step="5" value="50" data-vol="music"><output data-vol-out="music" for="volMusic">50 %</output></div>
+          </div>
+          <div class="opt-row vol-row">
+            <label class="opt-label" for="volAmbience">Ambiance</label>
+            <div class="vol"><input type="range" id="volAmbience" min="0" max="100" step="5" value="70" data-vol="ambience"><output data-vol-out="ambience" for="volAmbience">70 %</output></div>
+            <span class="opt-hint">Nature du niveau : vent, oiseaux, animaux, vagues, spectateurs.</span>
+          </div>
+          <div class="opt-row vol-row">
+            <label class="opt-label" for="volSfx">Effets</label>
+            <div class="vol"><input type="range" id="volSfx" min="0" max="100" step="5" value="80" data-vol="sfx"><output data-vol-out="sfx" for="volSfx">80 %</output></div>
+            <span class="opt-hint">Pneus, roue libre, vent de la vitesse, aviron, objets, départ et arrivée.</span>
+          </div>
+          <div class="opt-row vol-row">
+            <label class="opt-label" for="volUi">Interface</label>
+            <div class="vol"><input type="range" id="volUi" min="0" max="100" step="5" value="60" data-vol="ui"><output data-vol-out="ui" for="volUi">60 %</output></div>
+          </div>
+          <p class="opt-hint" id="soundNote" hidden></p>
+        </div>
       </div>
     </section>
 

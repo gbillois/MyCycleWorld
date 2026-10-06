@@ -4,6 +4,20 @@
 
 const visible = (el) => el && !el.hidden && el.offsetParent !== null && !el.disabled;
 const isText = (el) => el && el.tagName === 'INPUT' && el.type === 'text';
+const isRange = (el) => el && el.tagName === 'INPUT' && el.type === 'range';
+
+// Curseur (volume) : ← → changent la valeur d'un pas, aussi pour les touches synthétiques des manettes
+// (le navigateur ne fait rien de lui-même pour elles).
+function nudge(el, dir) {
+  const step = Number(el.step) || 1;
+  const min = Number(el.min) || 0;
+  const max = el.max === '' ? 100 : Number(el.max);
+  const v = Math.max(min, Math.min(max, Math.round((Number(el.value) + dir * step) / step) * step));
+  if (String(v) === el.value) return;
+  el.value = String(v);
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+}
 
 // Mode de saisie courant (clavier, manette, tactile) : body[data-input] choisit les pictogrammes affichés
 // dans les barres d'aide (touches du clavier ou boutons des manettes Zwift Play).
@@ -42,6 +56,7 @@ export class TitleMenu {
     this.root = root;
     this.panel = null;
     this.openers = new Map();
+    this.sound = null; // sons d'interface (branchés par le jeu) : focus, confirm, back, open, close
     for (const btn of root.querySelectorAll('[data-panel]')) btn.addEventListener('click', () => this.open(btn.dataset.panel, btn));
     for (const btn of root.querySelectorAll('[data-close]')) btn.addEventListener('click', () => this.close());
     window.addEventListener('keydown', (e) => this.onKey(e), true);
@@ -52,6 +67,21 @@ export class TitleMenu {
       for (const m of list) if (!m.target.hidden) m.target.querySelector('.btn.play')?.focus({ preventScroll: true });
     });
     for (const s of this.screens) watch.observe(s, { attributes: true, attributeFilter: ['hidden'] });
+    // Clic (souris, doigt, A) sur un bouton du menu ou des écrans Pause / Arrivée : son de validation.
+    const confirm = (e) => {
+      const b = e.target.closest?.('button, a[href]');
+      if (b && !b.hasAttribute('data-close') && !b.disabled) this.play('confirm');
+    };
+    root.addEventListener('click', confirm);
+    for (const s of this.screens) s.addEventListener('click', confirm);
+  }
+
+  play(kind) {
+    try {
+      this.sound?.(kind);
+    } catch {
+      /* le son ne doit jamais gêner la navigation */
+    }
   }
 
   get active() {
@@ -61,7 +91,7 @@ export class TitleMenu {
   // Éléments navigables du niveau courant. Le bouton « Retour » de l'en-tête reste cliquable,
   // mais les flèches l'ignorent : B / Échap font déjà ce travail.
   focusables(scope = this.panel || this.root.querySelector('.menu')) {
-    return [...scope.querySelectorAll('button, a[href], input[type="text"]')].filter((el) => visible(el) && !el.hasAttribute('data-close'));
+    return [...scope.querySelectorAll('button, a[href], input[type="text"], input[type="range"]')].filter((el) => visible(el) && !el.hasAttribute('data-close'));
   }
 
   // Met le focus sur « Jouer » (ou, dans un écran, sur l'élément courant ou le premier).
@@ -96,6 +126,7 @@ export class TitleMenu {
     if (body && dir === 'fwd') body.scrollTop = 0;
     this.root.classList.add('panel-open');
     this.focusDefault();
+    if (dir === 'fwd') this.play('open');
   }
 
   close(refocus = true) {
@@ -104,6 +135,10 @@ export class TitleMenu {
     const parent = panel.dataset.parent;
     panel.hidden = true;
     this.panel = null;
+    if (refocus) {
+      this.play('back');
+      this.play('close');
+    }
     const opener = this.openers.get(panel.id);
     if (parent && refocus) {
       this.open(parent, null, 'back');
@@ -127,11 +162,18 @@ export class TitleMenu {
     const cur = document.activeElement;
     const i = list.indexOf(cur);
     const horiz = e.code === 'ArrowLeft' || e.code === 'ArrowRight';
-    if (e.code === 'ArrowDown' || e.code === 'ArrowUp' || (horiz && (this.panel || screen) && !isText(cur))) {
+    if (horiz && isRange(cur) && i >= 0) {
+      // ← → sur un curseur : on règle la valeur, le focus ne bouge pas.
+      e.preventDefault();
+      nudge(cur, e.code === 'ArrowRight' ? 1 : -1);
+    } else if (e.code === 'ArrowDown' || e.code === 'ArrowUp' || (horiz && (this.panel || screen) && !isText(cur))) {
       e.preventDefault();
       const step = e.code === 'ArrowDown' || e.code === 'ArrowRight' ? 1 : -1;
       const next = i < 0 ? list[0] : list[(i + step + list.length) % list.length];
-      if (next) reveal(next);
+      if (next) {
+        reveal(next);
+        if (next !== cur) this.play('focus');
+      }
     } else if (e.code === 'Escape') {
       if (this.panel) {
         e.preventDefault();

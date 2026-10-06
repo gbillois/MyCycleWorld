@@ -28,6 +28,7 @@ import { uuidName } from '../src/ble/bytes.js';
 import { BleInspector, parseServiceList } from '../src/ble/inspector.js';
 import { FrameGovernor } from '../src/core/framerate.js';
 import { TapDrive } from '../src/core/taps.js';
+import { createAudio } from './audio/index.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -162,6 +163,10 @@ const post = DETAILED ? await createPost(renderer, scene, camera, QUALITY) : nul
 const TOUCH = wantsTouch(params);
 const touch = TOUCH ? new TouchControls($('hud')) : null;
 if (TOUCH) document.body.classList.add('touch');
+
+// Son (voir audio/index.js) : démarre au premier geste, réglages dans Options.
+const audio = createAudio({ quality: QUALITY, touch: TOUCH });
+menu.sound = (kind) => audio.ui(kind);
 
 function resize() {
   renderer.setSize(window.innerWidth, window.innerHeight, false);
@@ -1303,6 +1308,7 @@ function frame(nowMs) {
   const dt = Math.min(0.1, Math.max(0, (nowMs - lastFrame) / 1000));
   lastFrame = nowMs;
   updateSim(dt);
+  audio.update({ dt, mode, state, camera, track, race, rowing: rowing?.race, gear: gears.gear });
   if (mode === 'row') {
     frameRowing(dt, nowMs);
     if (post) post.render();
@@ -1379,6 +1385,7 @@ window.__mcw = {
   get courseId() { return courseId; },
   loadCourse,
   get feltGrade() { return feltGrade; },
+  audio,
 };
 
 renderCourses();

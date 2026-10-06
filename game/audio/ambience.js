@@ -1,0 +1,565 @@
+// Ambiances de niveau : nappes continues (vent et rafales, feuillage, insectes, torrent, ressac, clapotis,
+// rapides) et événements tirés au sort (oiseaux qui se répondent, animaux de la ferme, sonnailles, cloche du
+// village, marmottes, rapace, vagues qui déferlent, goélands, canards). Fondu enchaîné d'un décor à l'autre.
+// Rien ne boucle de façon audible : délais de Poisson, positions, hauteurs et variantes changent sans cesse.
+import { rng, range, irange, pick, chance, EventClock, Wander, nextDelay } from './random.js';
+import { pickBird, SCENE_BIRDS } from './patterns.js';
+import { coastZ } from './spots.js';
+import { biquad } from './engine.js';
+
+const TAU = Math.PI * 2;
+
+// Niveau de chaque espèce (les petits passereaux portent moins loin que le coucou ou le chocard).
+const BIRD_GAIN = { blackbird: 0.55, greatTit: 0.45, chaffinch: 0.5, robin: 0.42, skylark: 0.35, swallow: 0.4, cuckoo: 0.6, chough: 0.55, marmot: 0.7, dipper: 0.5, reedWarbler: 0.42, coot: 0.5 };
+const SCENE_ANIMALS = { meadow: ['cow', 'sheep', 'horse', 'rooster', 'bee'], alpine: ['raptor'], coast: ['gull'], lake: ['duck'], river: [] };
+export const SCENE_REVERB = { meadow: 'meadow', alpine: 'alpine', coast: 'coast', lake: 'lake', river: 'river' };
+
+class Scene {
+  constructor(engine, name, world, r) {
+    this.e = engine;
+    this.name = name;
+    this.world = world || {};
+    this.spots = this.world.spots || {};
+    this.r = r;
+    this.nodes = [];
+    this.sources = [];
+    this.mods = [];
+    this.timers = [];
+    this.loops = [];
+    this.gates = [];
+    this.gateLeft = 0;
+    this.clocks = {};
+    this.ready = false;
+    this.stopped = false;
+    const c = engine.ctx;
+    this.out = c.createGain();
+    this.out.gain.value = 0;
+    this.out.connect(engine.buses.ambience);
+    this.def = SCENES[name] || SCENES.meadow;
+  }
+
+  async start() {
+    const e = this.e;
+    const need = [['noise', { color: 'pink', seconds: 6 }], ['noise', { color: 'brown', seconds: 6 }], ['noise', { color: 'white', seconds: 6 }], ...this.def.buffers(this)];
+    await Promise.all(need.map(([n, o]) => e.bank.load(n, o, 1).catch(() => null)));
+    if (this.stopped) return;
+    // Premières variantes des oiseaux et des animaux du décor, pour que les premiers chants ne manquent pas
+    for (const [species] of SCENE_BIRDS[this.name] || []) for (let k = 0; k < 3; k++) e.bank.pool('song', { species }, 5);
+    for (const n of SCENE_ANIMALS[this.name] || []) for (let k = 0; k < 2; k++) e.bank.pool(n, {}, n === 'gull' ? 4 : 3);
+    this.gust = new Wander(this.r, 0, 1, { every: [1.2, 4.5], start: 0.4 });
+    this.gustValue = 0.4;
+    this.gustSinks = [];
+    this.def.build(this);
+    const t = e.ctx.currentTime;
+    this.out.gain.setValueAtTime(0, t);
+    this.out.gain.linearRampToValueAtTime(1, t + 2.5);
+    this.ready = true;
+  }
+
+  stop(fade = 2.5) {
+    this.stopped = true;
+    const c = this.e.ctx;
+    const t = c.currentTime;
+    this.out.gain.cancelScheduledValues(t);
+    this.out.gain.setValueAtTime(this.out.gain.value, t);
+    this.out.gain.linearRampToValueAtTime(0, t + fade);
+    setTimeout(() => {
+      for (const s of this.sources) {
+        try {
+          s.stop();
+        } catch {
+          /* rien */
+        }
+        s.disconnect();
+      }
+      for (const l of this.loops) l.voice?.stop(0.05);
+      for (const n of this.nodes) n.disconnect();
+      this.out.disconnect();
+    }, fade * 1000 + 100);
+  }
+
+  // --- Briques ---
+  gain(v = 1) {
+    const g = this.e.ctx.createGain();
+    g.gain.value = v;
+    this.nodes.push(g);
+    return g;
+  }
+
+  filter(type, f, q = 0.707) {
+    const b = biquad(this.e.ctx, type, f, q);
+    this.nodes.push(b);
+    return b;
+  }
+
+  noise(color = 'pink', rate = 1) {
+    const s = this.e.noise(color, { rate });
+    if (s) this.sources.push(s);
+    return s;
+  }
+
+  // Une boucle (bruit ou échantillon) -> chaîne de nœuds -> sortie de la scène.
+  chain(src, ...nodes) {
+    if (!src) return null;
+    let n = src;
+    for (const x of nodes) {
+      n.connect(x);
+      n = x;
+    }
+    n.connect(this.out);
+    return n;
+  }
+
+  // Paramètre qui suit les rafales : value = lo + (hi - lo) * rafale^power
+  onGust(param, lo, hi, power = 1, tau = 0.8) {
+    this.gustSinks.push({ param, lo, hi, power, tau });
+    param.value = lo + (hi - lo) * Math.pow(this.gustValue, power);
+  }
+
+  // Paramètre qui erre lentement entre deux bornes (vie de la nappe).
+  wander(param, lo, hi, every = [2, 6]) {
+    const w = new Wander(this.r, lo, hi, { every });
+    param.value = w.value;
+    this.mods.push({ w, param });
+  }
+
+  // Vent : bruit rose filtré dont le niveau, la brillance et le sifflement suivent les rafales.
+  wind({ level = 0.3, lo = 350, hi = 1200, whistle = 0, hp = 70 } = {}) {
+    const g = this.gain(level);
+    const lp = this.filter('lowpass', lo, 0.5);
+    this.chain(this.noise('pink', range(this.r, 0.85, 1)), this.filter('highpass', hp, 0.5), lp, g);
+    this.onGust(g.gain, level * 0.35, level, 1.2);
+    this.onGust(lp.frequency, lo, hi, 1);
+    if (whistle > 0) {
+      // Sifflement du vent dans les rochers et les câbles : bande étroite qui glisse avec les rafales
+      const wg = this.gain(0);
+      const bp = this.filter('bandpass', 700, 9);
+      this.chain(this.noise('pink', 0.93), bp, wg);
+      this.onGust(wg.gain, 0, whistle, 2.5);
+      this.onGust(bp.frequency, 480, 1150, 1.5, 1.5);
+    }
+  }
+
+  // Feuillage, roseaux, herbes : bruit aigu qui frémit avec les rafales.
+  rustle(level = 0.06, f = 2600) {
+    const g = this.gain(0);
+    this.chain(this.noise('white', 0.9), this.filter('highpass', f, 0.6), this.filter('lowpass', 9000, 0.5), g);
+    this.onGust(g.gain, level * 0.15, level, 1.8, 0.4);
+  }
+
+  // Boucle d'échantillon calculé (insectes, eau) : niveau qui vit lentement ; positionnée si pos est donnée.
+  bed(name, opts, level, { pos = null, ref = 20, rolloff = 1, live = [0.65, 1], rate = 1 } = {}) {
+    const buf = this.e.bank.get(name, opts);
+    if (!buf) return null;
+    const c = this.e.ctx;
+    const src = c.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+    src.playbackRate.value = rate;
+    src.start(c.currentTime, Math.random() * buf.duration);
+    this.sources.push(src);
+    const g = this.gain(level);
+    if (live) this.wander(g.gain, level * live[0], level * live[1], [3, 8]);
+    src.connect(g);
+    if (pos) {
+      const p = this.e.panner({ ref, rolloff, max: 3000 });
+      this.e.setPos(p, pos);
+      this.nodes.push(p);
+      p.connect(this.out);
+      // Source lointaine (plus de 40 fois sa distance de référence) : débranchée, elle ne coûte rien.
+      this.gates.push({ g, p, pos, radius: Math.max(120, ref * 40), on: false });
+    } else g.connect(this.out);
+    return g;
+  }
+
+  // Événement ponctuel sur le bus d'ambiance.
+  spawn(buf, o) {
+    return buf ? this.e.play(buf, { bus: 'ambience', ...o }) : null;
+  }
+
+  after(sec, fn) {
+    this.timers.push({ t: sec, fn });
+  }
+
+  clock(name, mean, opts) {
+    return (this.clocks[name] ||= new EventClock(this.r, mean, opts));
+  }
+
+  // Point au hasard autour de l'auditeur (distance d, hauteur h).
+  around(d, h = 0) {
+    const l = this.e.listener;
+    const a = this.r() * TAU;
+    return { x: l.x + Math.cos(a) * d, y: l.y + h, z: l.z + Math.sin(a) * d };
+  }
+
+  update(dt, info) {
+    if (!this.ready || this.stopped) return;
+    const t = this.e.ctx.currentTime;
+    const g = this.gust.tick(dt);
+    if (g) {
+      this.gustValue = g.target;
+      for (const s of this.gustSinks) s.param.setTargetAtTime(s.lo + (s.hi - s.lo) * Math.pow(g.target, s.power), t, Math.max(0.2, g.time * 0.3 * s.tau));
+    }
+    if ((this.gateLeft -= dt) <= 0) {
+      this.gateLeft = 0.5;
+      for (const gt of this.gates) {
+        const want = this.e.distanceTo(gt.pos) < gt.radius;
+        if (want && !gt.on) gt.g.connect(gt.p);
+        else if (!want && gt.on) gt.g.disconnect();
+        gt.on = want;
+      }
+    }
+    for (const m of this.mods) {
+      const x = m.w.tick(dt);
+      if (x) m.param.setTargetAtTime(x.target, t, x.time * 0.4);
+    }
+    for (let i = this.timers.length - 1; i >= 0; i--) {
+      const tm = this.timers[i];
+      tm.t -= dt;
+      if (tm.t <= 0) {
+        this.timers.splice(i, 1);
+        tm.fn();
+      }
+    }
+    this.def.update(this, dt, info);
+  }
+
+  // --- Événements communs ---
+  bird(rate = 1) {
+    const species = pickBird(this.name, this.r);
+    const buf = this.e.bank.pool('song', { species }, 5);
+    if (!buf) return;
+    const high = species === 'skylark';
+    const d = high ? range(this.r, 20, 45) : range(this.r, 9, 55);
+    const pos = this.around(d, high ? range(this.r, 30, 50) : range(this.r, 2.5, 12));
+    this.spawn(buf, { pos, ref: 9, rolloff: 1, gain: (BIRD_GAIN[species] ?? 0.5) * range(this.r, 0.6, 1), rate: range(this.r, 0.95, 1.05), wet: 0.25, radius: 120 });
+    // Un congénère répond parfois d'un autre arbre
+    if (chance(this.r, 0.3 * rate)) {
+      this.after(range(this.r, 0.6, 2.4), () => {
+        const b2 = this.e.bank.pool('song', { species }, 5);
+        this.spawn(b2, { pos: this.around(range(this.r, 15, 60), range(this.r, 3, 12)), ref: 9, gain: (BIRD_GAIN[species] ?? 0.5) * range(this.r, 0.5, 0.85), rate: range(this.r, 0.95, 1.05), wet: 0.3, radius: 120 });
+      });
+    }
+  }
+
+  animal(name, pos, { gain = 0.7, ref = 12, wet = 0.25, rate = [0.96, 1.04], pool = 3 } = {}) {
+    const buf = this.e.bank.pool(name, {}, pool);
+    this.spawn(buf, { pos, ref, rolloff: 1, gain, rate: range(this.r, rate[0], rate[1]), wet, radius: 400 });
+  }
+}
+
+// =====================================================================
+// Décors
+// =====================================================================
+const near = (scene, p, radius) => p && scene.e.distanceTo(p) < radius;
+
+const SCENES = {
+  meadow: {
+    buffers: () => [['insects', { kind: 'meadow', seconds: 8 }]],
+    build(s) {
+      s.wind({ level: 0.3, lo: 320, hi: 1000 });
+      s.rustle(0.05);
+      s.bed('insects', { kind: 'meadow', seconds: 8 }, 0.15);
+      s.bed('insects', { kind: 'meadow', seconds: 8 }, 0.1, { rate: 0.913 }); // autre vitesse : pas de motif qui revient
+    },
+    update(s, dt, info) {
+      const calm = info.speed < 6 ? 1 : 0.7;
+      if (s.clock('bird', 2.4).tick(dt, calm)) s.bird();
+      if (s.clock('cuckoo', 38, { min: 15 }).tick(dt)) {
+        const buf = s.e.bank.pool('song', { species: 'cuckoo' }, 2);
+        s.spawn(buf, { pos: s.around(range(s.r, 110, 220), 10), ref: 60, rolloff: 1, gain: 0.55, wet: 0.5, rate: range(s.r, 0.97, 1.03) });
+      }
+      if (s.clock('bee', 28, { min: 10 }).tick(dt) && info.speed < 4) {
+        const buf = s.e.bank.pool('bee', {}, 3);
+        s.spawn(buf, { gain: 0.22, rate: range(s.r, 0.92, 1.08) });
+      }
+      farm(s, dt);
+    },
+  },
+  alpine: {
+    buffers: () => [['water', STREAM]],
+    build(s) {
+      s.wind({ level: 0.5, lo: 200, hi: 1400, whistle: 0.1 }); // au-dessus des arbres : rafales graves, peu de feuillage
+      s.rustle(0.008, 3200);
+      s.bed('water', STREAM, 0.03, { live: [0.6, 1] });
+      if (s.spots.stream) s.bed('water', STREAM, 0.9, { pos: s.spots.stream, ref: 40, rolloff: 1 });
+      if (s.spots.fountain) s.bed('water', STREAM, 0.35, { pos: s.spots.fountain, ref: 3, rolloff: 1.4, rate: 1.6 });
+      s.cows = (s.spots.cows || []).map((herd) => ({
+        ...herd,
+        cows: herd.bells.map((f0) => ({ f0, mode: 'graze', t: range(s.r, 0, 3), walk: 0, pos: pick(s.r, herd.points) })),
+      }));
+      for (const herd of s.cows) for (const cow of herd.cows) for (const double of [false, true]) s.e.bank.load('cowbell', { f0: cow.f0, double }).catch(() => {});
+      s.e.bank.load('church', { nominal: 440 }).catch(() => {});
+      s.e.bank.load('church', { nominal: 392 }).catch(() => {});
+    },
+    update(s, dt, info) {
+      if (s.clock('bird', 4.2).tick(dt)) s.bird();
+      if (s.clock('marmot', 45, { min: 18 }).tick(dt)) {
+        const buf = s.e.bank.pool('song', { species: 'marmot' }, 2);
+        s.spawn(buf, { pos: s.around(range(s.r, 50, 140), range(s.r, 5, 25)), ref: 30, gain: 0.6, wet: 0.65 });
+      }
+      if (s.clock('raptor', 55, { min: 25 }).tick(dt)) {
+        const buf = s.e.bank.pool('raptor', {}, 2);
+        s.spawn(buf, { pos: s.around(range(s.r, 120, 260), range(s.r, 60, 140)), ref: 80, gain: 0.5, wet: 0.7 });
+      }
+      cowbells(s, dt);
+      churchBell(s, dt);
+      void info;
+    },
+  },
+  coast: {
+    buffers: () => [['insects', { kind: 'cicada', seconds: 8 }], ['crowd', { excited: false, seconds: 6 }]],
+    build(s) {
+      s.wind({ level: 0.34, lo: 450, hi: 1600, whistle: 0.03 });
+      // Grondement continu de la mer : plus fort près du rivage
+      s.surf = s.gain(0.2);
+      s.chain(s.noise('brown', 0.9), s.filter('lowpass', 420, 0.6), s.surf);
+      // Souffle lointain des rouleaux (large bande, plus doux que le grondement)
+      const hiss = s.gain(0.05);
+      s.chain(s.noise('pink', 0.7), s.filter('bandpass', 900, 0.5), hiss);
+      s.wander(hiss.gain, 0.025, 0.07, [2, 6]);
+      s.cicadas = s.bed('insects', { kind: 'cicada', seconds: 8 }, 0.1, { live: null });
+      s.cicadas2 = s.bed('insects', { kind: 'cicada', seconds: 8 }, 0.06, { live: null, rate: 1.071 });
+      if (s.spots.beach) s.bed('crowd', { excited: false, seconds: 6 }, 0.3, { pos: s.spots.beach, ref: 16, rolloff: 1.1 });
+    },
+    update(s, dt, info) {
+      const cfg = s.spots.coast;
+      const l = s.e.listener;
+      const shore = cfg ? Math.max(0, coastZ(cfg, l.x) - l.z) : 200;
+      const t = s.e.ctx.currentTime;
+      if (s.updLeft === undefined || (s.updLeft -= dt) <= 0) {
+        s.updLeft = 0.25;
+        // La mer s'entend de partout sur ce circuit, et gronde quand on longe la plage.
+        const k = Math.max(0.4, Math.min(1, 50 / (shore + 15)));
+        s.surf.gain.setTargetAtTime(0.5 * k, t, 0.5);
+        const inland = Math.min(1, Math.max(0.2, (shore - 20) / 60));
+        if (s.cicadas) s.cicadas.gain.setTargetAtTime(0.14 * inland, t, 0.8);
+        if (s.cicadas2) s.cicadas2.gain.setTargetAtTime(0.08 * inland, t, 0.8);
+      }
+      if (cfg && s.clock('wave', 8.5, { min: 6, max: 13 }).tick(dt)) wave(s, cfg);
+      if (s.clock('gull', 9, { min: 3 }).tick(dt)) gull(s, cfg);
+      if (s.clock('bird', 10).tick(dt)) s.bird();
+      void info;
+    },
+  },
+  lake: {
+    buffers: () => [['lapping', { seconds: 8 }]],
+    build(s) {
+      s.wind({ level: 0.24, lo: 380, hi: 950 });
+      s.bed('lapping', { seconds: 8 }, 0.8);
+      s.bed('lapping', { seconds: 8 }, 0.55, { rate: 0.887 });
+      s.rustle(0.05, 2200); // roseaux des berges
+    },
+    update(s, dt) {
+      if (s.clock('bird', 3.2).tick(dt)) s.bird();
+      if (s.clock('duck', 15, { min: 5 }).tick(dt)) {
+        const l = s.e.listener;
+        const bank = s.world.rowing?.bank ?? 60;
+        const side = chance(s.r, 0.5) ? 1 : -1;
+        s.animal('duck', { x: side * range(s.r, bank - 12, bank + 2), y: 0.3, z: l.z + range(s.r, -40, 90) }, { gain: 0.6, ref: 10 });
+      }
+      if (s.clock('cuckoo', 60, { min: 25 }).tick(dt)) {
+        const buf = s.e.bank.pool('song', { species: 'cuckoo' }, 2);
+        s.spawn(buf, { pos: s.around(range(s.r, 150, 260), 12), ref: 60, gain: 0.5, wet: 0.5 });
+      }
+    },
+  },
+  river: {
+    buffers: () => [['water', RAPIDS]],
+    build(s) {
+      s.wind({ level: 0.14, lo: 400, hi: 1000 });
+      s.bed('water', RAPIDS, 0.55);
+      const roar = s.gain(0.22);
+      s.chain(s.noise('pink', 0.8), s.filter('highpass', 120, 0.6), s.filter('lowpass', 1800, 0.6), roar);
+      s.wander(roar.gain, 0.14, 0.28, [1.5, 4]);
+    },
+    update(s, dt) {
+      if (s.clock('bird', 6).tick(dt)) s.bird();
+      if (s.clock('white', 2.6, { min: 0.6 }).tick(dt)) {
+        const buf = s.e.bank.pool('splash', { size: 1.4 }, 4);
+        s.spawn(buf, { gain: range(s.r, 0.08, 0.2), pan: range(s.r, -0.9, 0.9), rate: range(s.r, 0.8, 1.1) });
+      }
+    },
+  },
+};
+
+const STREAM = { seconds: 6, rate: 320, fmin: 300, fmax: 2600, noise: 0.4, noiseLp: 1800 };
+const RAPIDS = { seconds: 6, rate: 650, fmin: 180, fmax: 3200, noise: 0.9, noiseLp: 2600 };
+
+// Ferme : vaches, moutons qui se répondent, chevaux, coq près de la grange.
+function farm(s, dt) {
+  const f = s.spots.farm;
+  if (!near(s, f?.center, f?.radius ?? 0)) return;
+  if (s.clock('cow', 12, { min: 4 }).tick(dt)) s.animal('cow', pick(s.r, f.points), { gain: 0.75, ref: 14 });
+  if (s.clock('sheep', 8, { min: 2 }).tick(dt)) {
+    s.animal('sheep', pick(s.r, f.points), { gain: 0.6, ref: 10 });
+    if (chance(s.r, 0.4)) s.after(range(s.r, 0.5, 1.8), () => s.animal('sheep', pick(s.r, f.points), { gain: 0.5, ref: 10, rate: [1.02, 1.12] }));
+  }
+  if (s.clock('horse', 22, { min: 8 }).tick(dt)) s.animal('horse', pick(s.r, f.points), { gain: 0.55, ref: 10 });
+  if (s.clock('rooster', 35, { min: 15 }).tick(dt)) s.animal('rooster', f.barn, { gain: 0.6, ref: 16, wet: 0.35 });
+}
+
+// Sonnailles : chaque vache broute (coup isolé de temps en temps) ou marche (série de coups irréguliers).
+function cowbells(s, dt) {
+  for (const herd of s.cows || []) {
+    if (!near(s, herd.center, 190)) continue;
+    for (const cow of herd.cows) {
+      cow.t -= dt;
+      if (cow.t > 0) continue;
+      const double = chance(s.r, cow.mode === 'walk' ? 0.35 : 0.15);
+      const buf = s.e.bank.get('cowbell', { f0: cow.f0, double });
+      s.spawn(buf, { pos: cow.pos, ref: 5, rolloff: 1.25, gain: range(s.r, 0.3, 0.75) * (cow.mode === 'walk' ? 1 : 0.7), rate: range(s.r, 0.995, 1.005), wet: 0.35, radius: 200 });
+      if (cow.mode === 'walk') {
+        cow.t = range(s.r, 0.3, 0.7);
+        cow.walk -= cow.t;
+        if (cow.walk <= 0) cow.mode = 'graze';
+        if (chance(s.r, 0.2)) cow.pos = pick(s.r, herd.points);
+      } else {
+        cow.t = nextDelay(s.r, 3, 0.8, 9);
+        if (chance(s.r, 0.15)) {
+          cow.mode = 'walk';
+          cow.walk = range(s.r, 1.5, 5);
+          cow.t = range(s.r, 0.2, 0.5);
+        }
+      }
+    }
+  }
+}
+
+// Cloche de l'église du village : volée en arrivant, puis quelques coups de temps en temps.
+function churchBell(s, dt) {
+  const ch = s.spots.church;
+  if (!ch) return;
+  const d = s.e.distanceTo(ch);
+  if (d > 700) return;
+  const ring = (n) => {
+    for (let k = 0; k < n; k++) {
+      s.after(k * range(s.r, 2.1, 2.5), () => {
+        const buf = s.e.bank.get('church', { nominal: k % 2 && n > 4 ? 392 : 440 });
+        s.spawn(buf, { pos: ch, ref: 45, rolloff: 0.7, gain: 0.85, wet: 0.55, priority: 1.5 });
+      });
+    }
+  };
+  if (!s.rang && d < 450 && s.e.bank.get('church', { nominal: 440 }) && s.e.bank.get('church', { nominal: 392 })) {
+    s.rang = true;
+    ring(irange(s.r, 6, 8));
+    s.clock('church', 80, { min: 50, max: 140, first: 70 });
+    return;
+  }
+  if (s.rang && s.clock('church', 80, { min: 50, max: 140 }).tick(dt)) ring(irange(s.r, 3, 5));
+}
+
+// Vague qui déferle : montée sourde, éclatement large bande, puis l'écume qui se retire en chuintant.
+// Construite en temps réel (deux bruits filtrés automatisés) : aucune vague n'est identique.
+function wave(s, cfg) {
+  const e = s.e;
+  if (!e.canPlay(true)) return;
+  const c = e.ctx;
+  const l = e.listener;
+  const x = l.x + range(s.r, -50, 50);
+  const pos = { x, y: cfg.seaY + 0.6, z: coastZ(cfg, x) + range(s.r, 0, 8) };
+  const size = range(s.r, 0.5, 1);
+  const t0 = c.currentTime + 0.05;
+  const build = range(s.r, 1.4, 2.6);
+  const tc = t0 + build;
+  const tail = range(s.r, 3, 5.5);
+  const body = e.noise('pink', range(s.r, 0.8, 1));
+  const foam = e.noise('white', 1);
+  if (!body || !foam) return;
+  const lp = biquad(c, 'lowpass', 220);
+  lp.frequency.setValueAtTime(220, t0);
+  lp.frequency.exponentialRampToValueAtTime(900, tc - 0.15);
+  lp.frequency.linearRampToValueAtTime(1200 + 3200 * size, tc + 0.05);
+  lp.frequency.setTargetAtTime(650, tc + 0.2, 1.1);
+  const g = c.createGain();
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.linearRampToValueAtTime(0.22 * size, tc - 0.2);
+  g.gain.linearRampToValueAtTime(0.9 * size, tc + 0.06);
+  g.gain.setTargetAtTime(0, tc + 0.25, tail / 3);
+  const hp = biquad(c, 'highpass', 1500);
+  hp.frequency.setValueAtTime(1500, t0);
+  hp.frequency.linearRampToValueAtTime(3600, tc + tail);
+  const g2 = c.createGain();
+  g2.gain.setValueAtTime(0, t0);
+  g2.gain.setValueAtTime(0, tc + 0.1);
+  g2.gain.linearRampToValueAtTime(0.3 * size, tc + 0.45);
+  g2.gain.setTargetAtTime(0, tc + 0.7, tail / 2.6);
+  const pan = e.panner({ ref: 45, rolloff: 1, max: 3000 });
+  e.setPos(pan, pos);
+  body.connect(lp).connect(g).connect(pan);
+  foam.connect(hp).connect(g2).connect(pan);
+  pan.connect(s.out);
+  const wet = c.createGain();
+  wet.gain.value = 0.3;
+  pan.connect(wet).connect(e.wet.ambience);
+  const end = tc + tail * 1.7;
+  body.stop(end);
+  foam.stop(end);
+  e.adopt([body, foam], [g, lp, g2, hp, pan, wet], { spatial: true });
+}
+
+function gull(s, cfg) {
+  const l = s.e.listener;
+  const z = cfg ? coastZ(cfg, l.x) + range(s.r, -30, 110) : l.z + range(s.r, -60, 60);
+  const n = chance(s.r, 0.3) ? irange(s.r, 2, 3) : 1;
+  for (let k = 0; k < n; k++) {
+    s.after(k * range(s.r, 0.4, 1.5), () => {
+      const buf = s.e.bank.pool('gull', {}, 4);
+      s.spawn(buf, { pos: { x: l.x + range(s.r, -90, 90), y: l.y + range(s.r, 12, 40), z }, ref: 22, rolloff: 1, gain: range(s.r, 0.45, 0.75), rate: range(s.r, 0.93, 1.07), wet: 0.25, radius: 300 });
+    });
+  }
+}
+
+// =====================================================================
+export class Ambience {
+  constructor(engine) {
+    this.e = engine;
+    this.scene = null;
+    this.key = null;
+    this.r = rng((Math.random() * 4294967296) >>> 0);
+  }
+
+  // name : meadow | alpine | coast | lake | river ; world : { id, spots, rowing }
+  set(name, world = {}) {
+    const key = `${name}:${world.id ?? ''}`;
+    if (key === this.key || !this.e.ctx) return;
+    this.key = key;
+    this.scene?.stop(2.5);
+    // Boucles et cloches propres au décor quitté : libérées (recalculées si on y revient)
+    const prev = this.scene?.name;
+    if (prev && prev !== name) {
+      setTimeout(() => {
+        const b = this.e.bank;
+        b.evict((k) => SCENE_ONLY.test(k) && !this.keep(k));
+        // Variantes d'oiseaux et d'animaux qui ne chantent pas dans le nouveau décor
+        const sc = this.scene?.name;
+        const birds = new Set([...(SCENE_BIRDS[sc] || []).map(([sp]) => sp), 'cuckoo', 'marmot']);
+        const animals = new Set(SCENE_ANIMALS[sc] || []);
+        b.evictPools((k) => {
+          const m = /^song\{"species":"(\w+)"\}$/.exec(k);
+          if (m) return !birds.has(m[1]);
+          const n = /^(\w+)/.exec(k)[1];
+          return ['cow', 'sheep', 'horse', 'rooster', 'bee', 'raptor', 'gull', 'duck'].includes(n) && !animals.has(n);
+        });
+      }, 3000);
+    }
+    this.scene = new Scene(this.e, name, world, this.r);
+    this.scene.start();
+    this.e.setReverb(SCENE_REVERB[name] || 'meadow');
+  }
+
+  update(dt, info) {
+    this.scene?.update(dt, info);
+  }
+
+  // Le décor courant a-t-il encore besoin de ce son ?
+  keep(key) {
+    const s = this.scene;
+    if (!s) return false;
+    const need = s.def.buffers(s).map(([n, o]) => `${n}${JSON.stringify(o)}`);
+    if (need.includes(key)) return true;
+    return s.name === 'alpine' && /^(cowbell|church|water)/.test(key);
+  }
+}
+
+const SCENE_ONLY = /^(insects|water|lapping|cowbell|church)/;
