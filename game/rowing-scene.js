@@ -2,7 +2,8 @@
 // arche d'arrivée et bateaux (skiff avec rameur et avirons animés au rythme des coups).
 // Graphismes détaillés : lac naturel (voir buildRowingWorld) ; graphismes simples : version d'origine.
 import * as THREE from 'three';
-import { makeSky, makeEnvironment, disposeTree, terrainMaterial, fanGeometry, fanMaterial, mountainRingAround, fbm } from './scenery.js';
+import { makeSky, makeEnvironment, disposeTree, terrainMaterial, mountainRingAround, fbm } from './scenery.js';
+import { buildStandCrowd, addRowingCoach } from './people.js';
 import { MOODS, applyMood, installFog, makeSkyDome, makeEnvironment as makeSkyEnvironment, noiseTexture, makeBirds } from './atmosphere.js';
 import { Forest, deciduousGeometry, pineGeometry, bushGeometry, windMaterial, leafAtlas, makeFieldMaps } from './nature.js';
 import { makeWater, makeReflectiveWater } from './water.js';
@@ -704,20 +705,10 @@ export function buildRowingWorld(scene, opts = {}) {
   roof.rotation.z = -0.12;
   roof.castShadow = true;
   stand.add(roof);
-  const fans = [];
-  for (let k = 0; k < 6; k++) for (let z = -28; z <= 28; z += 1.1) if (r() < 0.8) fans.push([k * 2.2 + (r() - 0.5) * 0.6, 0.8 * (k + 1), z + (r() - 0.5) * 0.4, r()]);
-  const shirt = ['#e0384b', '#2b6cff', '#ffd23f', '#3ccf7a', '#ffffff', '#ff7aa8', '#ff5a1f'].map(C);
-  const fanMat = fanMaterial(shared);
-  [fans.filter((f) => f[3] < 0.85), fans.filter((f) => f[3] >= 0.85)].forEach((list, k) => {
-    const fm = new THREE.InstancedMesh(fanGeometry(k === 1), fanMat, list.length);
-    list.forEach(([x, y, z, rk], i) => {
-      fm.setMatrixAt(i, m4.compose(v3.set(x, y, z), q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, -Math.PI / 2), s3.setScalar(0.95 + rk * 0.1)));
-      fm.setColorAt(i, shirt[Math.floor(rk * 977) % shirt.length]);
-    });
-    fm.castShadow = quality === 'high';
-    fm.receiveShadow = true;
-    stand.add(fm);
-  });
+  // Public de la tribune (people.js, coordonnées monde : la tribune est posée en (bank + 8, 1, standZ))
+  const seats = [];
+  for (let k = 0; k < 6; k++) for (let z = -28; z <= 28; z += 1.1) if (r() < 0.8) seats.push([bank + 8 + k * 2.2 + (r() - 0.5) * 0.6, 1.0 + 0.8 * (k + 1), standZ + z + (r() - 0.5) * 0.4, -Math.PI / 2 + (r() - 0.5) * 0.3, r()]);
+  buildStandCrowd(group, seats, quality);
   stand.position.set(bank + 8, 1.0, standZ);
   group.add(stand);
 

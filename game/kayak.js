@@ -7,10 +7,10 @@
 // Un cycle de phase (0..2π) = un coup à gauche puis un coup à droite : un coup de rameur = un cycle complet.
 import * as THREE from 'three';
 import { makeLabel } from './models.js';
-import { puddleTexture, wakeTexture } from './boat.js';
+import { splashTexture, splashGeometry, wakeTexture } from './boat.js';
 import {
   Parts, PBR, sweep, keep, pbrLut, hash, shade, SKINS, B, BODY, ATLAS, bindPositions, bodyGeometry, bodyMaterial, makeBody,
-  ik2, orient, defaultQuality,
+  ik2, orient, defaultQuality, poseHeadGear, HairSwing,
 } from './figure.js';
 
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
@@ -43,6 +43,8 @@ const smooth = (a, b, x) => {
   return t * t * (3 - 2 * t);
 };
 const lerp = (a, b, t) => a + (b - a) * t;
+// Fenêtre douce : 0 avant a, 1 entre b et c, 0 après d
+const win = (t, a, b, c, d) => smooth(a, b, t) * (1 - smooth(c, d, t));
 
 // Forme de la coque le long de z : demi-largeur, plat-bord (relevé aux pointes), creux sous le plat-bord, bombé du pont.
 const beamAt = (z) => 0.315 * Math.pow(Math.max(0, 1 - Math.pow(Math.abs(z / HALF), 2.1)), 0.62);
@@ -199,9 +201,13 @@ export class Kayak {
       [B.oarR, [0, PADDLE.y, PADDLE.z]],
       [B.seat, [0, SEAT_Y, SEAT_Z]],
     ]);
+    // Visage découvert (pas de lunettes en eau vive), queue de cheval ou barbe
+    this.pony = (seed >>> 5) % 3 === 0;
+    const look = { beard: this.pony ? 0 : [0, 1, 2, 0, 3, 1][(seed >>> 9) % 6] };
+    this.hairSwing = new HairSwing();
     const body = makeBody(
       bodyGeometry('kayaker', q, paddleExtras),
-      bodyMaterial({ kind: 'rower', jersey: color, helmet, accent: helmet, skin: SKINS[seed % SKINS.length], number: 1 }, q),
+      bodyMaterial({ kind: 'kayaker', jersey: color, helmet, accent: helmet, skin: SKINS[seed % SKINS.length], number: 1, look }, q),
       binds,
     );
     this.body = body.mesh;
@@ -210,8 +216,8 @@ export class Kayak {
     this.boat.add(this.body);
 
     if (q !== 'low') {
-      const mat = new THREE.MeshBasicMaterial({ map: puddleTexture(), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
-      this.puddles = new THREE.InstancedMesh(cached('kpuddleGeo', () => keep(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2))), mat, PUDDLES);
+      const mat = new THREE.MeshBasicMaterial({ map: splashTexture(), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
+      this.puddles = new THREE.InstancedMesh(splashGeometry(), mat, PUDDLES);
       this.puddles.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       this.puddles.setColorAt(0, tC.setRGB(0, 0, 0));
       this.puddles.count = 0;
@@ -240,6 +246,11 @@ export class Kayak {
     this.pose(0, 0);
   }
 
+  // Arrivée : pagaie brandie au-dessus de la tête (podium), sinon pagaie posée et buste relâché.
+  celebrate(place = 9) {
+    this.cele = { t: 0, place };
+  }
+
   // Cap (rad, autour de Y), gîte (+ = penché à droite) et tangage.
   setOrientation(yaw, lean = 0, pitch = 0) {
     this.boat.rotation.set(pitch, yaw, lean);
@@ -251,7 +262,17 @@ export class Kayak {
     const now = performance.now() / 1000;
     const dt = this._t ? Math.min(0.1, Math.max(0, now - this._t)) : 0;
     this._t = now;
-    const r = Math.max(0, Math.min(1, paddling));
+    let upW = 0;
+    let slump = 0;
+    let cw = 0;
+    if (this.cele && this.cele.t >= 0) {
+      const c = (this.cele.t += dt);
+      cw = win(c, 0, 0.7, 9, 11);
+      if (this.cele.place <= 3) upW = win(c, 0.5, 1.2, this.cele.place === 1 ? 6 : 3.5, this.cele.place === 1 ? 7 : 4.3);
+      else slump = win(c, 0.4, 1.2, 5, 7);
+      if (c > 11) this.cele.t = -1;
+    }
+    const r = Math.max(0, Math.min(1, paddling)) * (1 - cw);
     const sn = Math.sin(phase);
     const cs = Math.cos(phase);
     // Côté actif : passe vite d'un bord à l'autre, reste franc pendant la propulsion.
@@ -259,7 +280,7 @@ export class Kayak {
     const roll = 0.8 * side * r;
     const yaw = 0.6 * cs * r;
     const twist = yaw * 0.55;
-    const lean = lerp(0.12, 0.2 + 0.08 * (1 - Math.abs(cs)), r) + 0.85 * duck;
+    const lean = lerp(0.12, 0.2 + 0.08 * (1 - Math.abs(cs)), r) + 0.85 * duck - 0.15 * upW + 0.3 * slump;
     const bones = this.bones;
 
     // Bassin, buste (rotation vers la pale qui attaque, penché en avant), tête qui regarde devant
@@ -274,7 +295,9 @@ export class Kayak {
     bones[B.chest].quaternion.copy(qC);
     const head = tV[3].set(0, BODY.headY - BODY.chestY, 0).applyQuaternion(qC).add(chest);
     bones[B.head].position.copy(head);
-    bones[B.head].quaternion.setFromAxisAngle(AY, twist * 0.25).multiply(tQ[3].setFromAxisAngle(AX, -0.08));
+    bones[B.head].quaternion.setFromAxisAngle(AY, twist * 0.25).multiply(tQ[3].setFromAxisAngle(AX, -0.08 - 0.3 * upW + 0.35 * slump));
+    this.hairSwing.step(dt, 0.08 + lean * 0.3, -roll * 0.4);
+    poseHeadGear(bones, -1, this.pony, this.hairSwing.x, this.hairSwing.z);
 
     // Pagaie : centre devant la poitrine (il tourne avec le buste), plus haut entre deux coups ; posée au repos.
     const C = tV[4].set(0, 0.15 + 0.05 * (1 - Math.abs(side)), 0.4).applyAxisAngle(AY, twist).add(chest);
@@ -282,6 +305,7 @@ export class Kayak {
     C.y = lerp(sheerAt(0.2) + crownAt(0.2) + 0.03, C.y, r);
     C.z = lerp(0.18, C.z, r);
     C.y -= 0.08 * duck;
+    if (upW > 0.001) C.lerp(tV[13].set(0, 0.76 + 0.05 * Math.sin(this.cele.t * 6), 0.13).add(chest), upW);
     const oar = bones[B.oarL];
     oar.position.copy(C);
     oar.quaternion.setFromAxisAngle(AY, -yaw).multiply(tQ[1].setFromAxisAngle(AZ, -roll));

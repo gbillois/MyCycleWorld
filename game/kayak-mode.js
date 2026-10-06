@@ -237,6 +237,7 @@ export class KayakMode {
       this.whirlOf.delete(w.id);
     });
     race.addEventListener('finish', ({ detail: r }) => {
+      this.boats.get(r)?.celebrate?.(race.positionOf(r));
       if (!r.isPlayer) return;
       hud.flash(`Arrivée : ${ordinal(race.positionOf(r))} !`, 2500, 'good');
       this.onFinish?.();

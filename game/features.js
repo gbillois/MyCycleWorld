@@ -576,6 +576,7 @@ export function addCoast(group, scene, ctx, cfg) {
     towelMesh.setColorAt(i, COLORS[Math.floor(k * 77 + 2) % COLORS.length]);
   });
   group.add(shadowed(umbMesh, true), shadowed(towelMesh, false));
+  ctx.towels = towels; // bronzeurs posés dessus (people.js)
 
   // Poste de secours
   const batch = new Batch();

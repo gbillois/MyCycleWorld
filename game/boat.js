@@ -8,7 +8,7 @@ import * as THREE from 'three';
 import { makeLabel } from './models.js';
 import {
   Parts, PBR, sweep, keep, pbrLut, hash, shade, SKINS, B, BODY, ATLAS, bindPositions, bodyGeometry, bodyMaterial, makeBody,
-  ik2, orient, defaultQuality,
+  ik2, orient, defaultQuality, poseHeadGear, HairSwing,
 } from './figure.js';
 
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
@@ -45,6 +45,8 @@ const smooth = (a, b, x) => {
   return t * t * (3 - 2 * t);
 };
 const lerp = (a, b, t) => a + (b - a) * t;
+// Fenêtre douce : 0 avant a, 1 entre b et c, 0 après d
+const win = (t, a, b, c, d) => smooth(a, b, t) * (1 - smooth(c, d, t));
 
 // Demi-largeur et hauteur du plat-bord le long de la coque
 const beam = (z) => 0.148 * Math.pow(Math.max(0, 1 - Math.pow(Math.abs(z / HALF_LEN), 2.3)), 0.6);
@@ -250,6 +252,60 @@ export function puddleTexture() {
     return keep(new THREE.CanvasTexture(cv));
   });
 }
+// Éclaboussure (une instance = flaque à plat + couronne de gouttelettes qui s'élargit) : la texture réunit
+// l'anneau de la flaque (moitié gauche) et les gouttes de la couronne (moitié droite, du bas vers le haut).
+export function splashTexture() {
+  return cached('splashTex', () => {
+    const cv = document.createElement('canvas');
+    cv.width = 256;
+    cv.height = 128;
+    const ctx = cv.getContext('2d');
+    ctx.drawImage(puddleTexture().image, 0, 0);
+    let r = 7;
+    const rnd = () => ((r = (r * 16807) % 2147483647) % 10000) / 10000;
+    for (let k = 0; k < 140; k++) {
+      const x = 128 + rnd() * 128;
+      const y = 20 + Math.pow(rnd(), 0.7) * 104;
+      const a = 0.25 + 0.6 * (y / 128);
+      ctx.fillStyle = `rgba(255,255,255,${a.toFixed(2)})`;
+      ctx.beginPath();
+      ctx.ellipse(x, y, 1.2 + rnd() * 1.6, 2 + rnd() * 5, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    const g = ctx.createLinearGradient(0, 128, 0, 60);
+    g.addColorStop(0, 'rgba(255,255,255,0.55)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(128, 60, 128, 68);
+    return keep(new THREE.CanvasTexture(cv));
+  });
+}
+export function splashGeometry() {
+  return cached('splashGeo', () => {
+    const flat = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
+    const fu = flat.attributes.uv;
+    for (let i = 0; i < fu.count; i++) fu.setX(i, fu.getX(i) * 0.5);
+    const crown = new THREE.CylinderGeometry(0.4, 0.26, 0.34, 12, 1, true).translate(0, 0.17, 0);
+    const cu = crown.attributes.uv;
+    for (let i = 0; i < cu.count; i++) cu.setX(i, 0.5 + cu.getX(i) * 0.5);
+    const parts = [flat, crown];
+    const g = new THREE.BufferGeometry();
+    const pos = [];
+    const uv = [];
+    const idx = [];
+    for (const p of parts) {
+      const o = pos.length / 3;
+      pos.push(...p.attributes.position.array);
+      uv.push(...p.attributes.uv.array);
+      for (const k of p.index.array) idx.push(k + o);
+    }
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    return keep(g);
+  });
+}
 export function wakeTexture() {
   return cached('wakeTex', () => {
     const W = 128;
@@ -282,7 +338,7 @@ export function wakeTexture() {
 }
 
 const PUDDLES = 8;
-const tV = Array.from({ length: 12 }, () => new THREE.Vector3());
+const tV = Array.from({ length: 14 }, () => new THREE.Vector3());
 const tQ = Array.from({ length: 4 }, () => new THREE.Quaternion());
 const tM = new THREE.Matrix4();
 const tC = new THREE.Color();
@@ -310,9 +366,14 @@ export class Boat {
       [B.oarR, [-PIN_X, PIN_Y, 0]],
       [B.seat, [0, SEAT_Y, 0]],
     ]);
+    // Visage : queue de cheval ou barbe, lunettes de soleil ou non
+    this.pony = (seed >>> 5) % 3 === 0;
+    this.glassMode = (seed >>> 7) % 3 === 0 ? -1 : 0;
+    const look = { beard: this.pony ? 0 : [0, 1, 2, 0, 3, 1][(seed >>> 9) % 6] };
+    this.hairSwing = new HairSwing();
     const body = makeBody(
       bodyGeometry('rower', q, rowerExtras),
-      bodyMaterial({ kind: 'rower', jersey: color, helmet, accent: helmet, skin: SKINS[seed % SKINS.length], number: 1 }, q),
+      bodyMaterial({ kind: 'rower', jersey: color, helmet, accent: helmet, skin: SKINS[seed % SKINS.length], number: 1, look }, q),
       binds,
     );
     this.body = body.mesh;
@@ -322,8 +383,8 @@ export class Boat {
 
     // Flaques laissées par les pelles (coordonnées « monde » du bassin, dérivent avec le bateau qui avance)
     if (q !== 'low') {
-      const mat = new THREE.MeshBasicMaterial({ map: puddleTexture(), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
-      this.puddles = new THREE.InstancedMesh(keep(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2)), mat, PUDDLES);
+      const mat = new THREE.MeshBasicMaterial({ map: splashTexture(), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
+      this.puddles = new THREE.InstancedMesh(splashGeometry(), mat, PUDDLES);
       this.puddles.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       this.puddles.setColorAt(0, tC.setRGB(0, 0, 0));
       this.puddles.count = 0;
@@ -350,6 +411,11 @@ export class Boat {
     this.speed = 0;
     this._t = 0;
     this.pose(Math.PI * 1.5, 0);
+  }
+
+  // Arrivée : le rameur lâche les poignées et lève les bras (vainqueur), un poing (podium), ou se laisse aller en arrière.
+  celebrate(place = 9) {
+    this.cele = { t: 0, place };
   }
 
   // phase : 0..2π, coup d'aviron (propulsion pendant sin > 0). rowing : 0 = au repos.
@@ -382,7 +448,20 @@ export class Boat {
       feather = smooth(0, 0.1, u) * (1 - smooth(0.7, 0.92, u));
     }
     // Au repos : assis jambes tendues, bras le long, pelles posées à plat sur l'eau
-    const r = Math.max(0, Math.min(1, rowing));
+    let upL = 0;
+    let upR = 0;
+    let slump = 0;
+    let cw = 0;
+    if (this.cele && this.cele.t >= 0) {
+      const c = (this.cele.t += dt);
+      cw = win(c, 0, 0.8, 9, 11);
+      if (this.cele.place === 1) upL = upR = win(c, 0.7, 1.3, 5.5, 6.5);
+      else if (this.cele.place <= 3) upR = win(c, 0.7, 1.2, 3.5, 4.3);
+      else slump = win(c, 0.4, 1.2, 5, 7);
+      if (c > 11) this.cele.t = -1;
+    }
+    const upW = Math.max(upL, upR);
+    const r = Math.max(0, Math.min(1, rowing)) * (1 - cw);
     legs = lerp(0.85, legs, r);
     back = lerp(0.55, back, r);
     arms = lerp(0.35, arms, r);
@@ -390,7 +469,7 @@ export class Boat {
     feather = lerp(1, feather, r);
 
     const seatZ = lerp(SEAT_CATCH, SEAT_FINISH, legs);
-    const lean = lerp(0.52, -0.36, back);
+    const lean = lerp(0.52, -0.36, back) * (1 - upW) + 0.02 * upW - 0.42 * slump;
     const reach = lerp(0.52, 0.2, arms);
     const bones = this.bones;
     bones[B.seat].position.set(0, SEAT_Y, seatZ - 0.02);
@@ -409,7 +488,9 @@ export class Boat {
     bones[B.chest].scale.set(1 + breathe * 0.015, 1, 1 + breathe * 0.025);
     const head = tV[3].set(0, BODY.headY - BODY.chestY, 0).applyQuaternion(qC).add(chest);
     bones[B.head].position.copy(head);
-    bones[B.head].quaternion.setFromAxisAngle(AX, lean * 0.35 + 0.05);
+    bones[B.head].quaternion.setFromAxisAngle(AX, lean * 0.35 + 0.05 - 0.3 * upW + 0.25 * slump);
+    this.hairSwing.step(dt, -(lean * 0.35 + 0.05) + 0.1, 0);
+    poseHeadGear(bones, this.glassMode, this.pony, this.hairSwing.x, this.hairSwing.z);
 
     // Avirons : la poignée suit les mains (portée horizontale devant les épaules)
     const shoulderZ = chest.z + Math.sin(lean) * (BODY.shoulder[1] - BODY.chestY);
@@ -431,10 +512,15 @@ export class Boat {
       const handDir = tV[6].set(0, -0.55, 0.84);
       const wrist = tV[7].copy(handle).addScaledVector(handDir, -0.06).add(tV[8].set(0, 0.012, 0));
       const pole = tV[8].set(s * 0.9, -0.55, -0.4);
+      const up = s > 0 ? upL : upR;
+      if (up > 0.001) {
+        wrist.lerp(tV[12].set(s * 0.16, 0.48 + 0.04 * Math.sin(this.cele.t * 7 + i), 0.06).applyQuaternion(qC).add(shoulder), up);
+        pole.lerp(tV[13].set(s, -0.1, -0.2), up);
+      }
       const elbow = ik2(shoulder, wrist, BODY.upper, BODY.fore, pole, tV[9], tV[10]);
       orient(bones[bu], shoulder, tV[11].subVectors(shoulder, elbow), tV[6].subVectors(tV[10], elbow));
       orient(bones[bf], elbow, tV[11].subVectors(elbow, tV[10]), tV[6].set(-s * 0.4, 1, 0));
-      orient(bones[bh], tV[10], tV[11].set(0, 0.55, -0.84), tV[6].set(-s, 0.2, 0.3));
+      orient(bones[bh], tV[10], tV[11].set(0, 0.55, -0.84).lerp(tV[12].set(0, -1, 0.1), up), tV[6].set(-s, 0.2, 0.3));
       if (i === 0) this._blade = this._blade || [V(0, 0, 0), V(0, 0, 0)];
       // Centre de la pelle (pour les flaques)
       this._blade[i].set(s * BLADE_R, 0, 0).applyQuaternion(tQ[2].setFromAxisAngle(UP, s * theta).multiply(tQ[3].setFromAxisAngle(AZ, -s * b))).add(oar.position);
