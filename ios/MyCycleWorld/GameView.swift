@@ -2,17 +2,44 @@ import SwiftUI
 import WebKit
 import Combine
 
-/// Onglet « Jeu » : le jeu web MyCycleWorld dans une WebView, branché sur le Bluetooth de l'appli.
-/// Le jeu est chargé depuis le site publié : une mise à jour du jeu arrive sans nouveau build de l'appli.
+/// Écran principal de l'appli : le jeu web MyCycleWorld en plein écran dans une WebView, branché sur le
+/// Bluetooth de l'appli. Le jeu est chargé depuis le site publié : une mise à jour du jeu arrive sans nouveau
+/// build de l'appli. Les écrans natifs (appareils, cockpit, diagnostic) s'ouvrent depuis les Options du jeu.
 struct GameView: View {
     @EnvironmentObject private var store: BluetoothStore
+    /// Ouvre un écran natif par-dessus le jeu (la WebView reste chargée dessous).
+    let openNative: (NativeScreen) -> Void
     @State private var loadFailed = false
     @State private var reloadToken = 0
+    /// Révision du protocole annoncée par la page (nil tant qu'elle n'est pas prête).
+    @State private var pageMinor: Int?
+
+    init(openNative: @escaping (NativeScreen) -> Void) {
+        self.openNative = openNative
+    }
+
+    /// Page publiée d'avant la révision 2 (sans entrée « Réglages de l'appli » dans ses Options) : un bouton
+    /// natif garde les réglages accessibles.
+    private var legacyPage: Bool { (pageMinor ?? 2) < 2 }
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            GameWebView(store: store, reloadToken: reloadToken) { loaded in loadFailed = !loaded }
+            // La page gère elle-même les zones sûres (viewport-fit=cover et env(safe-area-inset-*)) : la
+            // WebView occupe tout l'écran, sous la barre d'état et l'indicateur d'accueil.
+            GameWebView(store: store, reloadToken: reloadToken,
+                        onLoaded: { loaded in
+                            loadFailed = !loaded
+                            if !loaded { pageMinor = nil; return }
+                            // Page chargée mais muette (script en erreur, page inattendue) : après 10 s, le
+                            // bouton natif apparaît pour que les réglages restent accessibles.
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
+                                if pageMinor == nil && !loadFailed { pageMinor = 0 }
+                            }
+                        },
+                        onReady: { minor in pageMinor = minor },
+                        onOpenNative: openNative)
+                .ignoresSafeArea()
             if loadFailed {
                 VStack(spacing: 12) {
                     Image(systemName: "wifi.exclamationmark").font(.largeTitle)
@@ -20,11 +47,30 @@ struct GameView: View {
                     Text("Le jeu est chargé depuis Internet. Vérifie la connexion Wi-Fi puis réessaie.")
                         .font(.callout).multilineTextAlignment(.center)
                     Button("Réessayer") { loadFailed = false; reloadToken += 1 }.buttonStyle(.borderedProminent)
+                    Button { openNative(.settings) } label: {
+                        Label("Réglages de l'appli", systemImage: "gearshape")
+                    }
+                    .buttonStyle(.bordered)
                 }
                 .padding(24)
                 .foregroundStyle(.white)
+            } else if legacyPage {
+                VStack {
+                    HStack {
+                        Spacer()
+                        Button { openNative(.settings) } label: {
+                            Image(systemName: "gearshape.fill").font(.title3).padding(6)
+                        }
+                        .buttonStyle(.bordered)
+                        .accessibilityLabel("Réglages de l'appli")
+                    }
+                    Spacer()
+                }
+                .padding(12)
             }
         }
+        .statusBarHidden(true)
+        .persistentSystemOverlays(.hidden)
         .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = store.demo || store.activeConnectionCount > 0
@@ -38,8 +84,12 @@ private struct GameWebView: UIViewRepresentable {
     let store: BluetoothStore
     let reloadToken: Int
     let onLoaded: (Bool) -> Void
+    let onReady: (Int) -> Void
+    let onOpenNative: (NativeScreen) -> Void
 
-    func makeCoordinator() -> GameBridge { GameBridge(store: store, onLoaded: onLoaded) }
+    func makeCoordinator() -> GameBridge {
+        GameBridge(store: store, onLoaded: onLoaded, onReady: onReady, onOpenNative: onOpenNative)
+    }
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
@@ -69,7 +119,8 @@ private struct GameWebView: UIViewRepresentable {
 }
 
 /// Pont entre la WebView du jeu et le Bluetooth de l'appli (protocole décrit dans game/native.js).
-/// Le jeu envoie des ordres (pente, vitesses, vibration) ; l'appli lui envoie l'état et les boutons Zwift.
+/// Le jeu envoie des ordres (pente, vitesses, vibration, ouverture d'un écran natif) ; l'appli lui envoie
+/// l'état et les boutons Zwift.
 final class GameBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
     static let handlerName = "mcw"
     static let host = "gbillois.github.io"
@@ -77,6 +128,8 @@ final class GameBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
 
     private let store: BluetoothStore
     private let onLoaded: (Bool) -> Void
+    private let onReady: (Int) -> Void
+    private let onOpenNative: (NativeScreen) -> Void
     private weak var webView: WKWebView?
     private var ready = false
     private var lastSent: String?
@@ -84,9 +137,12 @@ final class GameBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
     private var cancellables = Set<AnyCancellable>()
     private var loadedToken = 0
 
-    init(store: BluetoothStore, onLoaded: @escaping (Bool) -> Void) {
+    init(store: BluetoothStore, onLoaded: @escaping (Bool) -> Void, onReady: @escaping (Int) -> Void,
+         onOpenNative: @escaping (NativeScreen) -> Void) {
         self.store = store
         self.onLoaded = onLoaded
+        self.onReady = onReady
+        self.onOpenNative = onOpenNative
         super.init()
     }
 
@@ -183,10 +239,11 @@ final class GameBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
 
     private func handle(_ command: GameCommand) {
         switch command {
-        case .ready:
+        case .ready(let minor):
             ready = true
             lastSent = nil
             push(force: true)
+            onReady(minor)
         case .grade(let grade):
             // Pente du terrain avant vitesses virtuelles : l'appli applique les siennes. Elliptique ou rameur :
             // la pente devient un niveau de résistance.
@@ -197,6 +254,11 @@ final class GameBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
             if store.controlReady && !store.controlled { store.takeControl() }
         case .vibrate:
             store.vibrateControllers()
+        case .openNative(let screen, let profile):
+            // Options du jeu > « Connecter Technogym » : le profil change d'abord (le jeu le reçoit dans l'état),
+            // puis l'écran natif s'ouvre par-dessus le jeu.
+            if let profile { store.setProfile(profile) }
+            onOpenNative(screen)
         }
     }
 

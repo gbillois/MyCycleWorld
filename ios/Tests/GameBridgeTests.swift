@@ -3,7 +3,12 @@ import XCTest
 
 final class GameBridgeTests: XCTestCase {
     func testDecodesSimpleCommands() {
-        XCTAssertEqual(GameCommand(body: ["type": "ready", "protocol": 1]), .ready)
+        XCTAssertEqual(GameCommand(body: ["type": "ready", "protocol": 1]), .ready(minor: 0), "jeu d'avant la révision 1 : pas de minor")
+        XCTAssertEqual(GameCommand(body: ["type": "ready", "protocol": 1, "minor": 1]), .ready(minor: 1))
+        XCTAssertEqual(GameCommand(body: ["type": "ready", "protocol": 1, "minor": 2]), .ready(minor: 2))
+        XCTAssertEqual(GameCommand(body: ["type": "ready", "minor": "2"]), .ready(minor: 0), "révision invalide : 0")
+        XCTAssertEqual(GameCommand(body: ["type": "ready", "minor": Double.nan]), .ready(minor: 0))
+        XCTAssertEqual(GameCommand(body: ["type": "ready", "minor": -1]), .ready(minor: 0))
         XCTAssertEqual(GameCommand(body: ["type": "takeControl"]), .takeControl)
         XCTAssertEqual(GameCommand(body: ["type": "vibrate"]), .vibrate)
     }
@@ -30,12 +35,32 @@ final class GameBridgeTests: XCTestCase {
         XCTAssertNil(GameCommand(body: ["type": "shift"]))
     }
 
+    func testDecodesOpenNativeWithScreenAndProfile() {
+        XCTAssertEqual(GameCommand(body: ["type": "openNative", "screen": "devices", "profile": "technogym"]), .openNative(.devices, profile: .technogym))
+        XCTAssertEqual(GameCommand(body: ["type": "openNative", "screen": "devices", "profile": "zwift"]), .openNative(.devices, profile: .zwift))
+        XCTAssertEqual(GameCommand(body: ["type": "openNative", "screen": "devices", "profile": "ble"]), .openNative(.devices, profile: .ble))
+        XCTAssertEqual(GameCommand(body: ["type": "openNative", "screen": "cockpit"]), .openNative(.cockpit, profile: nil))
+        XCTAssertEqual(GameCommand(body: ["type": "openNative", "screen": "inspector"]), .openNative(.inspector, profile: nil))
+        XCTAssertEqual(GameCommand(body: ["type": "openNative", "screen": "log"]), .openNative(.log, profile: nil))
+        XCTAssertEqual(GameCommand(body: ["type": "openNative", "screen": "settings"]), .openNative(.settings, profile: nil))
+    }
+
+    func testOpenNativeFallsBackToSettingsAndIgnoresUnknownProfiles() {
+        XCTAssertEqual(GameCommand(body: ["type": "openNative"]), .openNative(.settings, profile: nil))
+        XCTAssertEqual(GameCommand(body: ["type": "openNative", "screen": "écran-futur"]), .openNative(.settings, profile: nil), "écran inconnu : accueil des réglages")
+        XCTAssertEqual(GameCommand(body: ["type": "openNative", "screen": 3]), .openNative(.settings, profile: nil))
+        XCTAssertEqual(GameCommand(body: ["type": "openNative", "screen": "devices", "profile": "peloton"]), .openNative(.devices, profile: nil), "profil inconnu ignoré")
+        XCTAssertEqual(GameCommand(body: ["type": "openNative", "screen": "devices", "profile": ["zwift"]]), .openNative(.devices, profile: nil))
+        XCTAssertEqual(GameCommand(body: ["type": "openNative", "screen": "devices", "profile": "Zwift"]), .openNative(.devices, profile: nil), "casse exacte")
+    }
+
     func testUnknownOrMalformedMessagesAreRefused() {
         XCTAssertNil(GameCommand(body: ["type": "eval", "code": "alert(1)"]))
         XCTAssertNil(GameCommand(body: ["type": 3]))
         XCTAssertNil(GameCommand(body: ["value": 1]))
         XCTAssertNil(GameCommand(body: "ready"))
         XCTAssertNil(GameCommand(body: [1, 2, 3]))
+        XCTAssertNil(GameCommand(body: ["type": "OpenNative", "screen": "devices"]))
     }
 
     private func sampleState() -> GameState {
@@ -59,7 +84,8 @@ final class GameBridgeTests: XCTestCase {
         XCTAssertEqual(trainer["controlled"] as? Bool, false)
         XCTAssertEqual(trainer["name"] as? String, "KICKR \"Core\"")
         XCTAssertNil(object["speed"], "une mesure absente n'est pas envoyée")
-        XCTAssertEqual(object["minor"] as? Int, 1)
+        XCTAssertEqual(object["minor"] as? Int, 2)
+        XCTAssertEqual(object["capabilities"] as? [String], ["openNative"], "l'appli annonce l'ouverture des écrans natifs")
         XCTAssertNil(object["machineKind"], "champs machine facultatifs : absents quand inconnus")
         XCTAssertNil(object["strokeRate"])
     }

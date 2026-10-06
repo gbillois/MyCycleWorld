@@ -4,7 +4,7 @@ Environnement : Xcode 27.0 (27A266a), iPhone 18 Pro et iPad Pro 13 pouces (M5) s
 
 | Vérification | Résultat |
 | --- | --- |
-| Intégration à l'app | `ContentView` présente `GameView` dans l'onglet Jeu ; `GameView.swift` et `Core/GameBridge.swift` appartiennent à la phase Sources du projet Xcode |
+| Intégration à l'app | `ContentView` présente `GameView` en plein écran (les écrans natifs s'ouvrent en feuille depuis les Options du jeu) ; `GameView.swift` et `Core/GameBridge.swift` appartiennent à la phase Sources du projet Xcode |
 | Compilation Debug pour simulateur | Réussie |
 | Tests Swift exécutés par `ci_scripts/ci_post_clone.sh` | 26 réussis, dont 10 tests du protocole du pont du jeu |
 | Tests JavaScript | 42 réussis, dont 13 tests du pont natif |

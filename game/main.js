@@ -1001,12 +1001,24 @@ for (const card of document.querySelectorAll('[data-connect]')) {
     hwId = card.dataset.connect;
     savePref(HW_KEY, hwId);
     applyHardware();
+    // Appli iOS récente : l'écran natif « Appareils » s'ouvre par-dessus le jeu, avec ce profil.
+    if (NATIVE && devices.openNative('devices', hwId)) return;
     refreshDevices();
     showLog();
     menu.open('connectPanel', card);
   });
 }
 applyHardware();
+// Appli iOS récente (elle annonce « openNative ») : entrée « Réglages de l'appli » dans les Options.
+// Appli plus ancienne : rien ne change, la page « Connecter » renvoie vers son onglet « Appareils ».
+if (NATIVE) {
+  const refreshNativeEntries = () => {
+    $('nativeSettings').hidden = !devices.canOpenNative;
+  };
+  devices.addEventListener('change', refreshNativeEntries);
+  refreshNativeEntries();
+  $('nativeSettings').addEventListener('click', () => devices.openNative('settings'));
+}
 // Appli iOS : le profil choisi dans l'onglet « Appareils » fait foi dès qu'il change.
 let nativeHw = null;
 if (NATIVE) {

@@ -1,8 +1,8 @@
 import SwiftUI
 import UIKit
 
-// Onglet Appareils : test de connexion, console Bluetooth et inspecteur BLE (comme les pages
-// « Connecter Zwift / Technogym / Bluetooth standard » du jeu web).
+// Écran Appareils (Options du jeu > Réglages de l'appli) : test de connexion, console Bluetooth et
+// inspecteur BLE (comme les pages « Connecter Zwift / Technogym / Bluetooth standard » du jeu web).
 
 /// Ligne du test de connexion : libellé, valeur et couleur (vert = bon, rouge = à vérifier).
 private struct TestRow: Identifiable {
@@ -37,12 +37,12 @@ struct ConnectionTestSection: View {
             }
             .disabled(!store.canTestPilot || store.pilotRunning)
             NavigationLink {
-                StoreConsoleView()
+                StoreConsoleView().nativeCloseButton()
             } label: {
                 Label("Console Bluetooth (\(store.logs.count))", systemImage: "terminal")
             }
             NavigationLink {
-                InspectorView()
+                InspectorView().nativeCloseButton()
             } label: {
                 Label("Inspecteur BLE", systemImage: "magnifyingglass")
             }
@@ -198,7 +198,7 @@ struct InspectorView: View {
             }
             Section {
                 NavigationLink {
-                    InspectorConsoleView()
+                    InspectorConsoleView().nativeCloseButton()
                 } label: {
                     Label("Journal (\(inspector.logs.count) lignes)", systemImage: "terminal")
                 }

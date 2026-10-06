@@ -1,8 +1,10 @@
 import Foundation
 
 // Pont entre l'appli et le jeu web (WebView). Cette partie ne dépend que de Foundation : elle est testée
-// avec `swift test`. Le côté JavaScript est dans game/native.js (protocole version 1, révision 1 :
-// champs facultatifs en plus pour les elliptiques et rameurs, ignorés par un jeu plus ancien).
+// avec `swift test`. Le côté JavaScript est dans game/native.js (protocole version 1, révision 2 :
+// révision 1 = champs facultatifs pour les elliptiques et rameurs ; révision 2 = l'appli annonce ses
+// commandes en plus (capabilities) et le jeu peut ouvrir les écrans natifs depuis ses Options).
+// Chaque ajout est facultatif : un jeu plus ancien l'ignore, une appli plus ancienne aussi.
 
 /// Appui ou relâchement d'un bouton de manette Zwift, à transmettre au jeu.
 struct ButtonEvent: Equatable {
@@ -10,22 +12,44 @@ struct ButtonEvent: Equatable {
     let down: Bool
 }
 
+/// Écran natif que le jeu peut ouvrir par-dessus lui (Options du jeu > Réglages de l'appli).
+enum NativeScreen: String, CaseIterable, Identifiable, Hashable {
+    /// Accueil des réglages : liens vers les autres écrans, mode démo, confidentialité.
+    case settings
+    /// Profil matériel, recherche et connexion Bluetooth, test de connexion.
+    case devices
+    /// Mesures en direct et pilotage manuel du trainer.
+    case cockpit
+    /// Inspecteur BLE (octets bruts de n'importe quel appareil).
+    case inspector
+    /// Journal Bluetooth et partage du diagnostic.
+    case log
+
+    var id: String { rawValue }
+}
+
 /// Ordre envoyé par le jeu. Tout ce qui n'est pas reconnu est refusé : le contenu vient d'une page web.
 enum GameCommand: Equatable {
-    case ready
+    /// La page est chargée. `minor` = révision du protocole qu'elle parle (0 si elle ne le dit pas).
+    case ready(minor: Int)
     /// Pente du terrain en %, avant vitesses virtuelles (l'appli applique les siennes).
     case grade(Double)
     case shift(Int)
     case takeControl
     case vibrate
+    /// Ouvrir un écran natif, en choisissant d'abord le profil matériel s'il est donné.
+    case openNative(NativeScreen, profile: HardwareProfile?)
 
+    /// Commandes que cette appli comprend en plus du protocole 1 d'origine, annoncées au jeu dans l'état.
+    static let capabilities = ["openNative"]
     static let gradeRange: ClosedRange<Double> = -25...30
 
     init?(body: Any) {
         guard let dict = body as? [String: Any], let type = dict["type"] as? String else { return nil }
         switch type {
         case "ready":
-            self = .ready
+            let minor = GameCommand.number(dict["minor"]).flatMap { $0.isFinite && $0 >= 0 && $0 < 1000 ? Int($0) : nil }
+            self = .ready(minor: minor ?? 0)
         case "takeControl":
             self = .takeControl
         case "vibrate":
@@ -36,6 +60,11 @@ enum GameCommand: Equatable {
         case "shift":
             guard let delta = GameCommand.number(dict["delta"]), delta.isFinite, delta != 0 else { return nil }
             self = .shift(delta < 0 ? -1 : 1)
+        case "openNative":
+            // Écran absent ou inconnu (jeu plus récent que l'appli) : l'accueil des réglages, d'où tout est accessible.
+            let screen = (dict["screen"] as? String).flatMap(NativeScreen.init(rawValue:)) ?? .settings
+            let profile = (dict["profile"] as? String).flatMap(HardwareProfile.init(rawValue:))
+            self = .openNative(screen, profile: profile)
         default:
             return nil
         }
@@ -65,8 +94,12 @@ struct GameState: Encodable, Equatable {
     }
 
     var v = 1
-    /// Révision du protocole 1 : 1 = champs machine ci-dessous (facultatifs, absents quand inconnus).
-    var minor = 1
+    /// Révision du protocole 1 : 1 = champs machine ci-dessous (facultatifs, absents quand inconnus),
+    /// 2 = liste `capabilities`.
+    var minor = 2
+    /// Commandes facultatives que l'appli comprend (par exemple « openNative ») : le jeu n'affiche les
+    /// entrées correspondantes que si elles y figurent.
+    var capabilities: [String] = GameCommand.capabilities
     var demo: Bool
     var trainer: Trainer
     var hr: Heart

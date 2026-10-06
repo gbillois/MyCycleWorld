@@ -1,8 +1,9 @@
 // Pont avec l'appli iOS. Dans la WebView de l'appli, le Bluetooth est géré en natif (CoreBluetooth) :
 // le jeu ne parle pas à Web Bluetooth. Il reçoit un état (mesures, appareils connectés, vitesse virtuelle)
-// et envoie des ordres (pente, vitesses, vibration). Même interface que Devices (voir devices.js).
+// et envoie des ordres (pente, vitesses, vibration, ouverture des écrans natifs). Même interface que Devices
+// (voir devices.js).
 //
-// Protocole (version 1, révision 1)
+// Protocole (version 1, révision 2)
 //   jeu -> appli : window.webkit.messageHandlers.mcw.postMessage({ type, ... })
 //       ready   { protocol, minor }  le jeu est chargé, l'appli peut envoyer l'état
 //       grade   { value }     pente du terrain en %, AVANT vitesses virtuelles (l'appli les applique ;
@@ -10,19 +11,26 @@
 //       shift   { delta }     vitesse virtuelle +1 / -1
 //       takeControl           prendre le contrôle du trainer (début de course)
 //       vibrate               faire vibrer les manettes Zwift
+//       openNative { screen, profile? }  révision 2, seulement si l'appli l'annonce dans capabilities :
+//                             ouvre un écran natif par-dessus le jeu (settings | devices | cockpit | inspector
+//                             | log), après avoir choisi le profil matériel s'il est donné (zwift | technogym | ble)
 //   appli -> jeu : window.mcwNative.state({...}) et window.mcwNative.button(nom, appuyé)
 //       état v1 : v, demo, trainer { connected, controllable, controlled, controlReady, name, status },
 //                 hr { connected, name }, controllers [noms], power, cadence, speed, heartRate, gear
 //       révision 1 (champs facultatifs, absents quand inconnus) : minor, hardware (zwift | technogym | ble),
 //                 machineKind (bike | cross | rower | treadmill | power), strokeRate (coups/min), strokeCount,
 //                 distance (m), pace (s/500 m), stepRate (pas/min), resistance
+//       révision 2 : capabilities [noms des commandes facultatives comprises par l'appli, par exemple
+//                 'openNative']. Une appli plus ancienne ne l'envoie pas : le jeu garde alors son comportement
+//                 d'avant (page « Connecter » avec le message renvoyant vers l'onglet « Appareils »).
 import { KeyEmitter, loadKeymap } from '../src/core/keymap.js';
 
 const PROTOCOL = 1;
-const MINOR = 1;
+const MINOR = 2;
 
 const MACHINE_KINDS = new Set(['bike', 'cross', 'rower', 'treadmill', 'power']);
 const HARDWARE_IDS = new Set(['zwift', 'technogym', 'ble']);
+const NATIVE_SCREENS = new Set(['settings', 'devices', 'cockpit', 'inspector', 'log']);
 
 // Les boutons latéraux changent déjà les vitesses côté appli : on ne les retransmet pas en touches clavier.
 const NATIVE_SHIFT_BUTTONS = new Set(['L_SHIFT', 'L_SHIFT2', 'R_SHIFT', 'R_SHIFT2']);
@@ -44,6 +52,7 @@ export class NativeDevices extends EventTarget {
     this.snapshot = {};
     this.controllers = [];
     this.hardware = null; // profil matériel choisi dans l'appli (zwift | technogym | ble), null si inconnu
+    this.capabilities = new Set(); // commandes facultatives annoncées par l'appli (révision 2)
     // Mêmes formes que les objets de Devices (et Trainer), pour que l'écran d'accueil du jeu n'ait rien à savoir.
     this.trainer = {
       connected: false,
@@ -94,6 +103,7 @@ export class NativeDevices extends EventTarget {
     const d = this.trainer.data;
     for (const key of Object.keys(d)) d[key] = num(s[key]);
     if (HARDWARE_IDS.has(s.hardware)) this.hardware = s.hardware;
+    this.capabilities = new Set(Array.isArray(s.capabilities) ? s.capabilities.filter((c) => typeof c === 'string') : []);
     Object.assign(this.hr, { connected: demo || !!h.connected, name: demo ? 'Démo' : h.name || 'Ceinture cardio' });
     if (this.hr.connected) this.hr.device = true;
     this.hr.bpm = this.hr.connected ? s.heartRate || null : null;
@@ -120,8 +130,22 @@ export class NativeDevices extends EventTarget {
     return this.trainer.connected ? this.trainer.kind : null;
   }
 
-  // Le profil matériel se choisit dans l'onglet « Appareils » de l'appli (voir this.hardware).
+  // Le profil matériel se choisit dans l'écran « Appareils » de l'appli (voir this.hardware et openNative).
   setHardware() {}
+
+  // L'appli sait ouvrir ses écrans natifs (appareils, cockpit, diagnostic) par-dessus le jeu.
+  get canOpenNative() {
+    return this.capabilities.has('openNative');
+  }
+
+  // Ouvre un écran natif ; renvoie false si l'appli ne le permet pas (appli plus ancienne) ou si l'écran est inconnu.
+  openNative(screen = 'settings', profile) {
+    if (!this.canOpenNative || !NATIVE_SCREENS.has(screen)) return false;
+    const message = { type: 'openNative', screen };
+    if (HARDWARE_IDS.has(profile)) message.profile = profile;
+    this.post(message);
+    return true;
+  }
 
   get power() {
     return this.trainer.data.power ?? 0;
@@ -159,14 +183,14 @@ export class NativeDevices extends EventTarget {
   }
 
   async connectTrainer() {
-    throw new Error('Connecte ta machine dans l’onglet « Appareils » de l’appli.');
+    throw new Error('Connecte ta machine dans « Appareils » de l’appli.');
   }
 
   async connectHeartRate() {
-    throw new Error('Connecte la ceinture dans l’onglet « Appareils » de l’appli.');
+    throw new Error('Connecte la ceinture dans « Appareils » de l’appli.');
   }
 
   async connectController() {
-    throw new Error('Connecte la manette dans l’onglet « Appareils » de l’appli.');
+    throw new Error('Connecte la manette dans « Appareils » de l’appli.');
   }
 }

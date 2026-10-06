@@ -1182,11 +1182,13 @@ body.touch .hud-hint { display: none; }
   body.touch .banner { top: 46%; }
 }
 
-/* Dans l'appli iOS, les appareils se connectent dans l'onglet « Appareils » : on garde seulement leur état. */
+/* Dans l'appli iOS, les appareils se connectent dans l'écran natif « Appareils » : on garde seulement leur état. */
 body.native .device .btn, body.native .links { display: none; }
 body.native .device { grid-template-columns: 48px minmax(0, 1fr); }
 body.native .hw-select, body.native .device-extra, body.native .hw-test-actions, body.native .inspector { display: none; }
 body.native .connect-layout { grid-template-columns: minmax(0, 1fr); max-width: 720px; }
+/* Appli iOS récente : « Réglages de l'appli » sur toute la largeur, sous les trois cartes de connexion. */
+.connect-grid .native-settings { grid-column: 1 / -1; }
 
 /* Barre de progression du rameur : bateaux sur un plan d'eau, arrivée en damier */
 .row-progress {
