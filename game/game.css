@@ -1656,3 +1656,13 @@ body.touch, body.touch #hud, body.touch #rowHud { -webkit-user-select: none; use
   .gate-badge, .gate-card .muted { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .start-gate .gate-badge, .gate-steps li.current::before { animation: none; } }
+.gym-identify { display: grid; gap: 8px; }
+.gym-identify .btn { width: 100%; }
+.gym-identify-status { margin: 0; padding: 10px 12px; border-radius: 14px; font: 700 17px/1.25 var(--f-ui); letter-spacing: 0.02em; background: rgba(255, 255, 255, 0.06); border: 1.5px solid rgba(255, 255, 255, 0.12); }
+.gym-identify-status[data-phase="go"] { color: var(--ink); background: var(--gold); border-color: var(--gold); font-size: 20px; animation: mb-pulse 1s ease-in-out infinite; }
+.gym-identify-status[data-phase="found"] { color: var(--ok); border-color: rgba(60, 207, 122, 0.6); }
+.gym-identify-status[data-phase="failed"] { color: var(--warn); }
+.gym-nearest.contact { border-color: var(--ok); background: linear-gradient(180deg, rgba(60, 207, 122, 0.18), rgba(60, 207, 122, 0.04)); }
+.gym-nearest.contact .gi-kicker { color: var(--ok); }
+@media (prefers-reduced-motion: reduce) { .gym-identify-status[data-phase="go"] { animation: none; } }
+.gym-layout.nomap { grid-template-columns: minmax(0, 1fr); max-width: 620px; margin: 0 auto; }

@@ -306,6 +306,8 @@ test('révision 4 : carte des salles, machine choisie et identifiant de la machi
   devices.gymScan(1);
   devices.releaseMachine();
   assert.equal(devices.openNative('gym'), true);
+  assert.equal(devices.canIdentify, false);
+  assert.equal(devices.identify(true), false, 'appli sans « identify » : rien n’est envoyé');
   assert.deepEqual(posted, [
     { type: 'useMachine', id, kind: 'rower' },
     { type: 'useMachine', id },
@@ -321,4 +323,14 @@ test('révision 4 : carte des salles, machine choisie et identifiant de la machi
   assert.equal(devices.gym.places[0].machines[0].title, 'SKILLROW');
   win.mcwNative.gym('nimporte quoi');
   assert.deepEqual(devices.gym.places, []);
+});
+
+test('révision 4 : identification par le mouvement', () => {
+  const { devices, win, posted } = setup();
+  win.mcwNative.state({ ...STATE, capabilities: ['gym', 'identify'] });
+  posted.length = 0;
+  assert.equal(devices.canIdentify, true);
+  devices.identify(true);
+  devices.identify(0);
+  assert.deepEqual(posted, [{ type: 'identify', active: true }, { type: 'identify', active: false }]);
 });

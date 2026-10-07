@@ -369,11 +369,24 @@ struct GymPayload: Encodable, Equatable {
         var rssi: Int
     }
 
+    /// Identification par le mouvement : phase (connecting, calm, go, found, failed), texte à afficher,
+    /// machine trouvée.
+    struct Identify: Encodable, Equatable {
+        var phase: String
+        var text: String
+        var found: String?
+        var foundName: String?
+        var kind: String?
+    }
+
     var v = 1
     var defaultPlace: String?
     var places: [Place]
     var nearby: [Nearby]
     var scanning: Bool
+    /// Machine sur laquelle le téléphone est posé (identifiant), absente sinon.
+    var contact: String?
+    var identify: Identify?
 
     init(book: GymBook, nearby: [Nearby] = [], scanning: Bool = false) {
         let round = { (v: Double?) in v.map { ($0 * 10).rounded() / 10 } }

@@ -171,7 +171,7 @@ final class GameBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
             .sink { [weak self] _ in self?.push() }
             .store(in: &cancellables)
         // Carte des salles : au chargement et à chaque changement (lieux, machines, machines autour).
-        Publishers.CombineLatest3(gym.$book, gym.$nearby, gym.$scanning)
+        gym.objectWillChange
             .debounce(for: .milliseconds(150), scheduler: DispatchQueue.main)
             .sink { [weak self] _ in self?.pushGym() }
             .store(in: &cancellables)
@@ -192,6 +192,7 @@ final class GameBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         lastSent = nil
         lastGym = nil
         gym.listen("game", false)
+        if gym.identifyState != nil { gym.cancelIdentify() }
         webView?.load(URLRequest(url: GameBridge.gameURL))
     }
 
@@ -303,6 +304,10 @@ final class GameBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         case .gymScan(let active):
             // Écran « Sur quelle machine ? » du jeu : machines autour et la plus proche en direct.
             gym.listen("game", active)
+            if !active, gym.identifyState != nil { gym.cancelIdentify() }
+        case .identify(let active):
+            // « Identifier par le mouvement » : la machine qui démarre au signal est celle du joueur.
+            if active { gym.startIdentify() } else { gym.cancelIdentify() }
         }
     }
 

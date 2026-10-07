@@ -185,8 +185,20 @@ struct GymPlaceView: View {
         .navigationTitle(place?.name ?? "Lieu")
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: live) { _, on in gym.listen("nearest", on) }
+        .onChange(of: gym.identifyState?.found) { _, found in
+            // Machine identifiée par le mouvement : sélectionnée ; pas encore sur le plan, on l'ajoute et on la pose.
+            guard let found, let place else { return }
+            if place.machine(found) == nil { gym.addHeard(found, to: place.id); placing = found }
+            selected = found
+        }
+        .onChange(of: gym.contact?.id) { _, id in
+            // Téléphone posé sur une console : cette machine est sélectionnée.
+            guard let id, let place, place.machine(id) != nil, placing == nil else { return }
+            selected = id
+        }
         .onDisappear {
             gym.listen("nearest", false)
+            if gym.identifyState != nil { gym.cancelIdentify() }
             if surveying { gym.stopSurvey() }
         }
         .sheet(isPresented: $editing) {
@@ -366,6 +378,10 @@ struct GymPlaceView: View {
 
     @ViewBuilder private func nearestSection(_ place: GymPlace) -> some View {
         Section {
+            if let touching = gym.contact {
+                Label("Téléphone posé sur « \(touching.name) »", systemImage: "hand.tap.fill").foregroundStyle(.mint)
+            }
+            identifyRow(place)
             Toggle("Afficher la machine la plus proche", isOn: $live)
             if live || gym.scanning {
                 if gym.nearby.isEmpty {
@@ -393,7 +409,30 @@ struct GymPlaceView: View {
         } header: {
             Text("Trouver ma machine")
         } footer: {
-            Text("Mets-toi devant une machine : elle arrive en tête de liste (signal le plus fort) et clignote sur le plan. Pratique pour vérifier la carte ou poser une machine à la main.")
+            Text("Trois façons, de la plus sûre à la plus rapide : « Identifier par le mouvement » (la machine qui démarre au signal est la tienne, celles déjà utilisées par d’autres sont écartées), téléphone posé à plat sur la console (son signal domine tous les autres), ou la machine la plus proche, qui clignote sur le plan.")
+        }
+    }
+
+    /// « Identifier par le mouvement » et son déroulé (écoute, calme, signal, résultat).
+    @ViewBuilder private func identifyRow(_ place: GymPlace) -> some View {
+        if let s = gym.identifyState {
+            HStack(spacing: 10) {
+                switch s.phase {
+                case .found: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                case .failed: Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                case .go: Image(systemName: "figure.rower").foregroundStyle(.mint)
+                default: ProgressView()
+                }
+                Text(s.text).font(s.phase == .go ? .headline : .callout)
+            }
+            if s.phase == .found || s.phase == .failed {
+                Button { gym.startIdentify() } label: { Label("Recommencer", systemImage: "arrow.clockwise") }
+            } else {
+                Button("Annuler", role: .cancel) { gym.cancelIdentify() }
+            }
+        } else {
+            Button { gym.startIdentify() } label: { Label("Identifier par le mouvement", systemImage: "figure.rower") }
+                .buttonStyle(.borderedProminent)
         }
     }
 

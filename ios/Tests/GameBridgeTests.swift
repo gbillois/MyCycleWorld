@@ -85,7 +85,7 @@ final class GameBridgeTests: XCTestCase {
         XCTAssertEqual(trainer["name"] as? String, "KICKR \"Core\"")
         XCTAssertNil(object["speed"], "une mesure absente n'est pas envoyée")
         XCTAssertEqual(object["minor"] as? Int, 4)
-        XCTAssertEqual(object["capabilities"] as? [String], ["openNative", "reconnect", "gym"], "l'appli annonce l'ouverture des écrans natifs, la reconnexion et la carte des salles")
+        XCTAssertEqual(object["capabilities"] as? [String], ["openNative", "reconnect", "gym", "identify"], "l'appli annonce l'ouverture des écrans natifs, la reconnexion et la carte des salles")
         XCTAssertNil(object["machineKind"], "champs machine facultatifs : absents quand inconnus")
         XCTAssertNil(object["strokeRate"])
     }
@@ -159,6 +159,8 @@ final class GameBridgeTests: XCTestCase {
         XCTAssertEqual(GameCommand(body: ["type": "releaseMachine"]), .releaseMachine)
         XCTAssertEqual(GameCommand(body: ["type": "gymScan", "active": true]), .gymScan(true))
         XCTAssertEqual(GameCommand(body: ["type": "gymScan", "active": "oui"]), .gymScan(false))
+        XCTAssertEqual(GameCommand(body: ["type": "identify", "active": true]), .identify(true))
+        XCTAssertEqual(GameCommand(body: ["type": "identify"]), .identify(false))
         XCTAssertEqual(GameCommand(body: ["type": "openNative", "screen": "gym"]), .openNative(.gym, profile: nil))
 
         var state = sampleState()

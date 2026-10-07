@@ -20,6 +20,8 @@
 //                             carte des salles (connexion en attente qui aboutit dès qu'elle se réveille)
 //       releaseMachine        révision 4 : abandonner la connexion en attente vers la machine choisie
 //       gymScan { active }    révision 4 : écouter les machines autour (écran « Sur quelle machine ? »)
+//       identify { active }   révision 4, si « identify » est annoncé : identifier sa machine par le mouvement
+//                             (la machine qui démarre au signal), ou annuler
 //       openNative { screen: 'gym' }  révision 4 : écran de cartographie des salles
 //   appli -> jeu : window.mcwNative.state({...}), window.mcwNative.button(nom, appuyé)
 //                  et window.mcwNative.gym({...}) (révision 4 : carte des salles, voir src/core/gym.js)
@@ -36,7 +38,9 @@
 //       révision 4 : trainer.id (identifiant de la machine connectée ou attendue, celui de la carte) et
 //                 trainer.waiting (connexion en attente) ; capability « gym ».
 //       carte (révision 4) : { v, defaultPlace, places [{ id, name, width, depth (m), machines [{ id, name,
-//                 label?, kind?, x?, y?, err? (m) }] }], nearby [{ id, name, kind?, rssi }], scanning }
+//                 label?, kind?, x?, y?, err? (m) }] }], nearby [{ id, name, kind?, rssi }], scanning,
+//                 contact? (machine sur laquelle le téléphone est posé), identify? { phase (connecting | calm |
+//                 go | found | failed), text, found?, foundName?, kind? } }
 import { KeyEmitter, loadKeymap } from '../src/core/keymap.js';
 import { parseGym } from '../src/core/gym.js';
 
@@ -186,6 +190,17 @@ export class NativeDevices extends EventTarget {
     const message = { type: 'useMachine', id };
     if (MACHINE_KINDS.has(kind)) message.kind = kind;
     this.post(message);
+    return true;
+  }
+
+  // Identification par le mouvement (révision 4, capacité « identify »).
+  get canIdentify() {
+    return this.capabilities.has('identify');
+  }
+
+  identify(active) {
+    if (!this.canIdentify) return false;
+    this.post({ type: 'identify', active: !!active });
     return true;
   }
 

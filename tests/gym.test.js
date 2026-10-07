@@ -55,7 +55,7 @@ test('la carte de l’appli est lue prudemment', () => {
   assert.deepEqual([gym.places[1].width, gym.places[1].depth], [120, 4], 'dimensions bornées');
   assert.deepEqual(gym.nearby.map((n) => n.id), [ROW, LOOSE, BIKE], 'plus proche d’abord, entrées invalides ignorées');
   assert.equal(gym.scanning, true);
-  assert.deepEqual(parseGym(null), { places: [], defaultPlace: null, nearby: [], scanning: false });
+  assert.deepEqual(parseGym(null), { places: [], defaultPlace: null, nearby: [], scanning: false, contact: null, identify: null });
   assert.equal(parseGym({ places: [{ id: P2, machines: [] }], defaultPlace: 'inconnu' }).defaultPlace, P2);
 });
 
@@ -114,4 +114,20 @@ test('la course part aux premières données d’effort de la machine choisie', 
   assert.equal(gateStatus(t(true, ROW.toLowerCase()), ROW), 'idle');
   assert.equal(gateStatus(t(true, ROW, { power: 120 }), ROW), 'go');
   assert.equal(gateStatus(t(true, null, { cadence: 50 }), ROW), 'go', 'appli sans identifiant : la machine branchée fait foi');
+});
+
+test('téléphone posé sur une console et identification par le mouvement', () => {
+  const gym = parseGym({ ...RAW, contact: ROW.toLowerCase(), identify: { phase: 'found', text: 'C’est SKILLBIKE 7 ✓', found: 'CCCCCCCC-0000-4000-8000-000000000007', foundName: 'SKILLBIKE 7', kind: 'bike' } });
+  assert.equal(gym.contact, ROW);
+  assert.equal(gym.identify.phase, 'found');
+  const rows = rankMachines(gym, placeById(gym, P1), 'bike');
+  const found = rows.find((r) => r.id === 'CCCCCCCC-0000-4000-8000-000000000007');
+  assert.ok(found, 'machine identifiée hors carte et muette : proposée quand même');
+  assert.equal(found.title, 'SKILLBIKE 7');
+  assert.equal(found.fit, 'yes');
+  assert.equal(parseGym({ ...RAW, contact: 'pas-un-uuid', identify: { phase: 'inconnue', text: 'x' } }).contact, null);
+  assert.equal(parseGym({ ...RAW, identify: { phase: 'inconnue', text: 'x' } }).identify, null);
+  assert.equal(parseGym({ ...RAW, identify: { phase: 'go', text: 'Vas-y', found: 'faux' } }).identify.found, null);
+  // Sans carte : les machines entendues restent proposées.
+  assert.deepEqual(rankMachines(gym, null, 'row').map((r) => r.id).slice(0, 2), [ROW, LOOSE], 'le rameur d’abord, puis le signal le plus fort');
 });

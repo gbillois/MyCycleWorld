@@ -10,6 +10,7 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 const ICONS = { bike: 'i-bike', cross: 'i-cross', rower: 'i-row', treadmill: 'i-route', power: 'i-bolt' };
 const icon = (kind) => ICONS[kind] || 'i-dumbbell';
 const PLAY_LABELS = { bike: 'vélo', cross: 'elliptique', row: 'rameur' };
+const RUNNING = new Set(['connecting', 'calm', 'go']);
 
 // Plan du lieu en SVG (unités : mètres). Machines placées seulement ; la sélection et la plus proche ressortent.
 export function gymMapSvg(place, { selected = null, nearest = null, fitOf = () => 'yes' } = {}) {
@@ -80,15 +81,22 @@ export class GymPicker {
       this.onSkip?.();
     });
     $('gymEdit').addEventListener('click', () => this.onEdit?.());
+    // Identifier par le mouvement : écoute des machines proches, calme, signal, la machine qui démarre gagne.
+    $('gymIdentify').addEventListener('click', () => {
+      const phase = this.gym?.identify?.phase;
+      this.devices.identify(!RUNNING.has(phase));
+    });
   }
 
   get gym() {
     return this.devices.gym;
   }
 
-  // Écran utile : appli qui sait choisir une machine, et au moins une machine sur une carte.
+  // Écran utile : appli qui sait choisir une machine, et une carte avec des machines ou le profil Technogym
+  // (en salle, même sans carte : machine la plus proche, téléphone posé sur la console, identification).
   get available() {
-    return !!this.devices.canUseGym && !!this.gym?.places.some((p) => p.machines.length);
+    if (!this.devices.canUseGym) return false;
+    return !!this.gym?.places.some((p) => p.machines.length) || this.devices.hardware === 'technogym';
   }
 
   get place() {
@@ -105,7 +113,11 @@ export class GymPicker {
     const here = heardFirst && heardFirst.rssi >= -67 ? gym.places.find((p) => p.machines.some((m) => m.id === heardFirst.id)) : null;
     this.placeId = (here || placeById(gym, gym?.defaultPlace))?.id ?? null;
     this.order = [];
+    // Téléphone déjà posé sur une console, ou machine déjà identifiée : on ne la ressélectionne qu'à un changement.
+    this.contactSeen = gym?.contact ?? null;
+    this.foundSeen = gym?.identify?.found ?? null;
     this.choose(lastChoice(loadChoices(this.storage), this.placeId, play), false);
+    if (this.contactSeen) this.selected = this.contactSeen;
     this.devices.gymScan(true);
     this.render(true);
   }
@@ -137,23 +149,34 @@ export class GymPicker {
   // Mise à jour en direct (signaux des machines, chaque seconde) : l'ordre de la liste ne bouge pas, seules
   // les distances, la machine la plus proche et le plan changent.
   refresh() {
+    const gym = this.gym;
     const near = this.nearest();
+    // Téléphone posé sur une console, ou machine identifiée par le mouvement : choix explicite, il l'emporte.
+    if (gym?.contact && gym.contact !== this.contactSeen) this.choose(gym.contact, true);
+    this.contactSeen = gym?.contact ?? null;
+    const found = gym?.identify?.phase === 'found' ? gym.identify.found : null;
+    if (found && found !== this.foundSeen) {
+      this.choose(found, true);
+      $('gymGo').focus({ preventScroll: true });
+    }
+    this.foundSeen = found;
     // Personne n'a encore choisi : on propose la machine juste devant soi.
     if (!this.userPicked && near && near.rssi >= -60 && this.selected !== near.id) this.selected = near.id;
     this.render(false);
   }
 
-  // Machine du plan entendue le plus fort, si elle est dans la salle (pas une machine lointaine).
+  // Machine entendue le plus fort (sur le plan du lieu, sinon n'importe laquelle), si elle est dans la salle.
   nearest() {
-    const id = nearestId(this.gym, this.place);
-    const rssi = id ? this.gym.nearby.find((n) => n.id === id)?.rssi : null;
+    const gym = this.gym;
+    const id = nearestId(gym, this.place) ?? gym?.nearby[0]?.id ?? null;
+    const rssi = id ? gym.nearby.find((n) => n.id === id)?.rssi : null;
     return id && rssi >= -80 ? { id, rssi } : null;
   }
 
   render(reorder) {
     const gym = this.gym;
+    if (!gym) return;
     const place = this.place;
-    if (!place) return;
     const rows = this.rows();
     if (reorder || !this.order.length) this.order = rows.map((r) => r.id);
     else for (const r of rows) if (!this.order.includes(r.id)) this.order.push(r.id); // nouvelle machine entendue
@@ -164,21 +187,33 @@ export class GymPicker {
     $('gymTitle').textContent = this.title ? `${this.title} : sur quelle machine ?` : 'Sur quelle machine ?';
     $('gymPlaces').hidden = gym.places.length < 2;
     $('gymPlaces').innerHTML = gym.places
-      .map((p) => `<button type="button" class="chip-btn" data-place="${p.id}" aria-pressed="${p.id === place.id}">${esc(p.name)}${p.id === gym.defaultPlace ? ' ★' : ''}</button>`)
+      .map((p) => `<button type="button" class="chip-btn" data-place="${p.id}" aria-pressed="${p.id === place?.id}">${esc(p.name)}${p.id === gym.defaultPlace ? ' ★' : ''}</button>`)
       .join('');
-    $('gymMap').innerHTML = gymMapSvg(place, { selected: this.selected, nearest: near, fitOf: (m) => byId.get(m.id)?.fit ?? 'maybe' });
+    // Pas encore de plan : la liste, la machine la plus proche et l'identification suffisent.
+    const hasMap = !!place?.machines.length;
+    $('gymMap').hidden = !hasMap;
+    this.panel.querySelector('.gym-layout').classList.toggle('nomap', !hasMap);
+    $('gymSkip').textContent = hasMap ? 'Jouer sans machine de la carte' : 'Jouer sans choisir de machine';
+    $('gymEdit').textContent = gym.places.length ? 'Modifier la carte de la salle' : 'Créer la carte de la salle';
+    if (place?.machines.length) $('gymMap').innerHTML = gymMapSvg(place, { selected: this.selected, nearest: near, fitOf: (m) => byId.get(m.id)?.fit ?? 'maybe' });
+    this.renderIdentify();
 
-    // La plus proche, en grand : c'est presque toujours celle qu'on veut.
-    const nearRow = near ? byId.get(near) : null;
+    // La plus proche, en grand : c'est presque toujours celle qu'on veut. Téléphone posé sur une console :
+    // c'est elle, sans doute possible.
+    const touching = gym.contact && byId.has(gym.contact) ? gym.contact : null;
+    const nearRow = byId.get(touching || near) || null;
     const nearBox = $('gymNearest');
     nearBox.hidden = !nearRow;
     if (nearRow) {
-      const html = `<span class="gi-ico k-${nearRow.kind || 'none'}"><svg class="ico"><use href="#${icon(nearRow.kind)}"/></svg></span><span class="gi-text"><span class="gi-kicker">La plus proche de toi</span><span class="c-name">${esc(nearRow.title)}</span><span class="c-tag">${esc(proximity(nearRow.rssi))} · ${nearRow.rssi} dBm</span></span>`;
-      const key = `${nearRow.id}|${nearRow.rssi}|${this.selected === nearRow.id}`;
+      const kicker = touching ? 'Téléphone posé sur cette machine ✓' : 'La plus proche de toi';
+      const tag = nearRow.rssi !== null ? `${proximity(nearRow.rssi)} · ${nearRow.rssi} dBm` : '';
+      const html = `<span class="gi-ico k-${nearRow.kind || 'none'}"><svg class="ico"><use href="#${icon(nearRow.kind)}"/></svg></span><span class="gi-text"><span class="gi-kicker">${kicker}</span><span class="c-name">${esc(nearRow.title)}</span><span class="c-tag">${esc(tag)}</span></span>`;
+      const key = `${nearRow.id}|${nearRow.rssi}|${this.selected === nearRow.id}|${!!touching}`;
       if (nearBox.dataset.key !== key) {
         nearBox.dataset.key = key;
         nearBox.dataset.id = nearRow.id;
         nearBox.innerHTML = html;
+        nearBox.classList.toggle('contact', !!touching);
         nearBox.setAttribute('aria-pressed', String(this.selected === nearRow.id));
       }
     }
@@ -209,14 +244,28 @@ export class GymPicker {
       if (r.fit === 'no') bits.push(`pas un ${PLAY_LABELS[this.play] || 'vélo'}`);
       el.querySelector('.c-tag').textContent = bits.join(' · ');
     }
-    if (!list.length) box.innerHTML = '<p class="panel-note">Aucune machine sur ce plan. Cartographie la salle dans les réglages de l’appli.</p>';
+    if (!list.length) box.innerHTML = '<p class="panel-note">Aucune machine entendue pour l’instant. Réveille ta machine, ou cartographie la salle dans les réglages de l’appli.</p>';
 
     const chosen = byId.get(this.selected);
     const go = $('gymGo');
     go.disabled = !chosen;
-    go.querySelector('.gl').textContent = chosen ? `Lancer sur ${chosen.title}` : 'Touche ta machine sur le plan';
-    $('gymNote').textContent = gym.scanning
-      ? 'La machine devant laquelle tu te tiens clignote en orange. Une machine en veille n’émet rien : choisis-la sur le plan, le jeu l’attendra.'
-      : 'Choisis ta machine sur le plan : le jeu s’y connecte dès qu’elle se réveille et la course part quand elle envoie tes premières données.';
+    go.querySelector('.gl').textContent = chosen ? `Lancer sur ${chosen.title}` : 'Choisis ta machine';
+    $('gymNote').textContent = 'Pour être sûr : pose ton téléphone à plat sur la console de ta machine, ou touche « Identifier par le mouvement » puis commence l’effort au signal. Sur le plan, la machine devant laquelle tu te tiens clignote en orange.';
+  }
+
+  // Bouton « Identifier par le mouvement » et son déroulé (texte envoyé par l'appli).
+  renderIdentify() {
+    const box = $('gymIdentifyBox');
+    box.hidden = !this.devices.canIdentify;
+    if (box.hidden) return;
+    const s = this.gym?.identify;
+    const status = $('gymIdentifyStatus');
+    status.hidden = !s;
+    if (s) {
+      status.dataset.phase = s.phase;
+      if (status.textContent !== s.text) status.textContent = s.text;
+    }
+    const label = RUNNING.has(s?.phase) ? 'Annuler l’identification' : s ? 'Identifier à nouveau' : 'Identifier par le mouvement';
+    if ($('gymIdentify').textContent !== label) $('gymIdentify').textContent = label;
   }
 }

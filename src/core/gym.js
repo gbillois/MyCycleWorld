@@ -5,6 +5,7 @@
 
 export const KIND_LABELS = { bike: 'Vélo', cross: 'Elliptique', rower: 'Rameur', treadmill: 'Tapis de course', power: 'Capteur de puissance' };
 const KINDS = new Set(Object.keys(KIND_LABELS));
+const IDENTIFY_PHASES = new Set(['connecting', 'calm', 'go', 'found', 'failed']);
 const UUID = /^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$/;
 
 // Mode de jeu (bouton « Jouer ») -> types de machine faits pour lui. Les autres font quand même avancer
@@ -36,7 +37,7 @@ function parseMachine(m, width, depth) {
 
 // Carte reçue de l'appli -> { places, defaultPlace, nearby, scanning } (places vides si rien d'utilisable).
 export function parseGym(raw) {
-  const out = { places: [], defaultPlace: null, nearby: [], scanning: false };
+  const out = { places: [], defaultPlace: null, nearby: [], scanning: false, contact: null, identify: null };
   if (!raw || typeof raw !== 'object') return out;
   for (const p of Array.isArray(raw.places) ? raw.places.slice(0, 50) : []) {
     if (!p || typeof p !== 'object' || typeof p.id !== 'string' || !UUID.test(p.id)) continue;
@@ -54,6 +55,14 @@ export function parseGym(raw) {
   }
   out.nearby.sort((a, b) => b.rssi - a.rssi);
   out.scanning = raw.scanning === true;
+  // Téléphone posé sur une console : l'appli donne cette machine (signal nettement plus fort que les autres).
+  out.contact = typeof raw.contact === 'string' && UUID.test(raw.contact) ? raw.contact.toUpperCase() : null;
+  // Identification par le mouvement : phase, texte à afficher, machine trouvée.
+  const id = raw.identify;
+  if (id && typeof id === 'object' && IDENTIFY_PHASES.has(id.phase)) {
+    const found = typeof id.found === 'string' && UUID.test(id.found) ? id.found.toUpperCase() : null;
+    out.identify = { phase: id.phase, text: str(id.text, 240) || '', found, foundName: str(id.foundName), kind: KINDS.has(id.kind) ? id.kind : null };
+  }
   return out;
 }
 
@@ -83,10 +92,12 @@ export function rankMachines(gym, place, play) {
   const heard = new Map((gym?.nearby || []).map((n) => [n.id, n.rssi]));
   const order = { yes: 0, maybe: 1, no: 2 };
   const rows = (place?.machines || []).map((m) => ({ ...m, mapped: true, rssi: heard.get(m.id) ?? null, fit: fits(m.kind, play) }));
-  const mapped = new Set((gym?.places || []).flatMap((p) => p.machines.map((m) => m.id)));
-  for (const n of gym?.nearby || []) {
-    if (!mapped.has(n.id)) rows.push({ id: n.id, name: n.name, label: null, title: n.name, kind: n.kind, x: null, y: null, err: null, mapped: false, rssi: n.rssi, fit: fits(n.kind, play) });
-  }
+  const mapped = new Set(rows.map((m) => m.id)); // machines de ce plan ; les autres entendues suivent
+  const extra = (id, name, kind, rssi) => rows.push({ id, name, label: null, title: name, kind, x: null, y: null, err: null, mapped: false, rssi, fit: fits(kind, play) });
+  for (const n of gym?.nearby || []) if (!mapped.has(n.id)) extra(n.id, n.name, n.kind, n.rssi);
+  // Machine identifiée par le mouvement mais absente de la carte (et muette le temps de sa connexion) : proposée aussi.
+  const found = gym?.identify?.found;
+  if (found && !rows.some((r) => r.id === found)) extra(found, gym.identify.foundName || 'Ta machine', gym.identify.kind, null);
   const close = (r) => r.rssi !== null && r.rssi >= -55 && r.fit !== 'no';
   return rows.sort(
     (a, b) =>

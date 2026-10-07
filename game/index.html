@@ -172,6 +172,10 @@
         </div>
         <div class="gym-side">
           <button type="button" class="gym-item gym-nearest" id="gymNearest" hidden></button>
+          <div class="gym-identify" id="gymIdentifyBox" hidden>
+            <button type="button" class="btn" id="gymIdentify">Identifier par le mouvement</button>
+            <p class="gym-identify-status" id="gymIdentifyStatus" hidden aria-live="polite"></p>
+          </div>
           <button type="button" class="btn play" id="gymGo" disabled><span class="gl">Touche ta machine sur le plan</span><span class="glyph"><span class="k-kbd">Entrée</span><span class="k-pad pad-a">A</span></span></button>
           <div class="gym-list" id="gymList"></div>
           <button type="button" class="btn" id="gymSkip">Jouer sans machine de la carte</button>

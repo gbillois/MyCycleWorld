@@ -54,9 +54,11 @@ enum GameCommand: Equatable {
     case releaseMachine
     /// Révision 4 : écouter les machines autour (écran de choix de la machine ouvert) ou arrêter.
     case gymScan(Bool)
+    /// Révision 4 (capacité « identify ») : identifier sa machine par le mouvement, ou annuler.
+    case identify(Bool)
 
     /// Commandes que cette appli comprend en plus du protocole 1 d'origine, annoncées au jeu dans l'état.
-    static let capabilities = ["openNative", "reconnect", "gym"]
+    static let capabilities = ["openNative", "reconnect", "gym", "identify"]
     static let gradeRange: ClosedRange<Double> = -25...30
 
     init?(body: Any) {
@@ -78,6 +80,8 @@ enum GameCommand: Equatable {
             self = .releaseMachine
         case "gymScan":
             self = .gymScan(dict["active"] as? Bool ?? false)
+        case "identify":
+            self = .identify(dict["active"] as? Bool ?? false)
         case "grade":
             guard let value = GameCommand.number(dict["value"]), value.isFinite else { return nil }
             self = .grade(min(GameCommand.gradeRange.upperBound, max(GameCommand.gradeRange.lowerBound, value)))

@@ -24,6 +24,16 @@ struct GymSurveyState: Equatable {
     var heardLast = 0
 }
 
+/// Identification de sa machine par le mouvement (voir Core/GymIdentify.swift), suivie par l'écran du lieu et le jeu.
+struct GymIdentifyState: Equatable {
+    enum Phase: String { case connecting, calm, go, found, failed }
+    var phase: Phase
+    var text: String
+    var candidates = 0
+    var found: UUID?
+    var foundName: String?
+}
+
 /// Cartographie des salles (voir Core/GymMap.swift) : lieux enregistrés, recherche Bluetooth avec la force du
 /// signal (RSSI) de chaque annonce, stations de mesure et identification du type des machines (connexion de
 /// quelques secondes, lecture des services FTMS, déconnexion ; aucune commande n'est envoyée à la machine).
@@ -47,6 +57,10 @@ final class GymStore: NSObject, ObservableObject, CBCentralManagerDelegate, CBPe
     @Published private(set) var survey: GymSurveyState?
     /// Nom de la machine en cours d'identification (connexion de quelques secondes).
     @Published private(set) var probing: String?
+    /// Machine sur laquelle le téléphone est posé (signal nettement plus fort que tous les autres), sinon nil.
+    @Published private(set) var contact: GymHeard?
+    /// Identification par le mouvement en cours ou terminée (nil : aucune).
+    @Published private(set) var identifyState: GymIdentifyState?
     /// Montrer aussi les appareils Bluetooth qui ne ressemblent pas à une machine (machine non standard).
     @Published var includeAll = false { didSet { refreshNearby() } }
     @Published private(set) var logs: [String] = []
@@ -92,6 +106,21 @@ final class GymStore: NSObject, ObservableObject, CBCentralManagerDelegate, CBPe
     private var probed: Set<UUID> = []
     private var probe: Probe?
     private var refreshTimer: Timer?
+    /// Identification par le mouvement : connexions en lecture seule aux machines les plus proches.
+    private final class Link {
+        let id: UUID
+        let peripheral: CBPeripheral
+        let name: String
+        let rssi: Int
+        var characteristics: Set<String> = []
+        var subscribed = false
+        init(id: UUID, peripheral: CBPeripheral, name: String, rssi: Int) { self.id = id; self.peripheral = peripheral; self.name = name; self.rssi = rssi }
+    }
+    private var links: [UUID: Link] = [:]
+    private var tracker = MotionTracker()
+    private var identifyTimer: Timer?
+    /// Nombre de machines écoutées pendant l'identification (les plus proches).
+    static let identifyCandidates = 5
 
     override init() {
         book = UserDefaults.standard.data(forKey: GymStore.key).flatMap { try? JSONDecoder().decode(GymBook.self, from: $0) } ?? GymBook()
@@ -99,8 +128,14 @@ final class GymStore: NSObject, ObservableObject, CBCentralManagerDelegate, CBPe
     }
 
     var payload: GymPayload {
-        GymPayload(book: book, nearby: nearby.map { GymPayload.Nearby(id: $0.id.uuidString, name: $0.name, kind: $0.kind?.rawValue, rssi: $0.rssi) },
-                   scanning: scanning)
+        var p = GymPayload(book: book, nearby: nearby.map { GymPayload.Nearby(id: $0.id.uuidString, name: $0.name, kind: $0.kind?.rawValue, rssi: $0.rssi) },
+                           scanning: scanning)
+        p.contact = contact?.id.uuidString
+        if let s = identifyState {
+            p.identify = GymPayload.Identify(phase: s.phase.rawValue, text: s.text, found: s.found?.uuidString, foundName: s.foundName,
+                                             kind: s.found.flatMap { id in book.place(containing: id)?.machine(id)?.kind ?? heard[id]?.kind }?.rawValue)
+        }
+        return p
     }
     var text: String { (["MyCycleWorld iOS · cartographie des salles", bluetoothState] + logs).joined(separator: "\n") }
 
@@ -207,6 +242,7 @@ final class GymStore: NSObject, ObservableObject, CBCentralManagerDelegate, CBPe
     /// Arrête tout (appli en arrière-plan) : cartographie terminée, écoute coupée.
     func suspend() {
         if survey != nil { stopSurvey() }
+        if identifyState != nil { cancelIdentify() }
         reasons.removeAll()
         updateScan()
     }
@@ -267,6 +303,9 @@ final class GymStore: NSObject, ObservableObject, CBCentralManagerDelegate, CBPe
         }
         list.sort { $0.rssi != $1.rssi ? $0.rssi > $1.rssi : $0.id.uuidString < $1.id.uuidString }
         if list != nearby { nearby = list }
+        // Téléphone posé sur une console : cette machine domine tous les autres signaux.
+        let touching = GymIdentify.byContact(list.map { (id: $0.id, rssi: $0.rssi) }).flatMap { id in list.first { $0.id == id } }
+        if touching?.id != contact?.id { contact = touching; if let touching { log("Téléphone posé sur \(touching.name) (\(touching.rssi) dBm).") } }
     }
 
     // MARK: Cartographie
@@ -350,6 +389,113 @@ final class GymStore: NSObject, ObservableObject, CBCentralManagerDelegate, CBPe
         }
     }
 
+    // MARK: Identifier sa machine par le mouvement
+
+    /// Écoute (lecture seule) des machines les plus proches, période calme, puis « vas-y » : la machine qui
+    /// démarre à ce moment-là est celle du joueur. Les autres sont libérées tout de suite après.
+    func startIdentify() {
+        endLinks()
+        listen("identify", true)
+        refreshNearby()
+        guard poweredOn, let central else {
+            identifyState = GymIdentifyState(phase: .failed, text: "Bluetooth pas encore prêt : réessaie dans un instant.")
+            listen("identify", false)
+            return
+        }
+        let candidates = nearby.filter { h in
+            isInUse?(h.id) != true && heard[h.id]?.peripheral.state == .disconnected
+        }.prefix(GymStore.identifyCandidates)
+        guard !candidates.isEmpty else {
+            identifyState = GymIdentifyState(phase: .failed, text: "Aucune machine libre entendue autour de toi. Approche-toi de ta machine, réveille-la, puis recommence.")
+            listen("identify", false)
+            return
+        }
+        // Une identification du type en cours est interrompue (elle reprendra plus tard).
+        if let p = probe {
+            p.timer?.invalidate(); probe = nil; probing = nil; probed.remove(p.id)
+            if p.peripheral.state != .disconnected { central.cancelPeripheralConnection(p.peripheral) }
+        }
+        tracker = MotionTracker()
+        for h in candidates {
+            guard let e = heard[h.id] else { continue }
+            links[h.id] = Link(id: h.id, peripheral: e.peripheral, name: h.name, rssi: h.rssi)
+            e.peripheral.delegate = self
+            central.connect(e.peripheral)
+        }
+        identifyState = GymIdentifyState(phase: .connecting, text: "Écoute des \(links.count) machines les plus proches… Ne bouge pas.", candidates: links.count)
+        log("Identification par le mouvement : \(links.values.map(\.name).sorted().joined(separator: ", ")).")
+        identifyTimer?.invalidate()
+        identifyTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: false) { [weak self] _ in self?.beginCalm() }
+    }
+
+    /// Annule l'identification (ou efface son résultat) et libère les machines écoutées.
+    func cancelIdentify() {
+        endLinks()
+        identifyState = nil
+    }
+
+    private func beginCalm() {
+        guard identifyState?.phase == .connecting else { return }
+        identifyTimer?.invalidate()
+        identifyState?.phase = .calm
+        identifyState?.text = "Ne bouge plus pendant 2 secondes…"
+        identifyTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: false) { [weak self] _ in self?.goSignal() }
+    }
+
+    private func goSignal() {
+        guard identifyState?.phase == .calm else { return }
+        tracker.prompt(at: Date().timeIntervalSinceReferenceDate)
+        identifyState?.phase = .go
+        identifyState?.text = "Vas-y : commence à pédaler, ramer ou marcher !"
+        identifyTimer = Timer.scheduledTimer(withTimeInterval: 25, repeats: false) { [weak self] _ in
+            guard let self, self.identifyState?.phase == .go else { return }
+            let busy = self.tracker.busy.count
+            self.fail(busy > 0
+                      ? "Aucune machine n’a démarré au signal (\(busy) déjà en mouvement : si c’est la tienne, arrête-toi, puis recommence)."
+                      : "Aucune machine n’a démarré au signal. Ta machine est peut-être en veille ou trop loin : réveille-la, rapproche-toi et recommence.")
+        }
+    }
+
+    private func identified(_ id: UUID) {
+        guard identifyState?.phase == .go, let link = links[id] else { return }
+        let kind = MachineKind.detect(characteristics: link.characteristics)
+        let name = book.place(containing: id)?.machine(id)?.title ?? link.name
+        endLinks()
+        identifyState = GymIdentifyState(phase: .found, text: "C’est \(name) ✓", candidates: 0, found: id, foundName: name)
+        log("Machine identifiée par le mouvement : \(name).")
+        if let kind {
+            for place in book.places where place.machine(id) != nil {
+                book.update(place.id) { $0.update(id) { m in m.offer(kind: kind, source: .detected) } }
+            }
+            heard[id]?.kind = kind; heard[id]?.kindSource = .detected
+            save()
+            kindDetected?(id, kind)
+        }
+    }
+
+    private func fail(_ text: String) {
+        endLinks()
+        identifyState = GymIdentifyState(phase: .failed, text: text)
+        log("Identification : \(text)")
+    }
+
+    private func dropLink(_ id: UUID) {
+        links.removeValue(forKey: id)
+        guard let phase = identifyState?.phase, phase != .found, phase != .failed else { return }
+        if links.isEmpty { fail("Connexion impossible aux machines autour. Rapproche-toi de ta machine et recommence.") }
+        else if phase == .connecting, links.values.allSatisfy(\.subscribed) { beginCalm() }
+    }
+
+    /// Libère toutes les machines écoutées (sans toucher au résultat affiché).
+    private func endLinks() {
+        identifyTimer?.invalidate(); identifyTimer = nil
+        let old = links
+        links = [:]
+        for l in old.values where l.peripheral.state != .disconnected { central?.cancelPeripheralConnection(l.peripheral) }
+        listen("identify", false)
+        nextProbe()
+    }
+
     // MARK: Identification du type (connexion courte)
 
     private func queueProbe(_ id: UUID) {
@@ -359,7 +505,7 @@ final class GymStore: NSObject, ObservableObject, CBCentralManagerDelegate, CBPe
     }
 
     private func nextProbe() {
-        guard probe == nil, poweredOn, let central else { return }
+        guard probe == nil, links.isEmpty, poweredOn, let central else { return }
         while !probeQueue.isEmpty {
             let id = probeQueue.removeFirst()
             guard let e = heard[id], e.peripheral.state == .disconnected, isInUse?(id) != true,
@@ -397,19 +543,28 @@ final class GymStore: NSObject, ObservableObject, CBCentralManagerDelegate, CBPe
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        if links[peripheral.identifier] != nil { peripheral.discoverServices([GymStore.ftms, CBUUID(string: "1818")]); return }
         guard let p = probe, p.id == peripheral.identifier else { return }
         peripheral.discoverServices(GymStore.probeServices)
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
+        if links[peripheral.identifier] != nil { dropLink(peripheral.identifier); return }
         if let p = probe, p.id == peripheral.identifier { finishProbe(p) }
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
+        if links[peripheral.identifier] != nil { dropLink(peripheral.identifier); return }
         if let p = probe, p.id == peripheral.identifier { finishProbe(p) }
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+        if links[peripheral.identifier] != nil {
+            let services = peripheral.services ?? []
+            if error != nil || services.isEmpty { dropLink(peripheral.identifier); return }
+            for service in services { peripheral.discoverCharacteristics(nil, for: service) }
+            return
+        }
         guard let p = probe, p.id == peripheral.identifier else { return }
         let services = peripheral.services ?? []
         guard error == nil, !services.isEmpty else { finishProbe(p); return }
@@ -418,6 +573,19 @@ final class GymStore: NSObject, ObservableObject, CBCentralManagerDelegate, CBPe
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
+        if let l = links[peripheral.identifier] {
+            for char in service.characteristics ?? [] {
+                let id = char.uuid.uuidString.uppercased()
+                l.characteristics.insert(id)
+                if GymIdentify.dataCharacteristics.contains(id), char.properties.contains(.notify) || char.properties.contains(.indicate) {
+                    peripheral.setNotifyValue(true, for: char)
+                    l.subscribed = true
+                }
+            }
+            // Toutes les machines écoutées : la période calme commence sans attendre.
+            if identifyState?.phase == .connecting, links.values.allSatisfy(\.subscribed) { beginCalm() }
+            return
+        }
         guard let p = probe, p.id == peripheral.identifier else { return }
         for char in service.characteristics ?? [] {
             let id = char.uuid.uuidString.uppercased()
@@ -434,6 +602,13 @@ final class GymStore: NSObject, ObservableObject, CBCentralManagerDelegate, CBPe
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
+        if links[peripheral.identifier] != nil {
+            guard error == nil, let value = characteristic.value,
+                  let moving = GymIdentify.moving(characteristic: characteristic.uuid.uuidString, bytes: Array(value)) else { return }
+            tracker.record(peripheral.identifier, moving: moving, at: Date().timeIntervalSinceReferenceDate)
+            if let winner = tracker.winner(rssi: links.mapValues(\.rssi)) { identified(winner) }
+            return
+        }
         guard let p = probe, p.id == peripheral.identifier, characteristic.uuid.uuidString.uppercased() == "2A24" else { return }
         if error == nil, let value = characteristic.value {
             p.model = String(bytes: value, encoding: .utf8)?.trimmingCharacters(in: .controlCharacters.union(.whitespaces))
