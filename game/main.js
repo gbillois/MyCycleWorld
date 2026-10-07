@@ -435,8 +435,12 @@ function setupRace() {
         tour.dist += track.length;
         tour.gain += zoneGain();
         recordStage(safeStorage, track.course.id, r.finishTime);
+        // Points de la zone selon la place à l'arrivée du joueur (les autres : leur rang à cet instant).
+        race.ranking().forEach((x, k) => tour.points.set(x.name, (tour.points.get(x.name) || 0) + (TOUR_POINTS[k] || 0)));
+        const place = race.positionOf(r);
+        tour.places.push(place);
         if (next) {
-          hud.flash(`Zone suivante : ${next.name}`, 2200, 'place');
+          hud.flash(`${ordinal(place)} · +${TOUR_POINTS[place - 1] || 0} pts · zone suivante : ${next.name}`, 2600, 'place');
           const speed = r.v;
           endTimer = setTimeout(() => continueTour(next, speed), 1600);
           return;
@@ -502,8 +506,11 @@ function startRace({ rolling = null } = {}) {
   if (rolling !== null) {
     race.time = 0;
     race.state = 'racing';
-    race.player.s = 0;
-    race.player.v = rolling;
+    // Tout le peloton repart lancé, à quelques mètres de sa place sur la grille.
+    for (const x of race.racers) {
+      x.s += 4;
+      x.v = rolling;
+    }
     snapCamera();
     hud.flash(`Zone ${track.course.index + 1} / ${STAGES.length} · ${track.course.name}`, 2600, 'place');
   }
@@ -722,7 +729,7 @@ function stagePreview(id, x) {
     <div class="pv-info">
       <span class="pv-kicker">${machine} · Grande Balade · zone ${c.index + 1} / ${STAGES.length}</span>
       <h3>${x.name}</h3>
-      <p>${x.tagline}. Sans adversaires ni objets : la route, le paysage et ton rythme.</p>
+      <p>${x.tagline}. Cinq adversaires et des boîtes à objets tout au long de la route.</p>
       <div class="pv-diff"><span>Difficulté</span>${stars(x.difficulty)}</div>
       <div class="pv-profile">${profileSvg(x, 'profile')}<span class="pv-alt">${x.alt} m</span></div>
       <dl class="pv-stats"><div><dt>${icon('i-route')}Longueur</dt><dd>${x.km} km</dd></div><div><dt>${icon('i-mountain')}Dénivelé</dt><dd>${x.gain} m</dd></div><div><dt>${icon('i-flag')}Zone</dt><dd>${c.index + 1} / ${STAGES.length}</dd></div><div><dt>${icon('i-clock')}Meilleur temps</dt><dd>${best ? formatTime(best) : '—'}</dd></div></dl>
@@ -743,7 +750,7 @@ function tourPreview() {
     <div class="pv-info">
       <span class="pv-kicker">${machine} · Grande Balade · 8 zones d’affilée</span>
       <h3>Le Grand Tour</h3>
-      <p>Des Collines Fleuries au volcan des Terres de Feu. À chaque arrivée, la zone suivante s’ouvre et l’on repart lancé ; le chrono court sur tout le tour.</p>
+      <p>Des Collines Fleuries au volcan des Terres de Feu, contre cinq adversaires. À chaque arrivée, la zone suivante s’ouvre et tout le peloton repart lancé ; chaque zone rapporte des points (15, 12, 10, 8, 6, 4) et le classement final se joue aux points.</p>
       <dl class="pv-stats"><div><dt>${icon('i-route')}Longueur</dt><dd>${(tourKm() / 1000).toFixed(1)} km</dd></div><div><dt>${icon('i-mountain')}Dénivelé</dt><dd>${gain} m</dd></div><div><dt>${icon('i-flag')}Zones</dt><dd>${STAGES.length}</dd></div><div><dt>${icon('i-clock')}Meilleur temps</dt><dd>${progress[TOUR_ID] ? formatTime(progress[TOUR_ID]) : '—'}</dd></div></dl>
       <div class="pv-surf">${STAGES.map((st) => `<span>${st.index + 1}. ${st.name}</span>`).join('')}</div>
       <div class="pv-go"><span class="glyph"><span class="k-kbd">Entrée</span><span class="k-pad pad-a">A</span></span>Partir pour le Grand Tour</div>
@@ -752,10 +759,12 @@ function tourPreview() {
 }
 
 // Grand Tour : les huit zones d'affilée (temps, distance et dénivelé cumulés).
-const tour = { active: false, done: false, time: 0, zoneStart: 0, dist: 0, gain: 0 };
+const tour = { active: false, done: false, time: 0, zoneStart: 0, dist: 0, gain: 0, points: new Map(), places: [] };
+// Points par zone du Grand Tour selon la place (comme une coupe de karting) : 15, 12, 10, 8, 6, 4.
+const TOUR_POINTS = [15, 12, 10, 8, 6, 4];
 const zoneGain = () => elevationGain(track.grade, track.step); // les prolongements sont plats : rien à retrancher
 async function startTour() {
-  Object.assign(tour, { active: true, done: false, time: 0, zoneStart: 0, dist: 0, gain: 0 });
+  Object.assign(tour, { active: true, done: false, time: 0, zoneStart: 0, dist: 0, gain: 0, points: new Map(), places: [] });
   await loadCourse(STAGES[0].id);
   startRace();
 }
@@ -793,9 +802,15 @@ function showRideEnd() {
     // Fin du Grand Tour : totaux des huit zones.
     const { best } = recordStage(safeStorage, TOUR_ID, tour.time);
     const progress = readProgress(safeStorage);
-    $('endTitle').textContent = 'Grand Tour terminé !';
-    $('podium').innerHTML = `<div class="ride-end">${worldSvg(null, true)}<div class="ride-stats">${stat('Temps total', formatTime(tour.time))}${stat('Vitesse moyenne', kmh(tour.dist, tour.time))}${stat('Distance', km(tour.dist))}${stat('Dénivelé', `${Math.round(tour.gain)} m`)}</div></div>`;
-    $('endNote').textContent = best ? 'Meilleur temps sur le Grand Tour !' : `Meilleur temps sur le Grand Tour : ${formatTime(progress[TOUR_ID])}.`;
+    // Classement final aux points (égalité : le joueur devant).
+    const me = race.player.name;
+    const standings = [...tour.points].sort((a, b) => b[1] - a[1] || (a[0] === me ? -1 : b[0] === me ? 1 : 0));
+    const rank = standings.findIndex(([n]) => n === me) + 1;
+    const colorOf = new Map(race.racers.map((x) => [x.name, x.color]));
+    const table = `<ol class="tour-standings">${standings.map(([n, pts]) => `<li class="${n === me ? 'me' : ''}"><i style="background:${colorOf.get(n) || '#fff'}"></i><span>${n === me ? 'Toi' : n}</span><b>${pts} pts</b></li>`).join('')}</ol>`;
+    $('endTitle').textContent = rank === 1 ? 'Grand Tour gagné !' : `Grand Tour : ${ordinal(rank)} au classement`;
+    $('podium').innerHTML = `<div class="ride-end">${worldSvg(null, true)}<div><div class="ride-stats">${stat('Points', `${tour.points.get(me) || 0}`)}${stat('Temps total', formatTime(tour.time))}${stat('Distance', km(tour.dist))}${stat('Vitesse moyenne', kmh(tour.dist, tour.time))}</div>${table}</div></div>`;
+    $('endNote').textContent = `Places par zone : ${tour.places.map((x) => ordinal(x)).join(', ')}. ${best ? 'Meilleur temps sur le Grand Tour !' : `Meilleur temps sur le Grand Tour : ${formatTime(progress[TOUR_ID])}.`}`;
     $('nextStage').hidden = true;
     tour.active = false;
     tour.done = true;
@@ -803,8 +818,9 @@ function showRideEnd() {
     tour.done = false;
     const { progress, best } = recordStage(safeStorage, c.id, zoneTime);
     const next = nextStage(c.id);
-    $('endTitle').textContent = `${placeAt(c, 1)} !`;
-    $('podium').innerHTML = `<div class="ride-end">${worldSvg(c.id, true)}<div class="ride-stats">${stat('Temps', formatTime(zoneTime))}${stat('Vitesse moyenne', kmh(track.length, zoneTime))}${stat('Distance', km(track.length))}${stat('Dénivelé', `${Math.round(zoneGain())} m`)}</div></div>`;
+    const place = race.positionOf(p);
+    $('endTitle').textContent = place === 1 ? `${placeAt(c, 1)} : victoire !` : `${placeAt(c, 1)} : ${ordinal(place)}`;
+    $('podium').innerHTML = `<div class="ride-end">${worldSvg(c.id, true)}<div class="ride-stats">${stat('Place', `${ordinal(place)} / ${race.racers.length}`)}${stat('Temps', formatTime(zoneTime))}${stat('Vitesse moyenne', kmh(track.length, zoneTime))}${stat('Dénivelé', `${Math.round(zoneGain())} m`)}</div></div>`;
     const count = STAGE_ORDER.filter((id) => progress[id]).length;
     $('endNote').textContent = `${best ? 'Meilleur temps sur cette zone ! ' : `Meilleur temps : ${formatTime(progress[c.id])}. `}${count === STAGES.length ? 'Les huit zones sont faites : essaie le Grand Tour d’une traite !' : `${count} zone${count > 1 ? 's' : ''} sur ${STAGES.length}.`}${next ? ` Prochaine zone : ${next.name}.` : ''}`;
     $('nextStage').hidden = !next;
@@ -886,7 +902,7 @@ function renderCourses() {
   }).join('')
     // Grande Balade : le Grand Tour (huit zones d'affilée), puis chaque zone seule (balade.js).
     + `<h3 class="course-section"><span>La Grande Balade</span><small>${STAGE_ORDER.filter((id) => progress[id]).length} / ${STAGES.length} zones</small></h3>`
-    + `<button type="button" class="course-card stage-card tour-card" data-tour="1" data-done="${progress[TOUR_ID] ? 'true' : 'false'}"><span class="cc-map">${worldSvg(null)}</span><span class="cc-body"><span class="c-name">Le Grand Tour</span><span class="c-tag">Les huit zones d’affilée : à chaque arrivée, la zone suivante s’ouvre et l’on repart lancé</span><span class="c-stats"><span>${(tourKm() / 1000).toFixed(1)} km</span><span>8 zones</span>${progress[TOUR_ID] ? `<span class="hot">✓ ${formatTime(progress[TOUR_ID])}</span>` : ''}</span></span>${stars(3)}</button>`
+    + `<button type="button" class="course-card stage-card tour-card" data-tour="1" data-done="${progress[TOUR_ID] ? 'true' : 'false'}"><span class="cc-map">${worldSvg(null)}</span><span class="cc-body"><span class="c-name">Le Grand Tour</span><span class="c-tag">Les huit zones d’affilée contre cinq adversaires : à chaque arrivée, la zone suivante s’ouvre et tout le monde repart lancé</span><span class="c-stats"><span>${(tourKm() / 1000).toFixed(1)} km</span><span>8 zones</span><span>Points</span>${progress[TOUR_ID] ? `<span class="hot">✓ ${formatTime(progress[TOUR_ID])}</span>` : ''}</span></span>${stars(3)}</button>`
     + STAGE_ORDER.map((id) => {
       const info = describeCourse(id);
       const done = progress[id];

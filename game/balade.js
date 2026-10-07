@@ -1,13 +1,14 @@
 // La Grande Balade : huit zones à vélo qui s'enchaînent comme les circuits d'un monde ouvert (données pures,
 // testées dans tests/balade.test.js ; décor dans game/balade-scene.js).
 //
-// Chaque zone est un parcours ouvert (Track.open) d'environ 2 à 2,5 km : départ et arrivée distincts, sans
-// adversaires ni objets, sur un chemin de terre. On peut rouler une zone seule ou faire le Grand Tour : à
-// l'arrivée d'une zone, la suivante se charge et l'on repart lancé, chrono et distance cumulés.
+// Chaque zone est un parcours ouvert (Track.open) d'environ 2 à 2,5 km : départ et arrivée distincts, sur un
+// chemin de terre, avec les cinq adversaires et les boîtes à objets des circuits. On peut rouler une zone seule ou
+// faire le Grand Tour : à l'arrivée d'une zone, la suivante se charge et tout le peloton repart lancé ; chaque
+// zone rapporte des points selon la place (game/main.js), chrono et distance cumulés.
 // La carte du monde (worldMap) met les huit routes bout à bout : elle est tirée des tracés eux-mêmes.
 //
 // Une zone est un circuit comme les autres (COURSES), avec en plus :
-//   ride     : balade sans adversaires ni boîtes à objets, sur un chemin de terre (baseSurface 'path')
+//   ride     : zone de balade, sur un chemin de terre (baseSurface 'path')
 //   open     : parcours ouvert ; lead = [avant, après] mètres de route dessinée de part et d'autre
 //   heading  : cap de départ (degrés, 0 = +x, 90 = +z), comme road() dans courses.js
 //   theme    : ambiance sonore et climat (meadow, alpine : ceux des circuits)
