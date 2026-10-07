@@ -142,6 +142,13 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
     private var requestScan = false
     /// Reconnexion demandée avant que le Bluetooth soit prêt.
     private var requestReconnect = false
+    /// Reconnexion du lancement de l'appli : les machines d'une salle cartographiée n'y ont pas droit.
+    private var launchReconnect = false
+    /// Machine choisie sur la carte avant que le Bluetooth soit prêt.
+    private var pendingMachine: (id: UUID, name: String, kind: MachineKind?)?
+    /// La machine figure-t-elle sur une carte de salle (GymStore) ? Dans une salle, l'appli ne se reconnecte pas
+    /// toute seule au lancement à la machine de la dernière fois : un autre sportif l'utilise peut-être.
+    var isGymMachine: ((UUID) -> Bool)?
     /// Appareils en attente de reconnexion automatique (connexion sans délai : iOS la mène à bien dès que
     /// l'appareil réapparaît, même des minutes plus tard).
     private var waiting: Set<UUID> = [] { didSet { waitingReconnect = !waiting.isEmpty } }
@@ -170,6 +177,7 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         // Machine ou ceinture déjà connue : connexion en attente dès le lancement, aboutit quand elle se réveille.
         if !demo, knownTrainerName != nil || knownHeartName != nil {
             requestReconnect = true
+            launchReconnect = true
             central = CBCentralManager(delegate: self, queue: .main)
         }
     }
@@ -212,7 +220,8 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         default: bluetoothState = "Initialisation Bluetooth…"
         }
         if poweredOn && requestScan { scan() }
-        if poweredOn && requestReconnect { requestReconnect = false; reconnectKnown() }
+        if poweredOn && requestReconnect { requestReconnect = false; reconnectKnown(); launchReconnect = false }
+        if poweredOn, let m = pendingMachine { useMachine(m.id, name: m.name, kind: m.kind) }
         if !poweredOn && !demo {
             scanning = false
             for c in connections.values { c.connectionTimer?.invalidate(); c.cancelWrites(); c.state = "Déconnecté"; c.chars = [:]; c.buttons = [] }
@@ -789,6 +798,10 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         }
         for (key, role) in [(BluetoothStore.knownTrainerKey, DeviceRole.trainer), (BluetoothStore.knownHeartKey, DeviceRole.heart)] {
             guard let k = known(key) else { continue }
+            if launchReconnect, role == .trainer, isGymMachine?(k.id) == true {
+                log("\(k.name) est une machine de salle : pas de reconnexion automatique au lancement. Choisis ta machine sur la carte en lançant un niveau.")
+                continue
+            }
             if let c = connections[k.id], c.peripheral.state != .disconnected { continue }
             if connections[k.id] == nil {
                 guard let p = central.retrievePeripherals(withIdentifiers: [k.id]).first else {
@@ -800,6 +813,59 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         }
         refresh()
     }
+    // MARK: Machine choisie sur la carte de la salle
+
+    /// Machine connectée ou attendue (connexion en attente), même identifiant que la carte des salles.
+    var currentTrainerID: UUID? { trainerID }
+    /// La machine choisie dort encore : connexion en attente.
+    var trainerWaiting: Bool { trainerID.map { waiting.contains($0) } ?? false }
+
+    /// Machine choisie sur la carte au lancement d'un niveau : connexion en attente, sans délai d'expiration,
+    /// qui aboutit dès que la machine se réveille. La machine précédente est libérée. `kind` : type connu de la
+    /// carte, utilisé tant que la machine ne l'a pas donné elle-même.
+    func useMachine(_ id: UUID, name: String, kind: MachineKind?) {
+        guard !demo else { return }
+        if let kind, rememberedKind(for: id) == nil { remember(kind, for: id, key: BluetoothStore.seenKindsKey) }
+        guard let central, poweredOn else {
+            pendingMachine = (id, name, kind)
+            if central == nil { central = CBCentralManager(delegate: self, queue: .main) }
+            return
+        }
+        pendingMachine = nil
+        if trainerID == id, let c = connections[id], c.peripheral.state != .disconnected {
+            log("\(c.name) : déjà \(c.peripheral.state == .connected ? "connectée" : "en attente").")
+            return
+        }
+        if connections[id] == nil {
+            guard let p = central.retrievePeripherals(withIdentifiers: [id]).first else {
+                log("\(name) : machine introuvable sur ce téléphone. Refais la cartographie de la salle."); return
+            }
+            connections[id] = Connection(p, name: name, rssi: 0)
+        }
+        log("Machine choisie sur la carte : \(name)")
+        connect(id, role: .trainer, auto: true)
+    }
+
+    /// Abandonne la connexion en attente vers la machine choisie (une machine déjà connectée le reste).
+    func releaseMachine() {
+        pendingMachine = nil
+        guard let id = trainerID, waiting.contains(id) else { return }
+        log("Machine choisie abandonnée.")
+        disconnect(id)
+    }
+
+    /// Type lu par la cartographie (connexion courte) : connu dès la prochaine connexion à cette machine.
+    func rememberDetectedKind(_ kind: MachineKind, for id: UUID) {
+        remember(kind, for: id, key: BluetoothStore.seenKindsKey)
+        if trainerID == id, detectedKind == nil { detectedKind = kind; applyKind() }
+    }
+
+    /// Type choisi à la main sur la carte (nil = automatique).
+    func rememberChosenKind(_ kind: MachineKind?, for id: UUID) {
+        remember(kind, for: id, key: BluetoothStore.chosenKindsKey)
+        if trainerID == id { kindOverride = kind; applyKind() }
+    }
+
     private struct Known: Codable {
         var id: UUID
         var name: String

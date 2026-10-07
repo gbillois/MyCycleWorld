@@ -157,6 +157,29 @@
       </div>
     </section>
 
+    <!-- Appli iOS, carte des salles : choix de la machine avant le départ (gym-picker.js). Ouvert depuis
+         le choix du circuit ou du bassin (data-parent posé par main.js). -->
+    <section class="side-panel screen-panel" id="machinePanel" hidden aria-label="Ta machine" data-parent="coursePanel" data-crumb="Machine">
+      <header class="sp-head">
+        <button class="btn back" data-close aria-label="Retour"><svg class="ico"><use href="#i-back"/></svg><span>Retour</span></button>
+        <div class="sp-titles"><nav class="crumbs" aria-label="Chemin"></nav><h2 id="gymTitle">Sur quelle machine ?</h2></div>
+      </header>
+      <div class="sp-body gym-layout">
+        <div class="gym-col">
+          <div class="gym-places" id="gymPlaces" hidden></div>
+          <div class="gym-map" id="gymMap"></div>
+          <p class="panel-note" id="gymNote"></p>
+        </div>
+        <div class="gym-side">
+          <button type="button" class="gym-item gym-nearest" id="gymNearest" hidden></button>
+          <button type="button" class="btn play" id="gymGo" disabled><span class="gl">Touche ta machine sur le plan</span><span class="glyph"><span class="k-kbd">Entrée</span><span class="k-pad pad-a">A</span></span></button>
+          <div class="gym-list" id="gymList"></div>
+          <button type="button" class="btn" id="gymSkip">Jouer sans machine de la carte</button>
+          <button type="button" class="btn small" id="gymEdit">Modifier la carte de la salle</button>
+        </div>
+      </div>
+    </section>
+
     <!-- Options : connexions (une page par matériel) et réglages -->
     <section class="side-panel screen-panel" id="optionsPanel" hidden aria-label="Options" data-crumb="Options">
       <header class="sp-head">
@@ -169,6 +192,8 @@
           <button type="button" class="mode-card small" data-connect="zwift" data-crumb="Zwift"><span class="mc-icon"><svg class="ico"><use href="#i-pad"/></svg></span><span><span class="c-name">Connecter Zwift</span><span class="c-tag">Home trainer, manettes Zwift Play, cardio</span></span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
           <button type="button" class="mode-card small" data-connect="technogym" data-crumb="Technogym"><span class="mc-icon"><svg class="ico"><use href="#i-dumbbell"/></svg></span><span><span class="c-name">Connecter Technogym</span><span class="c-tag">Vélo, elliptique ou rameur Technogym, cardio</span></span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
           <button type="button" class="mode-card small" data-connect="ble" data-crumb="Bluetooth"><span class="mc-icon"><svg class="ico"><use href="#i-bt"/></svg></span><span><span class="c-name">Bluetooth standard</span><span class="c-tag">Toute machine FTMS ou capteur de puissance</span></span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
+          <!-- Appli iOS récente seulement (révision 4, capacité « gym ») : cartographie des salles. -->
+          <button type="button" class="mode-card small native-settings" id="gymOptions" hidden><span class="mc-icon"><svg class="ico"><use href="#i-route"/></svg></span><span><span class="c-name">Carte de ma salle</span><span class="c-tag">Repérer les machines de la salle sur un plan, plusieurs lieux</span></span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
           <!-- Appli iOS récente seulement (voir native.js, openNative) : écrans natifs par-dessus le jeu. -->
           <button type="button" class="mode-card small native-settings" id="nativeSettings" hidden><span class="mc-icon"><svg class="ico"><use href="#i-gear"/></svg></span><span><span class="c-name">Réglages de l'appli</span><span class="c-tag">Appareils, cockpit, diagnostic</span></span><svg class="chev" aria-hidden="true"><use href="#i-chev"/></svg></button>
         </div>
@@ -454,6 +479,21 @@
   <!-- Bouton Pause toujours visible en course (vélo, aviron, kayak ; souris et doigt) -->
   <button class="game-pause" id="gamePause" hidden aria-label="Pause"><svg class="ico" aria-hidden="true"><use href="#i-pause"/></svg></button>
   <div id="banner" class="banner" aria-live="polite"></div>
+
+  <!-- Départ en attente de la machine choisie sur la carte : la course part à ses premières données. -->
+  <section id="startGate" class="start-gate" hidden aria-live="polite">
+    <div class="panel narrow gate-card">
+      <div class="gate-badge" aria-hidden="true"><svg class="ico" id="gateIcon"><use href="#i-bt"/></svg></div>
+      <h2 id="gateTitle">En attente de ta machine</h2>
+      <ol class="gate-steps">
+        <li id="gateStep1">Connexion à la machine</li>
+        <li id="gateStep2">Premières données : la course part</li>
+      </ol>
+      <p class="muted" id="gateText"></p>
+      <button class="btn play" id="gateGo"><span>Partir sans attendre</span><span class="glyph"><span class="k-kbd">Entrée</span><span class="k-pad pad-a">A</span></span></button>
+      <button class="btn" id="gateCancel"><span>Changer de machine</span></button>
+    </div>
+  </section>
 
   <section id="pause" class="screen dim" hidden>
     <div class="panel narrow pause-card">

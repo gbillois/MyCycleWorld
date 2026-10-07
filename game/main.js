@@ -38,6 +38,8 @@ import { weatherMode, forecast, WEATHER_LABELS, windGrade, ftmsWindSpeed } from 
 import { buildForestScenery } from './mtb-scene.js';
 import { MtbMode } from './mtb-mode.js';
 import { HelmetFx } from './helmet-fx.js';
+import { GymPicker } from './gym-picker.js';
+import { gateStatus } from '../src/core/gym.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -429,6 +431,7 @@ function setupRace() {
 function show(id) {
   for (const s of ['loading', 'home', 'pause', 'end']) $(s).hidden = s !== id;
   $('gamePause').hidden = state !== 'race' || id !== null;
+  $('startGate').hidden = !(gate.active && state === 'race' && id === null);
   const racing = state === 'race' || state === 'paused' || state === 'end';
   hud.show(racing && mode === 'bike');
   $('rowHud').hidden = !(racing && mode === 'row');
@@ -441,6 +444,9 @@ function show(id) {
 
 async function goHome() {
   clearTimeout(endTimer);
+  // Départ abandonné pendant l'attente : la machine qui dort encore n'est plus attendue.
+  if (gate.active && devices.trainer.waiting) devices.releaseMachine?.();
+  gate.active = false;
   if (mode === 'row') await leaveRowing();
   if (mode === 'kayak') await leaveKayak();
   state = 'home';
@@ -470,6 +476,64 @@ function weatherBanner(type, d) {
   if (type === 'rain-start') hud.flash('🌧️ Il commence à pleuvoir : la route glisse', 2600, 'bad');
   else if (type === 'rain-stop') hud.flash('🌤️ La pluie s’arrête, la route va sécher', 2000, 'good');
   else if (type === 'windy') hud.flash(`💨 Vent fort, ${d.kmh} km/h : abrite-toi dans les roues !`, 2400);
+}
+
+// ---------- Départ en attente de la machine choisie sur la carte (appli iOS) ----------
+// La course est prête mais figée (compte à rebours arrêté) jusqu'aux premières données d'effort de la
+// machine : on lance le niveau, on installe son téléphone, on commence à pédaler ou à ramer, et c'est parti.
+const gate = { active: false, machine: null, step: '', prepared: false };
+const GATE_VERB = { rower: 'tire la poignée', cross: 'commence à pédaler', treadmill: 'commence à marcher', bike: 'commence à pédaler' };
+
+function armGate(machine) {
+  gate.machine = machine;
+  gate.active = !!machine;
+  gate.step = '';
+  gate.prepared = false;
+  updateGate(); // textes de l'écran d'attente (ou départ direct si la machine tourne déjà)
+}
+
+function updateGate() {
+  if (!gate.active) return;
+  const status = gateStatus(devices.trainer, gate.machine?.id);
+  if (status !== 'connecting' && !gate.prepared) {
+    gate.prepared = true;
+    devices.prepareRace?.(); // machine enfin là : prise de contrôle (pente ou résistance)
+  }
+  if (status === 'go') return void openGate(true);
+  if (status === gate.step) return;
+  gate.step = status;
+  const m = gate.machine;
+  const name = escHtml(m?.title || 'ta machine');
+  const verb = GATE_VERB[devices.machineKind || m?.kind] || 'commence l’effort';
+  const box = $('startGate');
+  box.dataset.step = status;
+  $('gateIcon').innerHTML = `<use href="#${status === 'idle' ? 'i-bolt' : 'i-bt'}"/>`;
+  $('gateStep1').className = status === 'connecting' || status === 'other' ? 'current' : 'done';
+  $('gateStep2').className = status === 'idle' ? 'current' : '';
+  if (status === 'connecting') {
+    $('gateTitle').innerHTML = `Réveille ${name}`;
+    $('gateStep1').textContent = 'Connexion en attente';
+    $('gateText').textContent = `Le jeu se connecte dès que la machine se réveille : un coup de pédale ou de rame, ou Start sur la console. Installe ton téléphone, puis ${verb}.`;
+  } else if (status === 'other') {
+    $('gateTitle').textContent = 'Une autre machine est connectée';
+    $('gateStep1').textContent = `Connexion à ${m?.title || 'ta machine'}…`;
+    $('gateText').textContent = `${devices.trainer.name} est encore branchée. Change de machine ou pars avec celle-ci.`;
+  } else {
+    $('gateTitle').innerHTML = `${name} est connectée`;
+    $('gateStep1').textContent = 'Machine connectée';
+    $('gateText').textContent = `Installe ton téléphone, puis ${verb} : la course part dès les premières données.`;
+  }
+  $('gateStep2').textContent = 'Premières données : la course part';
+}
+
+// Fin de l'attente : la course démarre (compte à rebours), machine prête ou non.
+function openGate(byMachine) {
+  if (!gate.active) return;
+  gate.active = false;
+  $('startGate').hidden = true;
+  if (state !== 'race') return; // machine déjà en route avant même le départ : la course part normalement
+  if (!gate.prepared) devices.prepareRace?.();
+  hud.flash(byMachine ? 'Données reçues : c’est parti !' : 'C’est parti !', 1200, 'good');
 }
 
 function pause() {
@@ -707,9 +771,12 @@ bindPreview('rowList', 'rowPreview', 'data-row', rowPreview);
 bindPreview('rowList', 'rowPreview', 'data-kayak', (id) => kayakPreview(id, { stars, icon }));
 $('rowList').addEventListener('click', (e) => {
   const card = e.target.closest('[data-row]');
-  if (card) startRowing(+card.dataset.row);
+  if (card) {
+    const d = +card.dataset.row;
+    chooseMachineThen(() => startRowing(d), { play: 'row', title: rowLevel(d).name, parent: 'rowPanel', opener: card });
+  }
   const k = e.target.closest('[data-kayak]');
-  if (k) startKayak(k.dataset.kayak);
+  if (k) chooseMachineThen(() => startKayak(k.dataset.kayak), { play: 'row', title: riverById(k.dataset.kayak).name, parent: 'rowPanel', opener: k });
 });
 
 // Jouer : choix de la machine, puis du niveau.
@@ -724,11 +791,59 @@ for (const card of document.querySelectorAll('[data-machine]')) {
   });
 }
 
-$('courseList').addEventListener('click', async (e) => {
+$('courseList').addEventListener('click', (e) => {
   const card = e.target.closest('[data-course]');
   if (!card) return;
-  await loadCourse(card.dataset.course);
-  startRace();
+  const id = card.dataset.course;
+  chooseMachineThen(
+    async () => {
+      await loadCourse(id);
+      startRace();
+    },
+    { play: playMachine === 'cross' ? 'cross' : 'bike', title: courseById(id).name, parent: 'coursePanel', opener: card },
+  );
+});
+
+// ---------- Carte de la salle (appli iOS) : choix de la machine au lancement d'un niveau ----------
+// Niveau choisi -> « Sur quelle machine ? » (s'il y a une carte) -> départ en attente de la machine.
+const safeStorage = (() => {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+})();
+let pendingLaunch = null; // { start, opts } : niveau à lancer une fois la machine choisie
+const gymPicker = new GymPicker({
+  devices,
+  storage: safeStorage,
+  onLaunch: (machine) => launchPending(machine),
+  onSkip: () => launchPending(null),
+  onEdit: () => devices.openNative?.('gym'),
+});
+function chooseMachineThen(start, opts) {
+  if (!gymPicker.available) {
+    armGate(null);
+    return start();
+  }
+  pendingLaunch = { start, opts };
+  $('machinePanel').dataset.parent = opts.parent;
+  gymPicker.open(opts);
+  menu.open('machinePanel', opts.opener);
+}
+function launchPending(machine) {
+  const launch = pendingLaunch;
+  if (!launch) return;
+  if (machine) devices.useMachine(machine.id, machine.kind);
+  armGate(machine);
+  launch.start();
+}
+// Attente du départ : « Partir sans attendre », ou « Changer de machine » (retour au plan, même niveau).
+$('gateGo').addEventListener('click', () => openGate(false));
+$('gateCancel').addEventListener('click', async () => {
+  const launch = pendingLaunch;
+  await goHome();
+  if (launch) chooseMachineThen(launch.start, launch.opts);
 });
 
 // ---------- Mode rameur ----------
@@ -857,7 +972,7 @@ function rowCameraTarget(outPos, outLook) {
 
 function frameRowing(dt, nowMs) {
   const r = rowing.race;
-  if (state === 'race' || state === 'end') {
+  if ((state === 'race' && !gate.active) || state === 'end') {
     // Bassin en ligne droite vers +z : le vent de dos est la composante z du vent (0 sans météo).
     weather.step(dt, r.time, true);
     r.tailwind = weather.active ? weather.now.speed * weather.now.dirZ : 0;
@@ -1142,6 +1257,7 @@ function refreshDevices() {
       : 'Sans home trainer : maintiens la flèche ↑ pour pédaler (250 W simulés).';
 }
 devices.addEventListener('change', refreshDevices);
+devices.addEventListener('change', updateGate);
 
 async function connect(kind, statusId, fn) {
   busy[kind] = true;
@@ -1186,7 +1302,8 @@ function applyHardware() {
   devices.setHardware(hwId);
   $('connectTitle').textContent = CONNECT_TITLES[hwId];
   if (!NATIVE) $('connectTrainer').textContent = hw.connectLabel;
-  $('hwHint').textContent = hw.hint;
+  // En salle (des dizaines de machines) : la carte de la salle de l'appli iOS évite de chercher la sienne dans une liste.
+  $('hwHint').textContent = hwId === 'technogym' && !NATIVE ? `${hw.hint} En salle, avec des dizaines de machines : l’appli iPhone MyCycleWorld cartographie la salle et te laisse choisir ta machine sur un plan.` : hw.hint;
   $('connectDemoCross').hidden = !(DEMO && hwId === 'technogym');
   $('zwiftRow').hidden = hwId !== 'zwift';
   for (const card of document.querySelectorAll('[data-connect]')) card.setAttribute('aria-current', String(card.dataset.connect === hwId));
@@ -1213,6 +1330,13 @@ if (NATIVE) {
   devices.addEventListener('change', refreshNativeEntries);
   refreshNativeEntries();
   $('nativeSettings').addEventListener('click', () => devices.openNative('settings'));
+  // Révision 4 : carte de la salle (lieux, machines repérées) dans les Options.
+  const refreshGymEntry = () => {
+    $('gymOptions').hidden = !devices.canUseGym;
+  };
+  devices.addEventListener('change', refreshGymEntry);
+  refreshGymEntry();
+  $('gymOptions').addEventListener('click', () => devices.openNative('gym'));
 }
 // Appli iOS : le profil choisi dans l'onglet « Appareils » fait foi dès qu'il change.
 let nativeHw = null;
@@ -1416,6 +1540,8 @@ for (const btn of document.querySelectorAll('.seg-btn[data-gfx]')) {
 
 // Rejouer la même course (vélo, aviron ou kayak).
 function replay() {
+  // Même machine de la carte : on attend à nouveau ses données (on rejoue quand on reprend l'effort).
+  if (gate.machine) armGate(gate.machine);
   if (mode === 'row') startRowing(rowing.distance);
   else if (mode === 'kayak') startKayak(kayak.riverId);
   else startRace();
@@ -1448,7 +1574,8 @@ window.addEventListener('keydown', (e) => {
   } else if (code === 'Space' && state === 'race' && mode === 'kayak') {
     kayak.useItem();
   } else if (code === 'Enter' || code === 'NumpadEnter') {
-    if (state === 'paused') resume();
+    if (state === 'race' && gate.active) openGate(false);
+    else if (state === 'paused') resume();
     else if (state === 'end') replay();
   }
 });
@@ -1753,7 +1880,7 @@ function frame(nowMs) {
   helmetFx.group.visible = mode === 'bike';
   if (mode === 'kayak') {
     kayakSounds();
-    kayak.frame(dt, nowMs, state, kayakInput(), kayakHud());
+    kayak.frame(dt, nowMs, gate.active && state === 'race' ? 'paused' : state, kayakInput(), kayakHud());
     updateGrade();
     if (post) post.render();
     else renderer.render(scene, camera);
@@ -1767,7 +1894,7 @@ function frame(nowMs) {
     requestAnimationFrame(frame);
     return;
   }
-  if (state === 'race' || state === 'end') {
+  if ((state === 'race' && !gate.active) || state === 'end') {
     weather.step(dt, race.time, true); // vent et pluie de l'instant, avant la physique
     race.update(dt, playerInput());
     if (race.time < 0) hud.countdown(String(Math.ceil(-race.time)));

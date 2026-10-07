@@ -28,6 +28,7 @@ final class NativeRouter: ObservableObject {
 struct ContentView: View {
     @EnvironmentObject private var store: BluetoothStore
     @EnvironmentObject private var inspector: BLEInspector
+    @EnvironmentObject private var gym: GymStore
     @StateObject private var router = NativeRouter()
 
     var body: some View {
@@ -36,10 +37,14 @@ struct ContentView: View {
                 // Retour au jeu : les recherches s'arrêtent, les appareils connectés le restent.
                 store.stopScan()
                 inspector.stopScan()
+                // Cartographie et recherche de la machine la plus proche : rien n'écoute plus derrière le jeu.
+                if gym.survey != nil { gym.stopSurvey() }
+                gym.listen("nearest", false)
             }) { sheet in
                 AppSettingsView(start: sheet.screen)
                     .environmentObject(store)
                     .environmentObject(inspector)
+                    .environmentObject(gym)
                     .environmentObject(router)
                     .tint(.mint)
             }
@@ -49,6 +54,7 @@ struct ContentView: View {
 /// Réglages de l'appli : accueil et écrans natifs, avec un bouton « Fermer » qui ramène au jeu.
 private struct AppSettingsView: View {
     @EnvironmentObject private var store: BluetoothStore
+    @EnvironmentObject private var gym: GymStore
     @State private var path: [NativeScreen]
 
     init(start: NativeScreen) {
@@ -63,6 +69,15 @@ private struct AppSettingsView: View {
                     Label(summary, systemImage: store.demo ? "play.circle.fill" : "dot.radiowaves.left.and.right")
                         .foregroundStyle(store.demo ? Color.orange : store.activeConnectionCount > 0 ? Color.mint : Color.secondary)
                     Text("Matériel : \(store.profile.label)").font(.callout).foregroundStyle(.secondary)
+                }
+                Section {
+                    NavigationLink(value: NativeScreen.gym) {
+                        SettingsRow(title: "Salles de sport", detail: gymSummary, icon: "map")
+                    }
+                } header: {
+                    Text("Cartographie des salles")
+                } footer: {
+                    Text("Repère les machines de ta salle sur un plan (Technogym et toute machine Bluetooth), puis choisis la tienne en lançant un niveau : le jeu s’y connecte dès qu’elle se réveille et part quand elle envoie ses données.")
                 }
                 Section("Appareils et pilotage") {
                     NavigationLink(value: NativeScreen.devices) {
@@ -86,7 +101,7 @@ private struct AppSettingsView: View {
                     Text("La démo déconnecte les appareils réels et simule les mesures (un rameur en profil Technogym).")
                 }
                 Section("Confidentialité") {
-                    Text("Les mesures et le journal restent en mémoire sur cet appareil. Aucun compte, serveur, suivi publicitaire ni HealthKit. Le partage du diagnostic est manuel.").font(.callout)
+                    Text("Les mesures et le journal restent en mémoire sur cet appareil ; la carte des salles y est enregistrée, nulle part ailleurs. Aucun compte, serveur, suivi publicitaire ni HealthKit. Le partage du diagnostic est manuel.").font(.callout)
                 }
                 Section {
                     Text(verbatim: AppSettingsView.version).font(.caption).foregroundStyle(.secondary)
@@ -98,6 +113,12 @@ private struct AppSettingsView: View {
                 destination(screen).nativeCloseButton()
             }
         }
+    }
+
+    private var gymSummary: String {
+        guard let place = gym.book.defaultPlace else { return "Créer la carte de ta salle" }
+        let others = gym.book.places.count - 1
+        return "\(place.name) · \(place.machines.count) machine\(place.machines.count > 1 ? "s" : "")" + (others > 0 ? " · \(others) autre\(others > 1 ? "s" : "") lieu\(others > 1 ? "x" : "")" : "")
     }
 
     private var summary: String {
@@ -112,6 +133,7 @@ private struct AppSettingsView: View {
         case .cockpit: DashboardView()
         case .inspector: InspectorView()
         case .log: LogView()
+        case .gym: GymPlacesView()
         case .settings: EmptyView()
         }
     }
@@ -276,6 +298,15 @@ private struct DevicesView: View {
                 }
                 .pickerStyle(.segmented)
             } header: { Text("Matériel") } footer: { Text(store.profile.hint) }
+            if store.profile == .technogym {
+                Section {
+                    NavigationLink(value: NativeScreen.gym) {
+                        SettingsRow(title: "Carte de ma salle", detail: "Repère les machines de la salle et choisis la tienne sur le plan", icon: "map")
+                    }
+                } footer: {
+                    Text("En salle, inutile de chercher la bonne machine dans la liste : cartographie la salle une fois, puis touche ta machine sur la carte en lançant un niveau.")
+                }
+            }
             Section {
                 Toggle("Mode démo", isOn: Binding(get: { store.demo }, set: { store.setDemo($0) }))
             } footer: { Text(store.profile == .technogym ? "La démo déconnecte les appareils réels et simule un rameur." : "La démo déconnecte les appareils réels et affiche des mesures simulées.") }

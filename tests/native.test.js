@@ -50,7 +50,7 @@ test('détection de la WebView de l’appli', () => {
 
 test('au démarrage, le jeu annonce qu’il est prêt', () => {
   const { posted, win } = setup();
-  assert.deepEqual(posted, [{ type: 'ready', protocol: 1, minor: 3 }]);
+  assert.deepEqual(posted, [{ type: 'ready', protocol: 1, minor: 4 }]);
   assert.equal(typeof win.mcwNative.state, 'function');
   assert.equal(typeof win.mcwNative.button, 'function');
 });
@@ -285,4 +285,40 @@ test('révision 3 : reconnexion des appareils déjà connus', () => {
   posted.length = 0;
   assert.equal(devices.reconnect(), true);
   assert.deepEqual(posted, [{ type: 'reconnect' }]);
+});
+
+test('révision 4 : carte des salles, machine choisie et identifiant de la machine', () => {
+  const { devices, win, posted } = setup();
+  posted.length = 0;
+  assert.equal(devices.canUseGym, false);
+  assert.equal(devices.useMachine('11111111-2222-3333-4444-555555555555', 'rower'), false, 'appli sans « gym » : rien n’est envoyé');
+  devices.gymScan(true);
+  devices.releaseMachine();
+  assert.deepEqual(posted, []);
+
+  const id = '11111111-2222-3333-4444-555555555555';
+  win.mcwNative.state({ ...STATE, capabilities: ['openNative', 'reconnect', 'gym'], trainer: { ...STATE.trainer, connected: false, id: id.toLowerCase(), waiting: true } });
+  assert.equal(devices.canUseGym, true);
+  assert.equal(devices.trainer.id, id, 'identifiant en majuscules, comme la carte');
+  assert.equal(devices.trainer.waiting, true);
+  assert.equal(devices.useMachine(id, 'rower'), true);
+  assert.equal(devices.useMachine(id, 'fusée'), true);
+  devices.gymScan(1);
+  devices.releaseMachine();
+  assert.equal(devices.openNative('gym'), true);
+  assert.deepEqual(posted, [
+    { type: 'useMachine', id, kind: 'rower' },
+    { type: 'useMachine', id },
+    { type: 'gymScan', active: true },
+    { type: 'releaseMachine' },
+    { type: 'openNative', screen: 'gym' },
+  ]);
+
+  let gymEvents = 0;
+  devices.addEventListener('gym', () => gymEvents++);
+  win.mcwNative.gym({ v: 1, defaultPlace: 'AAAAAAAA-0000-0000-0000-000000000000', places: [{ id: 'AAAAAAAA-0000-0000-0000-000000000000', name: 'Club', width: 20, depth: 12, machines: [{ id, name: 'SKILLROW', kind: 'rower', x: 3, y: 4 }] }], nearby: [], scanning: false });
+  assert.equal(gymEvents, 1);
+  assert.equal(devices.gym.places[0].machines[0].title, 'SKILLROW');
+  win.mcwNative.gym('nimporte quoi');
+  assert.deepEqual(devices.gym.places, []);
 });

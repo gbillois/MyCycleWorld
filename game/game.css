@@ -1586,3 +1586,73 @@ body.touch, body.touch #hud, body.touch #rowHud { -webkit-user-select: none; use
   body.touch #rowHud .hud-top-left, body.touch #kayakHud .hud-top-left { padding: 5px 10px 6px; }
   body.touch #rowHud .pos > span, body.touch #kayakHud .pos > span { font-size: 32px; }
 }
+
+/* ---------- Carte de la salle : « Sur quelle machine ? » (appli iOS, gym-picker.js) ---------- */
+.gym-layout { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.9fr); gap: 22px; align-items: start; }
+.gym-col { min-width: 0; }
+.gym-places { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+.chip-btn { font: 700 14px/1 var(--f-ui); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); background: rgba(255, 255, 255, 0.06); border: 1.5px solid rgba(255, 255, 255, 0.14); border-radius: 999px; padding: 9px 14px; cursor: pointer; }
+.chip-btn[aria-pressed="true"] { color: var(--ink); background: var(--gold); border-color: var(--gold); }
+.chip-btn:focus-visible, body[data-input="pad"] .chip-btn:focus { outline: 3px solid var(--gold); outline-offset: 2px; }
+.gym-map { border-radius: 18px; background: rgba(4, 7, 16, 0.55); border: 1px solid rgba(255, 255, 255, 0.1); padding: 6px; margin-bottom: 10px; }
+.gym-map svg { display: block; width: 100%; height: auto; max-height: min(58vh, 640px); }
+.gym-map .room { fill: rgba(255, 255, 255, 0.04); stroke: rgba(255, 255, 255, 0.45); stroke-width: 0.08; }
+.gym-map .g1 { stroke: rgba(255, 255, 255, 0.05); stroke-width: 0.03; }
+.gym-map .g5 { stroke: rgba(255, 255, 255, 0.14); stroke-width: 0.05; }
+.gym-map .door { fill: var(--ok); }
+.gym-map .door-t { fill: var(--ok); text-anchor: middle; font-family: var(--f-ui); font-weight: 700; }
+.gym-map .gm { cursor: pointer; --k: #9aa3b5; }
+.gym-map .gm text { fill: var(--text); text-anchor: middle; font-family: var(--f-ui); font-weight: 700; paint-order: stroke; stroke: rgba(5, 8, 18, 0.85); stroke-width: 0.12; }
+.gym-map .gm use { color: #fff; pointer-events: none; }
+.gym-map .gm-dot { fill: var(--k); stroke: rgba(0, 0, 0, 0.45); stroke-width: 0.06; }
+.gym-map .gm-err { fill: var(--k); opacity: 0.1; }
+.gym-map .gm.fit-no { opacity: 0.45; }
+.gym-map .gm.sel .gm-dot { stroke: var(--gold); stroke-width: 0.22; }
+.gym-map .gm.sel text { fill: var(--gold); }
+.gym-map .gm-near { fill: none; stroke: var(--accent-2); stroke-width: 0.16; animation: gm-pulse 1.1s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+@keyframes gm-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.35; transform: scale(1.18); } }
+.k-bike { --k: #3ccf7a; } .k-rower { --k: #2b8cff; } .k-cross { --k: #9b5de5; } .k-treadmill { --k: #ff8a3d; } .k-power { --k: #e8b600; } .k-none { --k: #7d869a; }
+.gym-side { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.gym-side > .btn { width: 100%; }
+.gym-side .btn.play { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.gym-side .btn.play:disabled { opacity: 0.55; cursor: default; }
+.gym-list { display: grid; gap: 8px; }
+.gym-item { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; font: inherit; color: var(--text); padding: 10px 12px; border-radius: 16px; border: 2px solid rgba(255, 255, 255, 0.1); background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.025)); cursor: pointer; transition: border-color 0.15s, background 0.15s, transform 0.18s var(--ease-out); }
+.gym-item .gi-ico { flex: none; width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; font-size: 22px; color: #fff; background: var(--k, #7d869a); }
+.gym-item .gi-text { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.gym-item .c-name { font: 400 20px/1.1 var(--f-display); overflow-wrap: anywhere; }
+.gym-item .c-tag { font-size: 13px; color: var(--muted); line-height: 1.3; }
+.gym-item .gi-kicker { font: 800 12px/1 var(--f-ui); letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent-2); }
+.gym-item.fit-no { opacity: 0.6; }
+.gym-item.near .gi-ico { box-shadow: 0 0 0 3px var(--accent-2); }
+.gym-item[aria-pressed="true"] { border-color: var(--gold); background: linear-gradient(180deg, rgba(255, 210, 63, 0.16), rgba(255, 210, 63, 0.04)); }
+.gym-item:hover, .gym-item:focus-visible, body[data-input="pad"] .gym-item:focus { outline: none; border-color: var(--gold); transform: translateX(4px); }
+.gym-nearest { border-color: rgba(255, 138, 61, 0.6); background: linear-gradient(180deg, rgba(255, 138, 61, 0.16), rgba(255, 138, 61, 0.04)); }
+@media (max-width: 760px), (orientation: portrait) {
+  .gym-layout { grid-template-columns: minmax(0, 1fr); }
+  .gym-map svg { max-height: 46vh; }
+}
+@media (prefers-reduced-motion: reduce) { .gym-map .gm-near { animation: none; } }
+
+/* ---------- Départ en attente de la machine choisie ---------- */
+.start-gate { position: fixed; inset: auto 0 calc(18px + var(--sb)) 0; display: grid; place-items: center; padding: 0 calc(16px + var(--sr)) 0 calc(16px + var(--sl)); pointer-events: none; z-index: 5; }
+.gate-card { pointer-events: auto; padding: 22px 22px 18px; animation: pop-in 0.35s var(--ease-back) both; }
+.gate-card h2 { font: 400 clamp(28px, 4vw, 40px)/1.05 var(--f-display); margin: 0 0 10px; }
+.gate-badge { width: 56px; height: 56px; margin: 0 auto 10px; display: grid; place-items: center; border-radius: 16px; font-size: 28px; color: #fff; background: linear-gradient(160deg, #4fd2ff, #2b6cff); box-shadow: 0 10px 24px rgba(43, 108, 255, 0.35); }
+.start-gate[data-step="connecting"] .gate-badge { animation: mb-pulse 1.2s ease-in-out infinite; }
+.start-gate[data-step="idle"] .gate-badge { background: linear-gradient(160deg, #6be59a, #22a85a); box-shadow: 0 10px 24px rgba(60, 207, 122, 0.35); }
+.gate-steps { list-style: none; margin: 0 0 10px; padding: 0; display: grid; gap: 6px; text-align: left; font: 700 16px/1.2 var(--f-ui); letter-spacing: 0.04em; }
+.gate-steps li { display: flex; align-items: center; gap: 10px; color: var(--muted); }
+.gate-steps li::before { content: ''; flex: none; width: 12px; height: 12px; border-radius: 50%; border: 2px solid currentColor; }
+.gate-steps li.current { color: var(--text); }
+.gate-steps li.current::before { border-color: var(--warn); background: var(--warn); animation: mb-pulse 1.2s ease-in-out infinite; }
+.gate-steps li.done { color: var(--ok); }
+.gate-steps li.done::before { background: var(--ok); border-color: var(--ok); }
+.gate-card .btn { width: 100%; }
+.gate-card .btn + .btn { margin-top: 10px; display: flex; align-items: center; justify-content: center; }
+.gate-card .btn.play { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+@media (orientation: landscape) and (max-height: 520px) {
+  .gate-card { padding: 14px 16px 12px; }
+  .gate-badge, .gate-card .muted { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .start-gate .gate-badge, .gate-steps li.current::before { animation: none; } }

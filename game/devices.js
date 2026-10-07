@@ -84,6 +84,11 @@ export class Devices extends EventTarget {
     await this.trainer.connect({ acceptAll, filters });
   }
 
+  // Carte des salles : seulement dans l'appli iOS (la recherche Web Bluetooth ne donne pas la force du signal).
+  get canUseGym() {
+    return false;
+  }
+
   // Appareils déjà choisis dans cette page (Web Bluetooth ne les retrouve pas après un rechargement) :
   // même forme que l'état « reconnect » de l'appli iOS.
   get known() {

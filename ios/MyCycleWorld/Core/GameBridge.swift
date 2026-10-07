@@ -5,6 +5,8 @@ import Foundation
 // révision 1 = champs facultatifs pour les elliptiques et rameurs ; révision 2 = l'appli annonce ses
 // commandes en plus (capabilities) et le jeu peut ouvrir les écrans natifs depuis ses Options).
 // Révision 3 : reconnexion des machines déjà connues (commande « reconnect » et état « reconnect »).
+// Révision 4 : cartographie des salles (capacité « gym ») : l'appli envoie la carte (window.mcwNative.gym), le
+// jeu choisit la machine au lancement d'un niveau (« useMachine ») et sait quand elle est branchée (trainer.id).
 // Chaque ajout est facultatif : un jeu plus ancien l'ignore, une appli plus ancienne aussi.
 
 /// Appui ou relâchement d'un bouton de manette Zwift, à transmettre au jeu.
@@ -25,6 +27,8 @@ enum NativeScreen: String, CaseIterable, Identifiable, Hashable {
     case inspector
     /// Journal Bluetooth et partage du diagnostic.
     case log
+    /// Cartographie des salles de sport (lieux, machines repérées sur le plan).
+    case gym
 
     var id: String { rawValue }
 }
@@ -43,9 +47,16 @@ enum GameCommand: Equatable {
     /// Reconnecter la machine et la ceinture déjà connues (révision 3) : connexion en attente, aboutit dès
     /// que l'appareil se réveille.
     case reconnect
+    /// Révision 4 : se brancher sur cette machine de la carte (connexion en attente qui aboutit dès qu'elle se
+    /// réveille). `kind` : type connu du jeu, utilisé tant que la machine ne l'a pas donné elle-même.
+    case useMachine(UUID, kind: MachineKind?)
+    /// Révision 4 : abandonner la connexion en attente vers la machine choisie (une machine déjà connectée le reste).
+    case releaseMachine
+    /// Révision 4 : écouter les machines autour (écran de choix de la machine ouvert) ou arrêter.
+    case gymScan(Bool)
 
     /// Commandes que cette appli comprend en plus du protocole 1 d'origine, annoncées au jeu dans l'état.
-    static let capabilities = ["openNative", "reconnect"]
+    static let capabilities = ["openNative", "reconnect", "gym"]
     static let gradeRange: ClosedRange<Double> = -25...30
 
     init?(body: Any) {
@@ -60,6 +71,13 @@ enum GameCommand: Equatable {
             self = .vibrate
         case "reconnect":
             self = .reconnect
+        case "useMachine":
+            guard let id = (dict["id"] as? String).flatMap(UUID.init(uuidString:)) else { return nil }
+            self = .useMachine(id, kind: (dict["kind"] as? String).flatMap(MachineKind.init(rawValue:)))
+        case "releaseMachine":
+            self = .releaseMachine
+        case "gymScan":
+            self = .gymScan(dict["active"] as? Bool ?? false)
         case "grade":
             guard let value = GameCommand.number(dict["value"]), value.isFinite else { return nil }
             self = .grade(min(GameCommand.gradeRange.upperBound, max(GameCommand.gradeRange.lowerBound, value)))
@@ -93,6 +111,10 @@ struct GameState: Encodable, Equatable {
         var controlReady: Bool
         var name: String?
         var status: String
+        /// Révision 4 : identifiant de la machine connectée ou attendue (même identifiant que la carte).
+        var id: String?
+        /// Révision 4 : connexion en attente (la machine dort encore).
+        var waiting: Bool?
     }
     struct Heart: Encodable, Equatable {
         var connected: Bool
@@ -107,8 +129,8 @@ struct GameState: Encodable, Equatable {
 
     var v = 1
     /// Révision du protocole 1 : 1 = champs machine ci-dessous (facultatifs, absents quand inconnus),
-    /// 2 = liste `capabilities`.
-    var minor = 3
+    /// 2 = liste `capabilities`, 3 = `reconnect`, 4 = carte des salles et `trainer.id`.
+    var minor = 4
     /// Commandes facultatives que l'appli comprend (par exemple « openNative ») : le jeu n'affiche les
     /// entrées correspondantes que si elles y figurent.
     var capabilities: [String] = GameCommand.capabilities
@@ -147,6 +169,12 @@ enum GameScript {
     static func state(_ state: GameState) -> String? {
         guard let json = state.json() else { return nil }
         return "window.mcwNative&&window.mcwNative.state(\(json))"
+    }
+
+    /// Carte des salles (révision 4), envoyée au chargement et à chaque changement.
+    static func gym(_ payload: GymPayload) -> String? {
+        guard let json = payload.json() else { return nil }
+        return "window.mcwNative&&window.mcwNative.gym&&window.mcwNative.gym(\(json))"
     }
 
     /// Le nom du bouton est inséré dans du code JavaScript : on n'accepte que lettres, chiffres et « _ ».

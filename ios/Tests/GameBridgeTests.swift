@@ -84,8 +84,8 @@ final class GameBridgeTests: XCTestCase {
         XCTAssertEqual(trainer["controlled"] as? Bool, false)
         XCTAssertEqual(trainer["name"] as? String, "KICKR \"Core\"")
         XCTAssertNil(object["speed"], "une mesure absente n'est pas envoyée")
-        XCTAssertEqual(object["minor"] as? Int, 3)
-        XCTAssertEqual(object["capabilities"] as? [String], ["openNative", "reconnect"], "l'appli annonce l'ouverture des écrans natifs et la reconnexion")
+        XCTAssertEqual(object["minor"] as? Int, 4)
+        XCTAssertEqual(object["capabilities"] as? [String], ["openNative", "reconnect", "gym"], "l'appli annonce l'ouverture des écrans natifs, la reconnexion et la carte des salles")
         XCTAssertNil(object["machineKind"], "champs machine facultatifs : absents quand inconnus")
         XCTAssertNil(object["strokeRate"])
     }
@@ -148,5 +148,29 @@ final class GameBridgeTests: XCTestCase {
         let r = try XCTUnwrap(object["reconnect"] as? [String: Any])
         XCTAssertEqual(r["trainer"] as? String, "Rower RWX")
         XCTAssertEqual(r["waiting"] as? Bool, true)
+    }
+
+    func testGymCommandsAndState() throws {
+        let id = "11111111-2222-3333-4444-555555555555"
+        XCTAssertEqual(GameCommand(body: ["type": "useMachine", "id": id, "kind": "rower"]), .useMachine(UUID(uuidString: id)!, kind: .rower))
+        XCTAssertEqual(GameCommand(body: ["type": "useMachine", "id": id, "kind": "fusée"]), .useMachine(UUID(uuidString: id)!, kind: nil), "type inconnu : ignoré")
+        XCTAssertNil(GameCommand(body: ["type": "useMachine", "id": "pas-un-uuid"]))
+        XCTAssertNil(GameCommand(body: ["type": "useMachine"]))
+        XCTAssertEqual(GameCommand(body: ["type": "releaseMachine"]), .releaseMachine)
+        XCTAssertEqual(GameCommand(body: ["type": "gymScan", "active": true]), .gymScan(true))
+        XCTAssertEqual(GameCommand(body: ["type": "gymScan", "active": "oui"]), .gymScan(false))
+        XCTAssertEqual(GameCommand(body: ["type": "openNative", "screen": "gym"]), .openNative(.gym, profile: nil))
+
+        var state = sampleState()
+        var trainer = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(state.json()!.utf8)) as? [String: Any])["trainer"] as? [String: Any]
+        XCTAssertNil(trainer?["id"], "sans machine choisie : pas d'identifiant")
+        state.trainer.id = id
+        state.trainer.waiting = true
+        trainer = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(state.json()!.utf8)) as? [String: Any])["trainer"] as? [String: Any]
+        XCTAssertEqual(trainer?["id"] as? String, id)
+        XCTAssertEqual(trainer?["waiting"] as? Bool, true)
+
+        let script = try XCTUnwrap(GameScript.gym(GymPayload(book: GymBook())))
+        XCTAssertTrue(script.hasPrefix("window.mcwNative&&window.mcwNative.gym&&window.mcwNative.gym({"))
     }
 }

@@ -3,7 +3,7 @@
 // et envoie des ordres (pente, vitesses, vibration, ouverture des écrans natifs). Même interface que Devices
 // (voir devices.js).
 //
-// Protocole (version 1, révision 3)
+// Protocole (version 1, révision 4)
 //   jeu -> appli : window.webkit.messageHandlers.mcw.postMessage({ type, ... })
 //       ready   { protocol, minor }  le jeu est chargé, l'appli peut envoyer l'état
 //       grade   { value }     pente du terrain en %, AVANT vitesses virtuelles (l'appli les applique ;
@@ -16,7 +16,13 @@
 //                             | log), après avoir choisi le profil matériel s'il est donné (zwift | technogym | ble)
 //       reconnect             révision 3, si annoncé : reconnecter la machine et la ceinture déjà connues
 //                             (connexions en attente qui aboutissent dès que l'appareil se réveille)
-//   appli -> jeu : window.mcwNative.state({...}) et window.mcwNative.button(nom, appuyé)
+//       useMachine { id, kind? }  révision 4, si « gym » est annoncé : se brancher sur cette machine de la
+//                             carte des salles (connexion en attente qui aboutit dès qu'elle se réveille)
+//       releaseMachine        révision 4 : abandonner la connexion en attente vers la machine choisie
+//       gymScan { active }    révision 4 : écouter les machines autour (écran « Sur quelle machine ? »)
+//       openNative { screen: 'gym' }  révision 4 : écran de cartographie des salles
+//   appli -> jeu : window.mcwNative.state({...}), window.mcwNative.button(nom, appuyé)
+//                  et window.mcwNative.gym({...}) (révision 4 : carte des salles, voir src/core/gym.js)
 //       état v1 : v, demo, trainer { connected, controllable, controlled, controlReady, name, status },
 //                 hr { connected, name }, controllers [noms], power, cadence, speed, heartRate, gear
 //       révision 1 (champs facultatifs, absents quand inconnus) : minor, hardware (zwift | technogym | ble),
@@ -27,14 +33,19 @@
 //                 d'avant (page « Connecter » avec le message renvoyant vers l'onglet « Appareils »).
 //       révision 3 : reconnect { trainer?, hr? (noms des appareils déjà connus), waiting (reconnexion en
 //                 attente) }, absent quand l'appli ne connaît aucun appareil.
+//       révision 4 : trainer.id (identifiant de la machine connectée ou attendue, celui de la carte) et
+//                 trainer.waiting (connexion en attente) ; capability « gym ».
+//       carte (révision 4) : { v, defaultPlace, places [{ id, name, width, depth (m), machines [{ id, name,
+//                 label?, kind?, x?, y?, err? (m) }] }], nearby [{ id, name, kind?, rssi }], scanning }
 import { KeyEmitter, loadKeymap } from '../src/core/keymap.js';
+import { parseGym } from '../src/core/gym.js';
 
 const PROTOCOL = 1;
-const MINOR = 3;
+const MINOR = 4;
 
 const MACHINE_KINDS = new Set(['bike', 'cross', 'rower', 'treadmill', 'power']);
 const HARDWARE_IDS = new Set(['zwift', 'technogym', 'ble']);
-const NATIVE_SCREENS = new Set(['settings', 'devices', 'cockpit', 'inspector', 'log']);
+const NATIVE_SCREENS = new Set(['settings', 'devices', 'cockpit', 'inspector', 'log', 'gym']);
 
 // Les boutons latéraux changent déjà les vitesses côté appli : on ne les retransmet pas en touches clavier.
 const NATIVE_SHIFT_BUTTONS = new Set(['L_SHIFT', 'L_SHIFT2', 'R_SHIFT', 'R_SHIFT2']);
@@ -58,8 +69,11 @@ export class NativeDevices extends EventTarget {
     this.hardware = null; // profil matériel choisi dans l'appli (zwift | technogym | ble), null si inconnu
     this.capabilities = new Set(); // commandes facultatives annoncées par l'appli (révision 2)
     this.known = null; // appareils déjà connus (révision 3)
+    this.gym = null; // carte des salles (révision 4), voir src/core/gym.js
     // Mêmes formes que les objets de Devices (et Trainer), pour que l'écran d'accueil du jeu n'ait rien à savoir.
     this.trainer = {
+      id: null, // identifiant de la machine connectée ou attendue (révision 4)
+      waiting: false, // connexion en attente vers cette machine (révision 4)
       connected: false,
       canControl: false,
       controlled: false,
@@ -73,6 +87,7 @@ export class NativeDevices extends EventTarget {
     win.mcwNative = {
       state: (s) => this.onState(s),
       button: (name, down) => this.onButton(name, down),
+      gym: (g) => this.onGym(g),
     };
     this.post({ type: 'ready', protocol: PROTOCOL, minor: MINOR });
   }
@@ -103,6 +118,8 @@ export class NativeDevices extends EventTarget {
       name: demo ? 'Démo' : t.name || 'Home trainer',
     });
     if (this.trainer.connected) this.trainer.device = true;
+    this.trainer.id = typeof t.id === 'string' ? t.id.toUpperCase() : null;
+    this.trainer.waiting = !!t.waiting;
     // Appli d'avant la révision 1 : pas de type de machine, c'est un vélo.
     this.trainer.kind = this.trainer.connected ? (MACHINE_KINDS.has(s.machineKind) ? s.machineKind : 'bike') : null;
     const d = this.trainer.data;
@@ -120,6 +137,11 @@ export class NativeDevices extends EventTarget {
     const r = s.reconnect && typeof s.reconnect === 'object' ? s.reconnect : null;
     this.known = r ? { trainer: typeof r.trainer === 'string' ? r.trainer : null, hr: typeof r.hr === 'string' ? r.hr : null, waiting: !!r.waiting } : null;
     this.dispatchEvent(new Event('change'));
+  }
+
+  onGym(g) {
+    this.gym = parseGym(g);
+    this.dispatchEvent(new Event('gym'));
   }
 
   onButton(name, down) {
@@ -151,6 +173,29 @@ export class NativeDevices extends EventTarget {
     if (!this.canReconnect) return false;
     this.post({ type: 'reconnect' });
     return true;
+  }
+
+  // Carte des salles (révision 4) : l'appli sait choisir une machine de la carte et s'y brancher.
+  get canUseGym() {
+    return this.capabilities.has('gym');
+  }
+
+  // Se brancher sur une machine de la carte (connexion en attente, aboutit dès qu'elle se réveille).
+  useMachine(id, kind) {
+    if (!this.canUseGym || typeof id !== 'string') return false;
+    const message = { type: 'useMachine', id };
+    if (MACHINE_KINDS.has(kind)) message.kind = kind;
+    this.post(message);
+    return true;
+  }
+
+  releaseMachine() {
+    if (this.canUseGym) this.post({ type: 'releaseMachine' });
+  }
+
+  // Écoute des machines autour pendant que l'écran « Sur quelle machine ? » est ouvert.
+  gymScan(active) {
+    if (this.canUseGym) this.post({ type: 'gymScan', active: !!active });
   }
 
   // L'appli sait ouvrir ses écrans natifs (appareils, cockpit, diagnostic) par-dessus le jeu.

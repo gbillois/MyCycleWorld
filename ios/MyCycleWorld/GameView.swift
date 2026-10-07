@@ -7,6 +7,7 @@ import Combine
 /// build de l'appli. Les écrans natifs (appareils, cockpit, diagnostic) s'ouvrent depuis les Options du jeu.
 struct GameView: View {
     @EnvironmentObject private var store: BluetoothStore
+    @EnvironmentObject private var gym: GymStore
     /// Ouvre un écran natif par-dessus le jeu (la WebView reste chargée dessous).
     let openNative: (NativeScreen) -> Void
     @State private var loadFailed = false
@@ -27,7 +28,7 @@ struct GameView: View {
             Color.black.ignoresSafeArea()
             // La page gère elle-même les zones sûres (viewport-fit=cover et env(safe-area-inset-*)) : la
             // WebView occupe tout l'écran, sous la barre d'état et l'indicateur d'accueil.
-            GameWebView(store: store, reloadToken: reloadToken,
+            GameWebView(store: store, gym: gym, reloadToken: reloadToken,
                         onLoaded: { loaded in
                             loadFailed = !loaded
                             if !loaded { pageMinor = nil; return }
@@ -82,13 +83,14 @@ struct GameView: View {
 
 private struct GameWebView: UIViewRepresentable {
     let store: BluetoothStore
+    let gym: GymStore
     let reloadToken: Int
     let onLoaded: (Bool) -> Void
     let onReady: (Int) -> Void
     let onOpenNative: (NativeScreen) -> Void
 
     func makeCoordinator() -> GameBridge {
-        GameBridge(store: store, onLoaded: onLoaded, onReady: onReady, onOpenNative: onOpenNative)
+        GameBridge(store: store, gym: gym, onLoaded: onLoaded, onReady: onReady, onOpenNative: onOpenNative)
     }
 
     func makeUIView(context: Context) -> WKWebView {
@@ -124,14 +126,16 @@ private struct GameWebView: UIViewRepresentable {
 }
 
 /// Pont entre la WebView du jeu et le Bluetooth de l'appli (protocole décrit dans game/native.js).
-/// Le jeu envoie des ordres (pente, vitesses, vibration, ouverture d'un écran natif) ; l'appli lui envoie
-/// l'état et les boutons Zwift.
+/// Le jeu envoie des ordres (pente, vitesses, vibration, ouverture d'un écran natif, machine choisie sur la
+/// carte) ; l'appli lui envoie l'état, les boutons Zwift et la carte des salles.
 final class GameBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
     static let handlerName = "mcw"
     static let host = "gbillois.github.io"
     static let gameURL = URL(string: "https://gbillois.github.io/MyCycleWorld/game/")!
 
     private let store: BluetoothStore
+    private let gym: GymStore
+    private var lastGym: String?
     private let onLoaded: (Bool) -> Void
     private let onReady: (Int) -> Void
     private let onOpenNative: (NativeScreen) -> Void
@@ -142,9 +146,10 @@ final class GameBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
     private var cancellables = Set<AnyCancellable>()
     private var loadedToken = 0
 
-    init(store: BluetoothStore, onLoaded: @escaping (Bool) -> Void, onReady: @escaping (Int) -> Void,
+    init(store: BluetoothStore, gym: GymStore, onLoaded: @escaping (Bool) -> Void, onReady: @escaping (Int) -> Void,
          onOpenNative: @escaping (NativeScreen) -> Void) {
         self.store = store
+        self.gym = gym
         self.onLoaded = onLoaded
         self.onReady = onReady
         self.onOpenNative = onOpenNative
@@ -165,12 +170,18 @@ final class GameBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.push() }
             .store(in: &cancellables)
+        // Carte des salles : au chargement et à chaque changement (lieux, machines, machines autour).
+        Publishers.CombineLatest3(gym.$book, gym.$nearby, gym.$scanning)
+            .debounce(for: .milliseconds(150), scheduler: DispatchQueue.main)
+            .sink { [weak self] _ in self?.pushGym() }
+            .store(in: &cancellables)
     }
 
     func detach() {
         timer?.invalidate()
         timer = nil
         cancellables.removeAll()
+        gym.listen("game", false)
         webView?.configuration.userContentController.removeScriptMessageHandler(forName: GameBridge.handlerName)
         webView?.navigationDelegate = nil
         webView = nil
@@ -179,6 +190,8 @@ final class GameBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
     func load() {
         ready = false
         lastSent = nil
+        lastGym = nil
+        gym.listen("game", false)
         webView?.load(URLRequest(url: GameBridge.gameURL))
     }
 
@@ -199,7 +212,8 @@ final class GameBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
             demo: store.demo,
             trainer: GameState.Trainer(connected: trainer != nil, controllable: store.gradeControl != .none,
                                        controlled: store.controlled, controlReady: store.controlReady && !store.readOnly,
-                                       name: trainer?.name, status: store.controlStatus),
+                                       name: trainer?.name, status: store.controlStatus,
+                                       id: store.currentTrainerID?.uuidString, waiting: store.currentTrainerID == nil ? nil : store.trainerWaiting),
             hr: GameState.Heart(connected: belt != nil, name: belt?.name),
             controllers: rows.filter { $0.role == .controller && $0.connected }.map { $0.name },
             power: m.power,
@@ -230,6 +244,13 @@ final class GameBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         webView.evaluateJavaScript(script, completionHandler: nil)
     }
 
+    private func pushGym(force: Bool = false) {
+        guard ready, let webView, let script = GameScript.gym(gym.payload) else { return }
+        if !force && script == lastGym { return }
+        lastGym = script
+        webView.evaluateJavaScript(script, completionHandler: nil)
+    }
+
     private func send(button event: ButtonEvent) {
         guard ready, let webView, let script = GameScript.button(event) else { return }
         webView.evaluateJavaScript(script, completionHandler: nil)
@@ -252,6 +273,7 @@ final class GameBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
             ready = true
             lastSent = nil
             push(force: true)
+            pushGym(force: true)
             onReady(minor)
         case .grade(let grade):
             // Pente du terrain avant vitesses virtuelles : l'appli applique les siennes. Elliptique ou rameur :
@@ -271,6 +293,16 @@ final class GameBridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         case .reconnect:
             // Pause ou choix du niveau : « Reconnecter » la machine (rameur qui s'est mis en veille…).
             store.reconnectKnown()
+        case .useMachine(let id, let kind):
+            // Machine choisie sur la carte au lancement d'un niveau : connexion en attente, le jeu attend ses données.
+            let mapped = gym.book.place(containing: id)?.machine(id)
+            let name = mapped?.title ?? gym.nearby.first(where: { $0.id == id })?.name ?? "Machine"
+            store.useMachine(id, name: name, kind: kind ?? mapped?.kind)
+        case .releaseMachine:
+            store.releaseMachine()
+        case .gymScan(let active):
+            // Écran « Sur quelle machine ? » du jeu : machines autour et la plus proche en direct.
+            gym.listen("game", active)
         }
     }
 
