@@ -34,6 +34,16 @@ export function buildProfile(profile, n, step) {
   return { grade, y, closure: h };
 }
 
+// Parcours ouvert (n échantillons de longueur step) : pentes telles quelles, sans retour à l'altitude de départ.
+// fractionOf(i) donne la fraction du parcours de l'échantillon i (bornée à 0 et 1 sur les prolongements).
+export function buildOpenProfile(profile, n, step, fractionOf = (i) => i / n) {
+  const grade = new Float32Array(n + 1);
+  const y = new Float32Array(n + 1);
+  for (let i = 0; i <= n; i++) grade[i] = profileGrade(profile, fractionOf(i));
+  for (let i = 0; i < n; i++) y[i + 1] = y[i] + ((grade[i] + grade[i + 1]) / 200) * step;
+  return { grade, y };
+}
+
 // Dénivelé positif total (m) d'un profil construit.
 export function elevationGain(grade, step) {
   let gain = 0;

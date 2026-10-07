@@ -9,6 +9,8 @@
 
 export const SURFACES = {
   asphalt: { label: 'Asphalte', crr: 0.004, gradeExtra: 0 },
+  // Chemin de terre bien tassé (Grande Balade) : à peine plus lent que l'asphalte.
+  path: { label: 'Chemin de terre', crr: 0.005, gradeExtra: 0 },
   boardwalk: { label: 'Passerelle en bois', crr: 0.006, gradeExtra: 0.2 },
   // Le sable freine beaucoup : en jeu (résistance au roulement) et dans les jambes (pente équivalente au trainer).
   sand: { label: 'Sable', crr: 0.03, gradeExtra: 2.6 },
@@ -25,8 +27,9 @@ export const SURFACES = {
 //   un nombre = ligne droite (m) ; [rayon (m), angle (°)] = virage, angle > 0 à droite, < 0 à gauche.
 // heading : cap de départ en degrés dans le plan x/z (0 = vers +x, 90 = vers +z, 180 = vers -x).
 // Renvoie les points de contrôle [x, z] (un tous les 40 m au plus, et tous les 20° dans les virages) ;
-// le dernier point, qui retombe sur le départ, est omis puisque la boucle se referme d'elle-même.
-export function road([x, z], heading, parts) {
+// le dernier point, qui retombe sur le départ, est omis puisque la boucle se referme d'elle-même
+// (sauf pour un parcours ouvert, { open: true } : le point d'arrivée est gardé).
+export function road([x, z], heading, parts, { open = false } = {}) {
   let a = (heading * Math.PI) / 180;
   const pts = [];
   for (const part of parts) {
@@ -51,6 +54,7 @@ export function road([x, z], heading, parts) {
       }
     }
   }
+  if (open) pts.push([x, z]);
   return pts.map(([px, pz]) => [Math.round(px * 10) / 10, Math.round(pz * 10) / 10]);
 }
 
