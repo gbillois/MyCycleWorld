@@ -45,6 +45,12 @@ struct ConnectionTestSection: View {
                 Label(store.pilotStatus, systemImage: "slider.horizontal.3")
             }
             .disabled(!store.canTestPilot || store.pilotRunning)
+            Toggle(isOn: Binding(get: { store.ftmsDebug }, set: { store.setFTMSDebug($0) })) {
+                Label("Mode debug FTMS", systemImage: "ladybug")
+            }
+            if store.ftmsDebug {
+                ShareLink(item: store.report) { Label("Partager le journal debug (\(store.logs.count) lignes)", systemImage: "square.and.arrow.up") }
+            }
             NavigationLink {
                 StoreConsoleView().nativeCloseButton()
             } label: {
@@ -58,7 +64,7 @@ struct ConnectionTestSection: View {
         } header: {
             Text("Test de connexion")
         } footer: {
-            Text(verbatim: "« Tester le pilotage » durcit la machine pendant 5 s puis revient : pente 6 % puis 0 pour un vélo, résistance 70 % puis 30 % pour un elliptique ou un rameur. La console et l’inspecteur se copient ou se partagent pour ajouter une machine non standard.")
+            Text(verbatim: "« Tester le pilotage » durcit la machine pendant 5 s puis revient : pente 6 % puis 0 pour un vélo, résistance 70 % puis 30 % pour un elliptique ou un rameur. Mode debug FTMS : chaque paquet de la machine est noté avec tous ses champs (même ceux que l’appli n’utilise pas), toutes ses caractéristiques sont listées et lues, et les mesures retenues sont notées chaque seconde. Active-le, connecte la machine, attends 10 s sans bouger, puis pédale 1 minute en changeant d’allure, et partage le journal.")
         }
     }
 
@@ -90,7 +96,13 @@ struct ConnectionTestSection: View {
             let age = max(0, now.timeIntervalSince(last))
             rows.append(TestRow(label: "Données", value: "\(store.trainerPackets) paquets, dernier il y a \(MachineText.age(age))", tone: age < 3 ? .ok : .bad))
         } else {
-            rows.append(TestRow(label: "Données", value: "aucune pour l’instant : démarre une séance sur la console (Start), puis pédale, marche ou tire la poignée", tone: .bad))
+            var value = "aucune pour l’instant : démarre une séance sur la console (Start), puis pédale, marche ou tire la poignée"
+            if store.trainerBadPackets > 0 {
+                value = "\(store.trainerBadPackets) paquets reçus dans un format inattendu : partage la console Bluetooth"
+            } else if store.trainerOtherPackets > 0 {
+                value = "rien en FTMS, mais \(store.trainerOtherPackets) paquets sur un service propriétaire : partage la console Bluetooth"
+            }
+            rows.append(TestRow(label: "Données", value: value, tone: .bad))
         }
         rows.append(TestRow(label: "Mesures", value: MachineText.measures(store.metrics)))
         rows.append(pilotRow)

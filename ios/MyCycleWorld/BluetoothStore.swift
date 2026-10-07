@@ -108,6 +108,10 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
     @Published private(set) var trainerServices: [String] = []
     @Published private(set) var trainerPackets = 0
     @Published private(set) var trainerLastPacket: Date?
+    /// Paquets de données reçus mais illisibles (format inattendu), et paquets reçus sur des caractéristiques
+    /// hors standard (service propriétaire) : diagnostic d'une machine qui « n'envoie rien ».
+    @Published private(set) var trainerBadPackets = 0
+    @Published private(set) var trainerOtherPackets = 0
     @Published private(set) var pilotStatus = BluetoothStore.pilotIdle
     @Published private(set) var pilotRunning = false
     @Published var terrain = 0.0
@@ -137,6 +141,8 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
     /// Abonnement aux données de la machine : instant, et avertissement « aucune donnée » déjà donné.
     private var subscribedAt: Date?
     private var noDataWarned = false
+    /// « Prise de contrôle + démarrage » FTMS déjà envoyé à une machine muette (une fois par connexion).
+    private var autoStartSent = false
     private var demoTick = 0
     private var demoDistance = 0.0
     private var requestScan = false
@@ -182,8 +188,56 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         }
     }
     func log(_ message: String) {
-        logs.append("\(Date().formatted(date: .omitted, time: .standard))  \(message)")
-        if logs.count > 2000 { logs.removeFirst(logs.count - 2000) }
+        // Mode debug : heure au millième (ordre des paquets) et journal plus long.
+        let time = ftmsDebug ? Date().formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits).second(.twoDigits).secondFraction(.fractional(3)))
+                             : Date().formatted(date: .omitted, time: .standard)
+        logs.append("\(time)  \(message)")
+        let cap = ftmsDebug ? 8000 : 2000
+        if logs.count > cap { logs.removeFirst(logs.count - cap) }
+    }
+
+    // MARK: Mode debug FTMS
+
+    /// Mode debug (test de connexion) : chaque paquet de la machine est écrit avec tous ses champs FTMS
+    /// (Core/FTMSDebug.swift), les caractéristiques et leurs propriétés sont listées, tout ce qui se lit est lu,
+    /// et les mesures retenues par l'appli sont notées chaque seconde. Le journal se partage ensuite.
+    @Published private(set) var ftmsDebug = false
+
+    func setFTMSDebug(_ on: Bool) {
+        guard on != ftmsDebug else { return }
+        ftmsDebug = on
+        log(on ? "=== Mode debug FTMS activé (\(report.split(separator: "\n").first ?? "")) ===" : "=== Mode debug FTMS désactivé ===")
+        if on { dumpTrainer() }
+    }
+
+    private static func properties(_ char: CBCharacteristic) -> String {
+        let p = char.properties
+        var list: [String] = []
+        if p.contains(.read) { list.append("lecture") }
+        if p.contains(.write) { list.append("écriture") }
+        if p.contains(.writeWithoutResponse) { list.append("écriture sans réponse") }
+        if p.contains(.notify) { list.append("notification\(char.isNotifying ? " (abonné)" : "")") }
+        if p.contains(.indicate) { list.append("indication\(char.isNotifying ? " (abonné)" : "")") }
+        return list.joined(separator: ", ")
+    }
+
+    /// Services et caractéristiques de la machine, puis lecture de tout ce qui se lit (fonctions FTMS, plages,
+    /// état, informations de l'appareil).
+    private func dumpTrainer() {
+        guard let id = trainerID, let c = connections[id] else {
+            log("[debug] Aucune machine connectée : connecte-la, le détail s'affichera à la connexion.")
+            return
+        }
+        log("[debug] Machine : \(c.name) · \(c.peripheral.identifier.uuidString) · état \(c.peripheral.state == .connected ? "connectée" : "pas connectée") · type \(machineKind?.label ?? "inconnu")")
+        log("[debug] Annonce : services \(c.advertised.joined(separator: ", ")) · fabricant \(FTMSDebug.hex(c.manufacturer))")
+        for service in c.peripheral.services ?? [] {
+            log("[debug] Service \(GATTText.name(service.uuid.uuidString))")
+            for char in service.characteristics ?? [] {
+                log("[debug]   \(GATTText.name(char.uuid.uuidString)) : \(BluetoothStore.properties(char))")
+                if char.properties.contains(.read) { c.peripheral.readValue(for: char) }
+            }
+        }
+        log("[debug] Pilotage : contrôle FTMS \(controlReady ? "prêt" : "indisponible")\(readOnly ? ", refusé (lecture seule)" : "")\(controlled ? ", pris" : "") · consignes pente \(simulationSupported ? "oui" : "non"), ERG \(ergSupported ? "oui" : "non"), résistance \(resistanceSupported ? "oui" : "non")")
     }
     func clearLog() { logs.removeAll() }
     func setProfile(_ value: HardwareProfile) {
@@ -361,6 +415,9 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
         guard let c = connections[peripheral.identifier] else { return }
         if let error { log("\(c.name) : \(error.localizedDescription)"); return }
+        if ftmsDebug, peripheral.identifier == trainerID {
+            log("[debug] Service \(GATTText.name(service.uuid.uuidString)) : " + (service.characteristics ?? []).map { "\(GATTText.plainName($0.uuid.uuidString)) (\(BluetoothStore.properties($0)))" }.joined(separator: " · "))
+        }
         for char in service.characteristics ?? [] {
             c.chars[char.uuid] = char
             let id = char.uuid.uuidString.uppercased()
@@ -466,6 +523,7 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         guard !demo, let c = connections[peripheral.identifier] else { return }
         if let error { log("Lecture \(GATTText.name(characteristic.uuid.uuidString)) : \(error.localizedDescription)"); return }
         let b = Array(characteristic.value ?? Data()), id = characteristic.uuid.uuidString.uppercased(), now = Date()
+        if ftmsDebug, peripheral.identifier == trainerID { log("[debug] ← " + FTMSDebug.describe(id, b)) }
         do {
             if characteristic.uuid == UUIDs.async || characteristic.uuid == UUIDs.tx { try receiveZwift(b, c); return }
             if id == "2A19", let battery = b.first { c.battery = Int(battery); refresh(); return }
@@ -537,11 +595,15 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
                 // Caractéristique hors standard (service propriétaire, capteur de vitesse et cadence…) :
                 // quelques paquets bruts dans le journal pour comprendre une machine qui n'envoie rien en FTMS.
                 guard !["2A19", "2A24", "2A26", "2A29", "2A37"].contains(id) else { break }
+                trainerOtherPackets += 1
                 var sampler = otherSamplers[id] ?? PacketSampler(first: 4, every: 500)
                 if sampler.sample() { log("Données \(GATTText.name(characteristic.uuid.uuidString)) : \(GATTText.hex(b))") }
                 otherSamplers[id] = sampler
             }
-        } catch { log("Paquet \(GATTText.name(id)) ignoré : tronqué ou invalide (\(b.count) octets : \(GATTText.hex(b))).") }
+        } catch {
+            if peripheral.identifier == trainerID { trainerBadPackets += 1 }
+            log("Paquet \(GATTText.name(id)) ignoré : tronqué ou invalide (\(b.count) octets : \(GATTText.hex(b))).")
+        }
     }
     private func packetReceived(_ now: Date) {
         trainerPackets = feed.packets
@@ -590,6 +652,20 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
             if ["L_SHIFT", "L_SHIFT2"].contains(button) { shift(-1) }
         }
         refresh()
+    }
+    /// Machine connectée mais muette depuis 3 s : comme qdomyos-zwift et Kinomap, on envoie « prise de contrôle »
+    /// puis « démarrage » FTMS (Request Control, Start or Resume) ; beaucoup de vélos et d'elliptiques
+    /// n'envoient leurs données qu'après. Jamais à un tapis de course (Start ferait démarrer la bande).
+    /// La résistance n'est pas changée.
+    private func wakeSilentMachine() {
+        guard !autoStartSent, !demo, controlReady, !readOnly, !controlled, queue.pending == nil else { return }
+        autoStartSent = true
+        if (kindOverride ?? detectedKind) == .treadmill {
+            log("Tapis muet : démarre la séance sur sa console (l'appli n'envoie jamais « démarrage » à un tapis).")
+            return
+        }
+        log("Machine muette depuis 3 s : envoi de « prise de contrôle + démarrage » (FTMS), sans changer la résistance.")
+        takeControl()
     }
     func takeControl() {
         if demo { controlled = true; controlStatus = "Contrôle simulé actif"; return }
@@ -913,7 +989,7 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         simulationSupported = false; ergSupported = false; resistanceSupported = false
         feed = TrainerFeed(); dataSampler = PacketSampler(first: 5, every: 200)
         machineKind = nil; detectedKind = nil; kindOverride = nil; trainerServices = []; trainerPackets = 0; trainerLastPacket = nil
-        otherSamplers = [:]; subscribedAt = nil; noDataWarned = false
+        otherSamplers = [:]; subscribedAt = nil; noDataWarned = false; autoStartSent = false; trainerBadPackets = 0; trainerOtherPackets = 0
         gradeResistance.reset(); encoder = ResistanceEncoder(); lastSent = nil; lastResistanceLevel = nil
         if pilotRunning { pilotTimer?.invalidate(); pilotRunning = false; pilotStatus = BluetoothStore.pilotIdle }
         if heartID == nil { heart = nil; heartContact = nil }
@@ -964,13 +1040,20 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         } else {
             let now = Date()
             var changed = feed.expire(now: now.timeIntervalSinceReferenceDate)
+            if let at = subscribedAt, trainerPackets == 0, now.timeIntervalSince(at) > 3 { wakeSilentMachine() }
             if let at = subscribedAt, !noDataWarned, trainerPackets == 0, now.timeIntervalSince(at) > 8 {
                 noDataWarned = true
-                log("Connecté mais aucune donnée reçue depuis 8 s. Sur une machine Technogym, démarre une séance sur la console (Start, Quick Start ou Entraînement libre) puis pédale ou marche : la console n'envoie ses mesures que pendant un exercice. Si rien n'arrive, envoie ce journal.")
+                var why = ""
+                if trainerBadPackets > 0 { why += " \(trainerBadPackets) paquets FTMS reçus dans un format inattendu (voir « ignoré » plus haut)." }
+                if trainerOtherPackets > 0 { why += " \(trainerOtherPackets) paquets reçus sur un service propriétaire, rien en FTMS." }
+                log("Connecté mais aucune donnée d'effort depuis 8 s.\(why) Sur une machine Technogym, démarre une séance sur la console (Start, Quick Start ou Entraînement libre) puis pédale ou marche : certaines consoles n'envoient leurs mesures que pendant un exercice. Si rien n'arrive, partage ce journal.")
                 controlStatus = "Aucune donnée : démarre une séance sur la console de la machine."
             }
             if let lastHeart, now.timeIntervalSince(lastHeart) > 5, heart != nil { heart = nil; heartContact = nil; changed = true }
             if changed { updateMetrics() }
+        }
+        if ftmsDebug, trainerID != nil || demo {
+            log("[debug] Mesures retenues : \(MachineText.measures(metrics)) · \(trainerPackets) paquets de données")
         }
         if let power = metrics.power { history.append(PowerSample(date: Date(), watts: power)) }
         if history.count > 120 { history.removeFirst(history.count - 120) }
