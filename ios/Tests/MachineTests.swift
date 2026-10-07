@@ -134,6 +134,28 @@ final class MachineTests: XCTestCase {
         XCTAssertEqual(feed.data.power, 410, "Cycling Power reprend la main quand FTMS se tait")
     }
 
+    func testCyclingPowerWinsWhenFtmsOnlySendsZeros() {
+        // Vélo Technogym : Indoor Bike Data à 0, vraie puissance et cadence en Cycling Power.
+        var feed = TrainerFeed()
+        feed.ftms(BikeReading(speed: 0, cadence: 0, power: 0), kind: .bike, now: 0)
+        feed.cyclingPower(power: 180, revs: 10, time: 0, now: 0.2)
+        XCTAssertEqual(feed.data.power, 180, "un FTMS à zéro ne masque plus Cycling Power")
+        XCTAssertEqual(feed.sources["power"], "Cycling Power")
+        feed.ftms(BikeReading(speed: 0, cadence: 0, power: 0), kind: .bike, now: 0.5)
+        XCTAssertEqual(feed.data.power, 180, "le zéro FTMS n'écrase pas une source qui mesure un effort")
+        feed.cyclingPower(power: 190, revs: 11, time: 683, now: 1)
+        XCTAssertEqual(feed.data.cadence, 90, "cadence du pédalier quand FTMS la donne à 0")
+        // Arrêt : Cycling Power muet depuis plus de 3 s, le zéro FTMS reprend.
+        feed.ftms(BikeReading(speed: 0, cadence: 0, power: 0), kind: .bike, now: 4.5)
+        XCTAssertEqual(feed.data.power, 0)
+        // FTMS se met à mesurer : il refait foi.
+        feed.cyclingPower(power: 200, revs: nil, time: nil, now: 5)
+        feed.ftms(BikeReading(power: 210), kind: .bike, now: 5.2)
+        feed.cyclingPower(power: 220, revs: nil, time: nil, now: 5.4)
+        XCTAssertEqual(feed.data.power, 210)
+        XCTAssertEqual(feed.sources["power"], "FTMS")
+    }
+
     func testFeedCrankCadenceIsRounded() {
         var feed = TrainerFeed()
         feed.cyclingPower(power: 200, revs: 10, time: 0, now: 0)

@@ -242,6 +242,7 @@ export class Trainer extends EventTarget {
     this.lastPacketAt = 0;
     this.serviceList = [];
     this.sources = {};
+    this.effortAt = {};
     this.features = null;
     this.ranges = {};
     this.cp = null;
@@ -290,6 +291,7 @@ export class Trainer extends EventTarget {
     this.derivedStrokeRate = undefined;
     for (const k of Object.keys(this.data)) this.data[k] = null;
     this.sources = {};
+    this.effortAt = {};
     this.server = await connectGatt(this.device, SRC);
     this.connected = true;
     this.serviceList = (await dumpGatt(this.server, SRC)).map((sv) => sv.uuid);
@@ -459,17 +461,31 @@ export class Trainer extends EventTarget {
   onCpsData(d) {
     this.packets++;
     this.lastPacketAt = performance.now();
-    // FTMS est prioritaire s'il fournit déjà la valeur.
-    if (this.sources.power !== 'FTMS') this.setValue('power', d.power, 'Cycling Power');
-    if (d.crankRevs !== undefined && this.sources.cadence !== 'FTMS') {
+    // FTMS est prioritaire, sauf s'il n'envoie que des zéros (voir setValue).
+    this.setValue('power', d.power, 'Cycling Power');
+    if (d.crankRevs !== undefined) {
       this.setValue('cadence', Math.round(this.crank.update(d.crankRevs, d.crankTime)), 'Cycling Power');
     }
     this.emit('data', this.data);
   }
 
-  setValue(key, value, source) {
-    // On garde FTMS comme source dès qu'il a fourni une valeur.
-    if (this.sources[key] === 'FTMS' && source !== 'FTMS') return;
+  // FTMS fait foi, sauf quand il n'envoie que des zéros alors qu'une autre source (Cycling Power) mesure un
+  // effort : certaines machines (vélos Technogym) remplissent les champs FTMS à 0 et donnent la vraie puissance
+  // ailleurs. Un zéro ne remplace jamais une source qui montre un effort depuis moins de 3 s (comme l'appli iOS).
+  setValue(key, value, source, now = performance.now()) {
+    this.effortAt ||= {};
+    const effort = typeof value === 'number' && value > 0;
+    if (effort) this.effortAt[`${key}|${source}`] = now;
+    const current = this.sources[key];
+    if (current && current !== source) {
+      const at = this.effortAt[`${key}|${current}`];
+      const currentLive = at !== undefined && now - at < 3000;
+      if (source === 'FTMS') {
+        if (!effort && currentLive) return;
+      } else if (current === 'FTMS') {
+        if (currentLive || !effort) return;
+      } else if (!effort && currentLive) return;
+    }
     this.data[key] = value;
     if (this.sources[key] !== source) {
       this.sources[key] = source;

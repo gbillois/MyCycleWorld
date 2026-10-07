@@ -47,4 +47,20 @@ final class FTMSDebugTests: XCTestCase {
         XCTAssertTrue(FTMSDebug.describe("2AD6", [0, 0, 0xc8, 0, 10, 0]).contains("min 0.0 · max 20.0 · pas 1.0"))
         XCTAssertEqual(FTMSDebug.describe("FFF1", [1, 2]), "FFF1 [FFF1] 2 o : 01 02")
     }
+
+    func testPartialDecodingKeepsCompleteFieldsOfATruncatedPacket() throws {
+        // Drapeaux : vitesse (bit 0 à 0), cadence (bit 2), puissance (bit 6), mais la puissance manque.
+        let packet: [UInt8] = [0x44, 0x00, 0xb8, 0x0b, 0xb4, 0x00]
+        XCTAssertThrowsError(try BLEProtocol.indoorBike(packet), "le décodeur strict rejette le paquet")
+        let p = try XCTUnwrap(FTMSDebug.partial("2AD2", packet))
+        XCTAssertEqual(p.kind, .bike)
+        XCTAssertEqual(p.reading.speed, 30)
+        XCTAssertEqual(p.reading.cadence, 90)
+        XCTAssertNil(p.reading.power)
+        XCTAssertNil(FTMSDebug.partial("2AD2", [0x44]), "rien d'utile")
+        XCTAssertNil(FTMSDebug.partial("2A63", [0, 0, 1, 0]), "seulement les données FTMS")
+        let cross = try XCTUnwrap(FTMSDebug.partial("2ACE", [0x08, 0x01, 0x00, 0x10, 0x27, 0x60, 0, 0x5a, 0, 0xb4]))
+        XCTAssertEqual(cross.reading.stepRate, 96)
+        XCTAssertNil(cross.reading.power)
+    }
 }

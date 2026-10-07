@@ -129,6 +129,10 @@ struct TrainerFeed {
     private(set) var packets = 0
     private(set) var lastPacket: TimeInterval?
     private var updated: [String: TimeInterval] = [:]
+    /// Dernier effort (valeur > 0) vu pour chaque mesure et chaque source (« power|FTMS »…).
+    private var effortAt: [String: TimeInterval] = [:]
+    /// Une source « vivante » a montré un effort il y a moins de ce délai.
+    static let liveWindow: TimeInterval = 3
     private var crank = CrankCadence()
     private var strokeMark: (count: Int, time: TimeInterval)?
     private var derivedStrokeRate: Double?
@@ -205,20 +209,21 @@ struct TrainerFeed {
         lastPacket = now
         var changes: [String] = []
         set(\.speed, "speed", speed, "RSC", now, &changes)
-        if sources["power"] != "FTMS" { set(\.power, "power", Int(BLEProtocol.runningPower(speedKmh: speed).rounded()), "RSC", now, &changes) }
+        set(\.power, "power", Int(BLEProtocol.runningPower(speedKmh: speed).rounded()), "RSC", now, &changes)
         if cadence > 0 { set(\.stepRate, "stepRate", cadence, "RSC", now, &changes) }
         set(\.cadence, "cadence", speed > 0.5 ? Double(cadence > 0 ? cadence : Int(150 + speed * 2)) / 2 : 0, "RSC", now, &changes)
         return changes
     }
 
-    /// Paquet Cycling Power : utilisé seulement pour ce que FTMS ne fournit pas.
+    /// Paquet Cycling Power : utilisé pour ce que FTMS ne fournit pas, ou quand FTMS n'envoie que des zéros
+    /// (vélos Technogym MYCYCLING / BIKE n : la puissance passe par Cycling Power, voir qdomyos-zwift).
     @discardableResult
     mutating func cyclingPower(power: Int, revs: Int?, time: Int?, now: TimeInterval) -> [String] {
         packets += 1
         lastPacket = now
         var changes: [String] = []
-        if sources["power"] != "FTMS" { set(\.power, "power", power, "Cycling Power", now, &changes) }
-        if let revs, let time, sources["cadence"] != "FTMS" {
+        set(\.power, "power", power, "Cycling Power", now, &changes)
+        if let revs, let time {
             let cadence = crank.update(revs: revs, time: time, now: now).rounded()
             set(\.cadence, "cadence", cadence, "Cycling Power", now, &changes)
         }
@@ -247,10 +252,28 @@ struct TrainerFeed {
         return changed
     }
 
+    private static func positive<T>(_ value: T) -> Bool {
+        if let i = value as? Int { return i > 0 }
+        if let d = value as? Double { return d > 0 }
+        return true
+    }
+
+    /// FTMS fait foi, sauf quand il n'envoie que des zéros alors qu'une autre source (Cycling Power, capteur de
+    /// course) mesure un effort : certaines machines remplissent les champs FTMS à 0 et donnent la vraie
+    /// puissance ailleurs. Un zéro ne remplace jamais une source qui montre un effort depuis moins de 3 s.
     private mutating func set<T>(_ key: WritableKeyPath<BikeReading, T?>, _ name: String, _ value: T?, _ source: String,
                                  _ now: TimeInterval, _ changes: inout [String]) {
         guard let value else { return }
-        if sources[name] == "FTMS" && source != "FTMS" { return }
+        let effort = TrainerFeed.positive(value)
+        if effort { effortAt[name + "|" + source] = now }
+        if let current = sources[name], current != source {
+            let currentLive = effortAt[name + "|" + current].map { now - $0 < TrainerFeed.liveWindow } ?? false
+            if source == "FTMS" {
+                if !effort && currentLive { return }
+            } else if current == "FTMS" {
+                if currentLive || !effort { return }
+            } else if !effort && currentLive { return }
+        }
         data[keyPath: key] = value
         updated[name] = now
         if sources[name] != source {

@@ -116,3 +116,17 @@ test('Vitesses virtuelles : décalage de pente et bornes', () => {
 test('hex', () => {
   assert.equal(hex(u8([0, 255, 16])), '00 ff 10');
 });
+
+test('vélo Technogym : un FTMS à zéro ne masque pas la puissance Cycling Power', async () => {
+  const { Trainer } = await import('../src/ble/trainer.js');
+  const t = new Trainer({ requestDevice: async () => null });
+  t.onFtmsData({ speed: 0, cadence: 0, power: 0 }, 'bike');
+  t.onCpsData({ power: 180 });
+  assert.equal(t.data.power, 180);
+  assert.equal(t.sources.power, 'Cycling Power');
+  t.onFtmsData({ speed: 0, cadence: 0, power: 0 }, 'bike');
+  assert.equal(t.data.power, 180, 'le zéro FTMS n’écrase pas une source qui mesure un effort');
+  t.onFtmsData({ power: 210 }, 'bike');
+  t.onCpsData({ power: 220 });
+  assert.equal(t.data.power, 210, 'FTMS qui mesure refait foi');
+});

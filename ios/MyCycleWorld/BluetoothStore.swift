@@ -136,6 +136,7 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
     private var lastResistanceLevel: Double?
     private var pilotResults: [UInt8] = []
     private var dataSampler = PacketSampler(first: 5, every: 200)
+    private var partialSampler = PacketSampler(first: 3, every: 200)
     /// Caractéristiques hors standard : quelques paquets bruts de chacune, pour le journal.
     private var otherSamplers: [String: PacketSampler] = [:]
     /// Abonnement aux données de la machine : instant, et avertissement « aucune donnée » déjà donné.
@@ -580,7 +581,20 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
             case "2AD9": queue.response(b); finishCommand()
             case "2ADA":
                 log("Statut machine : \(GATTText.hex(b))")
-                if b.first == 0xff || b.first == 1 || b.first == 3 || b.first == 2 {
+                // Pause ou arrêt sur la console (0x02, 0x03 : la console d'une machine de salle se met en pause dès
+                // qu'on arrête de pédaler) : le contrôle n'est PAS perdu selon FTMS, on garde la connexion.
+                // Reprise (0x04) : la consigne du jeu est renvoyée, la console a pu l'oublier.
+                if b.first == 2 || b.first == 3 {
+                    log(b.first == 2 ? "Machine en pause ou arrêtée sur la console : on attend la reprise." : "Clé de sécurité retirée : machine arrêtée.")
+                    break
+                }
+                if b.first == 4 {
+                    log("Reprise sur la console.")
+                    if controlled { gradeResistance.reset(); applyGameGrade(terrain) }
+                    break
+                }
+                // Contrôle perdu (0xFF) ou machine remise à zéro (0x01, le contrôle est rendu).
+                if b.first == 0xff || b.first == 1 {
                     controlled = false
                     if let pending = queue.pending, pending.first != 8 {
                         // End this GATT session so a delayed response cannot acknowledge a new request.
@@ -601,6 +615,13 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
                 otherSamplers[id] = sampler
             }
         } catch {
+            // Paquet de données tronqué (drapeaux qui annoncent des champs absents) : on garde ce qui est lisible.
+            if peripheral.identifier == trainerID, let p = FTMSDebug.partial(id, b) {
+                if partialSampler.sample() { log("Paquet \(GATTText.name(id)) incomplet, décodé en partie (\(b.count) octets : \(GATTText.hex(b))).") }
+                for change in feed.ftms(p.reading, kind: p.kind, now: now.timeIntervalSinceReferenceDate) { log(change) }
+                packetReceived(now)
+                return
+            }
             if peripheral.identifier == trainerID { trainerBadPackets += 1 }
             log("Paquet \(GATTText.name(id)) ignoré : tronqué ou invalide (\(b.count) octets : \(GATTText.hex(b))).")
         }
@@ -987,7 +1008,7 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
     private func resetTrainer() {
         trainerID = nil; queue.clear(); commandTimer?.invalidate(); controlled = false; controlReady = false; readOnly = false
         simulationSupported = false; ergSupported = false; resistanceSupported = false
-        feed = TrainerFeed(); dataSampler = PacketSampler(first: 5, every: 200)
+        feed = TrainerFeed(); dataSampler = PacketSampler(first: 5, every: 200); partialSampler = PacketSampler(first: 3, every: 200)
         machineKind = nil; detectedKind = nil; kindOverride = nil; trainerServices = []; trainerPackets = 0; trainerLastPacket = nil
         otherSamplers = [:]; subscribedAt = nil; noDataWarned = false; autoStartSent = false; trainerBadPackets = 0; trainerOtherPackets = 0
         gradeResistance.reset(); encoder = ResistanceEncoder(); lastSent = nil; lastResistanceLevel = nil

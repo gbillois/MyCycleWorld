@@ -160,6 +160,48 @@ enum FTMSDebug {
         return out
     }
 
+    /// Valeurs lues jusqu'à la fin du paquet, même s'il est tronqué (champs annoncés par les drapeaux mais absents).
+    static func values(_ b: [UInt8], flagBytes: Int, groups: [Group]) -> [String: Double] {
+        guard b.count >= flagBytes else { return [:] }
+        var flags = 0
+        for k in 0..<flagBytes { flags |= Int(b[k]) << (8 * k) }
+        var out: [String: Double] = [:]
+        var i = flagBytes
+        for g in groups where (flags & (1 << g.bit) != 0) != g.whenClear {
+            for field in g.fields {
+                guard i + field.size <= b.count else { return out }
+                out[field.name] = read(field, b, at: i) * field.scale
+                i += field.size
+            }
+        }
+        return out
+    }
+
+    /// Décodage de secours d'un paquet de données FTMS que le décodeur strict rejette (tronqué) : on garde les
+    /// champs complets avant la coupure. nil si rien d'utile n'a pu être lu.
+    static func partial(_ id: String, _ b: [UInt8]) -> (reading: BikeReading, kind: MachineKind)? {
+        let kind: MachineKind, v: [String: Double]
+        switch id.uppercased() {
+        case "2AD2": kind = .bike; v = values(b, flagBytes: 2, groups: indoorBike)
+        case "2AD1": kind = .rower; v = values(b, flagBytes: 2, groups: rower)
+        case "2ACE": kind = .cross; v = values(b, flagBytes: 3, groups: crossTrainer)
+        case "2ACD": kind = .treadmill; v = values(b, flagBytes: 2, groups: treadmill)
+        default: return nil
+        }
+        var r = BikeReading()
+        r.speed = v["vitesse inst."]
+        r.cadence = v["cadence inst."]
+        r.power = (v["puissance inst."] ?? v["puissance"]).map { Int($0) }
+        r.heartRate = v["cardio"].map { Int($0) }
+        r.distance = v["distance totale"].map { Int($0) }
+        r.resistance = v["résistance"]
+        r.strokeRate = v["cadence de coups"]
+        r.strokeCount = v["nombre de coups"].map { Int($0) }
+        if kind == .rower { r.pace = v["allure inst."].map { Int($0) } }
+        r.stepRate = v["pas par minute"].map { Int($0) }
+        return r == BikeReading() ? nil : (r, kind)
+    }
+
     /// Une ligne lisible pour un paquet d'une caractéristique (UUID court en majuscules ou minuscules).
     static func describe(_ id: String, _ b: [UInt8]) -> String {
         let uuid = id.uppercased()
