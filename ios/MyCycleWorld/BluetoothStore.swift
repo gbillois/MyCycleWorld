@@ -144,6 +144,11 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
     private var noDataWarned = false
     /// « Prise de contrôle + démarrage » FTMS déjà envoyé à une machine muette (une fois par connexion).
     private var autoStartSent = false
+    /// Un paquet avec un effort (puissance, cadence, vitesse, coups ou pas) est arrivé depuis la connexion.
+    private var effortSeen = false
+    /// Machine de salle perdue : la reconnexion automatique n'attend que ce délai (au-delà, quelqu'un d'autre
+    /// l'utilise peut-être, on ne doit pas la lui prendre).
+    static let gymReconnectWindow: TimeInterval = 10 * 60
     private var demoTick = 0
     private var demoDistance = 0.0
     private var requestScan = false
@@ -375,6 +380,15 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
                 if role == .trainer, let other = self.trainerID, other != id { return }
                 if role == .heart, let other = self.heartID, other != id { return }
                 self.connect(id, role: role, auto: true)
+                // Machine de salle : reconnexion en attente limitée à 10 min (on a pu partir, un autre sportif
+                // va la réveiller et ne doit pas la trouver prise par ce téléphone).
+                if role == .trainer, self.isGymMachine?(id) == true {
+                    Timer.scheduledTimer(withTimeInterval: BluetoothStore.gymReconnectWindow, repeats: false) { [weak self] _ in
+                        guard let self, self.waiting.contains(id), c.peripheral.state != .connected else { return }
+                        self.log("\(c.name) : pas revenue en 10 min, reconnexion automatique abandonnée (machine de salle).")
+                        self.disconnect(id)
+                    }
+                }
             }
             return
         }
@@ -627,6 +641,7 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         }
     }
     private func packetReceived(_ now: Date) {
+        if GymIdentify.moving(feed.data) { effortSeen = true }
         trainerPackets = feed.packets
         trainerLastPacket = now
         updateMetrics()
@@ -1010,7 +1025,7 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         simulationSupported = false; ergSupported = false; resistanceSupported = false
         feed = TrainerFeed(); dataSampler = PacketSampler(first: 5, every: 200); partialSampler = PacketSampler(first: 3, every: 200)
         machineKind = nil; detectedKind = nil; kindOverride = nil; trainerServices = []; trainerPackets = 0; trainerLastPacket = nil
-        otherSamplers = [:]; subscribedAt = nil; noDataWarned = false; autoStartSent = false; trainerBadPackets = 0; trainerOtherPackets = 0
+        otherSamplers = [:]; subscribedAt = nil; noDataWarned = false; autoStartSent = false; effortSeen = false; trainerBadPackets = 0; trainerOtherPackets = 0
         gradeResistance.reset(); encoder = ResistanceEncoder(); lastSent = nil; lastResistanceLevel = nil
         if pilotRunning { pilotTimer?.invalidate(); pilotRunning = false; pilotStatus = BluetoothStore.pilotIdle }
         if heartID == nil { heart = nil; heartContact = nil }
@@ -1061,7 +1076,8 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         } else {
             let now = Date()
             var changed = feed.expire(now: now.timeIntervalSinceReferenceDate)
-            if let at = subscribedAt, trainerPackets == 0, now.timeIntervalSince(at) > 3 { wakeSilentMachine() }
+            // Rien, ou seulement des zéros, 3 s après l'abonnement : « prise de contrôle + démarrage ».
+            if let at = subscribedAt, !effortSeen, now.timeIntervalSince(at) > 3 { wakeSilentMachine() }
             if let at = subscribedAt, !noDataWarned, trainerPackets == 0, now.timeIntervalSince(at) > 8 {
                 noDataWarned = true
                 var why = ""
