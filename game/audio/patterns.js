@@ -264,6 +264,8 @@ export const SURFACE_MIX = {
   gravel: { hiss: 0.3, rumble: 0.6, crunch: 1, wood: 0, sand: 0 },
   mud: { hiss: 0, rumble: 0.55, crunch: 0, wood: 0, sand: 0.9, water: 0.3 },
   creek: { hiss: 0, rumble: 0.4, crunch: 0.2, wood: 0, sand: 0, water: 1 },
+  // Chemin de terre tassé de la Terre du Milieu : grondement sourd et quelques gravillons
+  path: { hiss: 0.3, rumble: 0.8, crunch: 0.3, wood: 0, sand: 0.15 },
 };
 
 export function surfaceMix(surface, offRoad = false) {

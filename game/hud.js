@@ -140,7 +140,7 @@ export class Hud {
     const line = () => {
       ctx.beginPath();
       pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
-      ctx.closePath();
+      if (!this.track.open) ctx.closePath();
     };
     line();
     ctx.strokeStyle = 'rgba(0,0,0,0.5)';
@@ -166,7 +166,20 @@ export class Hud {
       ctx.lineWidth = 3.4;
       ctx.stroke();
     }
-    const [sx, sy] = this.mapPoint(this.path.norm(t.x[0], t.z[0]));
+    if (t.open) {
+      // Parcours ouvert : arrivée marquée d'un rond doré.
+      const end = t.frame(t.length);
+      const [ex, ey] = this.mapPoint(this.path.norm(end.x, end.z));
+      ctx.beginPath();
+      ctx.arc(ex, ey, 5, 0, Math.PI * 2);
+      ctx.fillStyle = '#f2c14e';
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#11151f';
+      ctx.stroke();
+    }
+    const st = t.frame(0);
+    const [sx, sy] = this.mapPoint(this.path.norm(st.x, st.z));
     ctx.fillStyle = '#fff';
     ctx.fillRect(sx - 4, sy - 4, 8, 8);
     ctx.fillStyle = '#11151f';
@@ -279,9 +292,15 @@ export class Hud {
     const wind = Math.abs(d.windGrade || 0) >= 0.15 ? ` · vent ${fmtGrade(d.windGrade)} %` : '';
     this.set('hTerrain', `terrain ${fmtGrade(d.terrainGrade)} %${wind}`);
     this.setWeather(d.weather);
-    this.setPosition(d.position);
-    this.set('hPosTotal', `/ ${d.total}`);
-    this.set('hLap', `Tour ${d.lap} / ${d.laps}`);
+    // Balade (Terre du Milieu) : pas de classement ni d'objets, la distance qui reste à la place du tour.
+    this.set('ride', d.ride !== null && d.ride !== undefined, (on) => this.root.classList.toggle('ride', on));
+    if (d.ride !== null && d.ride !== undefined) {
+      this.set('hLap', `${(d.ride / 1000).toFixed(1).replace('.', ',')} km restants`);
+    } else {
+      this.setPosition(d.position);
+      this.set('hPosTotal', `/ ${d.total}`);
+      this.set('hLap', `Tour ${d.lap} / ${d.laps}`);
+    }
     this.set('lastLap', d.lap === d.laps && d.laps > 1, (on) => e.hLap.parentElement.classList.toggle('final', on));
     this.set('hTime', formatTime(Math.max(0, d.time)));
     this.setItem(d.item);

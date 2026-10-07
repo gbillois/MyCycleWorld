@@ -1656,3 +1656,33 @@ body.touch, body.touch #hud, body.touch #rowHud { -webkit-user-select: none; use
   .gate-badge, .gate-card .muted { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .start-gate .gate-badge, .gate-steps li.current::before { animation: none; } }
+
+/* Balade en Terre du Milieu (middle-earth.js) : section du menu, cartes d'étape sur parchemin, nom des lieux,
+   affichage tête haute sans classement ni objets, écran de fin d'étape. */
+.course-section { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 14px 4px 0; font: 400 22px/1.1 Georgia, 'Times New Roman', serif; font-style: italic; color: #f2d58a; letter-spacing: 0.01em; }
+.course-section small { font: 700 12px/1 var(--f-ui); font-style: normal; letter-spacing: 0.1em; text-transform: uppercase; color: #b9a77a; }
+.stage-card { background: linear-gradient(180deg, rgba(242, 213, 138, 0.1), rgba(242, 213, 138, 0.03)); border-color: rgba(242, 213, 138, 0.2); }
+.stage-card .c-name { font-family: Georgia, 'Times New Roman', serif; font-style: italic; font-weight: 700; }
+.stage-card[data-done="true"] .c-stats .hot { background: rgba(120, 200, 110, 0.24); color: #c6f0b4; }
+.stage-pv .pv-map { background: radial-gradient(circle at 50% 60%, rgba(242, 213, 138, 0.14), transparent 70%); }
+.stage-pv .pv-map > svg { max-width: 360px; }
+.pv-inset { position: absolute; right: 18px; bottom: 18px; width: 30%; max-width: 110px; }
+.pv-inset svg { width: 100%; height: auto; border-radius: 12px; transform: none; box-shadow: 0 10px 20px rgba(0, 0, 0, 0.5); }
+.banner.place { font: italic 700 58px/1.05 Georgia, 'Times New Roman', serif; color: #f6e2a6; -webkit-text-stroke: 0; text-shadow: 0 2px 0 #3a2412, 0 0 18px rgba(0, 0, 0, 0.75), 0 10px 30px rgba(0, 0, 0, 0.6); }
+#hud.ride .pos, #hud.ride .hud-item { display: none; }
+#hud.ride .hud-meta { font-size: 1.1em; }
+#end[data-rank="ride"] #endTitle { font-family: Georgia, 'Times New Roman', serif; font-style: italic; color: #f6e2a6; }
+#end[data-rank="ride"] #results { display: none; }
+#end[data-rank="ride"] .podium { display: block; max-width: 640px; }
+.ride-end { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 16px; align-items: center; }
+.ride-end > svg { width: 100%; height: auto; border-radius: 16px; box-shadow: 0 16px 30px rgba(0, 0, 0, 0.45); }
+.ride-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.ride-stat { padding: 10px 12px; border-radius: 14px; background: rgba(255, 255, 255, 0.07); display: grid; gap: 4px; }
+.ride-stat span { font: 700 11px/1 var(--f-ui); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.ride-stat b { font: 400 26px/1 var(--f-display); color: #fff; }
+#end[data-rank="ride"] #endNote { text-align: center; font-size: 14px; }
+@media (max-width: 760px) {
+  .banner.place { font-size: 34px; }
+  .ride-end { grid-template-columns: 1fr; }
+  .ride-end > svg { max-width: 220px; margin: 0 auto; }
+}

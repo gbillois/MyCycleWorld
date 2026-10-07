@@ -29,6 +29,42 @@ export const MOODS = {
     hemiSky: '#bcd8ff', hemiGround: '#55693a', hemiI: 0.9, env: 0.6,
     fog: [320, 3200], clouds: 0.42, cirrus: 0.5, exposure: 1.0,
   },
+  // Terre du Milieu (middle-earth.js) : une lumière par région.
+  shire: {
+    zenith: '#2a62c4', mid: '#6ea2e0', horizon: '#e6dcc4', sun: '#ffe2b0', sunI: 3.3,
+    hemiSky: '#c9dcff', hemiGround: '#6a7a3a', hemiI: 0.95, env: 0.55,
+    fog: [260, 2600], clouds: 0.4, cirrus: 0.5, exposure: 1.02,
+  },
+  wilds: {
+    zenith: '#2a5fae', mid: '#6d97cc', horizon: '#cfd6dc', sun: '#fff0d8', sunI: 3.0,
+    hemiSky: '#bccbe0', hemiGround: '#5d6247', hemiI: 0.9, env: 0.55,
+    fog: [240, 2400], clouds: 0.58, cirrus: 0.4, exposure: 1.0,
+  },
+  misty: {
+    zenith: '#1d4fae', mid: '#5a8bd6', horizon: '#d6e2ee', sun: '#fff6ea', sunI: 3.1,
+    hemiSky: '#c6d8f2', hemiGround: '#55604c', hemiI: 0.88, env: 0.6,
+    fog: [300, 3400], clouds: 0.5, cirrus: 0.65, exposure: 1.0,
+  },
+  lorien: {
+    zenith: '#2c5cb8', mid: '#7aa2d8', horizon: '#f0e2b8', sun: '#ffe7a8', sunI: 3.2,
+    hemiSky: '#e8e0c0', hemiGround: '#7a7432', hemiI: 1.0, env: 0.6,
+    fog: [200, 2200], clouds: 0.3, cirrus: 0.6, exposure: 1.04,
+  },
+  rohan: {
+    zenith: '#2463c8', mid: '#6ea4e6', horizon: '#ece0c2', sun: '#ffe9c0', sunI: 3.4,
+    hemiSky: '#cfe0ff', hemiGround: '#8a7a42', hemiI: 0.95, env: 0.55,
+    fog: [320, 3600], clouds: 0.36, cirrus: 0.55, exposure: 1.0,
+  },
+  ithilien: {
+    zenith: '#225cc0', mid: '#6299dc', horizon: '#d9e2d6', sun: '#fff0d0', sunI: 3.2,
+    hemiSky: '#c4dafa', hemiGround: '#4f6a34', hemiI: 0.92, env: 0.55,
+    fog: [240, 2600], clouds: 0.46, cirrus: 0.5, exposure: 1.0,
+  },
+  mordor: {
+    zenith: '#2a1c1e', mid: '#5e3326', horizon: '#b8653c', sun: '#ffb27a', sunI: 2.3,
+    hemiSky: '#a06a54', hemiGround: '#2e2422', hemiI: 0.75, env: 0.35,
+    fog: [180, 3000], clouds: 0.78, cirrus: 0.15, exposure: 1.05,
+  },
 };
 
 // Applique l'ambiance aux lumières de la scène (créées par main.js) et à la brume.

@@ -40,6 +40,7 @@ import { MtbMode } from './mtb-mode.js';
 import { HelmetFx } from './helmet-fx.js';
 import { GymPicker } from './gym-picker.js';
 import { gateStatus } from '../src/core/gym.js';
+import { STAGES, STAGE_ORDER, JOURNEY, PLACES, nextStage, placeAt, readProgress, recordStage } from './middle-earth.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -162,9 +163,15 @@ function buildWorld() {
     scenery = buildDetailedScenery(scene, track, { quality: QUALITY, renderer });
   } else {
     const simple = buildScenery(scene, track);
+    if (!scene.fog) scene.fog = new THREE.Fog('#cfe6fb', 160, 1100); // retirée par un autre décor (forêt)
+    scene.fog.color.set(simple.fogColor); // brume et fond à la couleur de l'horizon (Mordor, Lórien...)
+    scene.background = scene.fog.color;
     scenery = {
       ...simple,
-      update: (dt, cam) => simple.sky.position.copy(cam.position),
+      update: (dt, cam) => {
+        simple.sky.position.copy(cam.position);
+        simple.animate?.(dt); // étapes de la Terre du Milieu : roue du moulin, lave, fumées
+      },
       dispose: () => {
         for (const root of [simple.group, simple.sky]) {
           scene.remove(root);
@@ -416,9 +423,16 @@ function setupRace() {
   race.addEventListener('lap', ({ detail }) => {
     hud.flash(detail.lap === race.laps ? 'Dernier tour !' : `Tour ${detail.lap} / ${race.laps}`, 1500);
   });
+  rideState.place = race.ride ? placeAt(track.course, 0) : null;
   race.addEventListener('finish', ({ detail: r }) => {
     models.get(r)?.celebrate?.(race.positionOf(r)); // bras levés pour le vainqueur, poing levé sur le podium
     if (!r.isPlayer) return;
+    if (race.ride) {
+      // Balade : fin de l'étape, arrivée au lieu de destination.
+      hud.flash(`${placeAt(track.course, 1)} !`, 2500, 'place');
+      endTimer = setTimeout(showEnd, 2200);
+      return;
+    }
     hud.flash(`Arrivée : ${ordinal(race.positionOf(r))} !`, 2500, 'good');
     endTimer = setTimeout(showEnd, 2200);
   });
@@ -562,6 +576,9 @@ function showEnd() {
   if (state !== 'race') return;
   state = 'end';
   touch?.releaseAll();
+  $('end').querySelector('.end-kicker').textContent = race.ride ? 'Étape terminée' : 'Course terminée';
+  $('nextStage').hidden = true;
+  if (race.ride) return showRideEnd();
   const rows = race.ranking().map((r) => ({ r, ...race.estimatedTime(r) }));
   rows.sort((a, b) => (a.estimated === b.estimated ? a.time - b.time : a.estimated ? 1 : -1));
   fillEnd(rows, { kind: 'bike', note: 'le coureur' });
@@ -613,7 +630,7 @@ function courseSvg(t, big = false) {
   }[theme];
   const [sx, sz] = pts[0];
   const start = `<g transform="translate(${(8 + sx * 84 - 4).toFixed(1)} ${(8 + sz * 84 - 4).toFixed(1)})"><rect width="8" height="8" rx="1.5" fill="#fff" stroke="#11151f" stroke-width="1"/><rect width="4" height="4" fill="#11151f"/><rect x="4" y="4" width="4" height="4" fill="#11151f"/></g>`;
-  return `<svg viewBox="0 0 100 100" aria-hidden="true"><defs><radialGradient id="${gid}" cx="35%" cy="30%" r="85%"><stop offset="0" stop-color="${c1}"/><stop offset="1" stop-color="${c2}"/></radialGradient></defs><rect width="100" height="100" fill="url(#${gid})"/>${deco}<path d="${d}Z" fill="none" stroke="#0b0e16" stroke-opacity=".6" stroke-width="${big ? 6 : 7.5}" stroke-linejoin="round"/><path d="${d}Z" fill="none" stroke="#fff" stroke-width="${big ? 2.6 : 3.2}" stroke-linejoin="round"/>${surf}${start}</svg>`;
+  return `<svg viewBox="0 0 100 100" aria-hidden="true"><defs><radialGradient id="${gid}" cx="35%" cy="30%" r="85%"><stop offset="0" stop-color="${c1}"/><stop offset="1" stop-color="${c2}"/></radialGradient></defs><rect width="100" height="100" fill="url(#${gid})"/>${deco}<path d="${d}${t.open ? '' : 'Z'}" fill="none" stroke="#0b0e16" stroke-opacity=".6" stroke-width="${big ? 6 : 7.5}" stroke-linejoin="round"/><path d="${d}${t.open ? '' : 'Z'}" fill="none" stroke="#fff" stroke-width="${big ? 2.6 : 3.2}" stroke-linejoin="round"/>${t.open ? finishDot(pts[pts.length - 1], P) : ''}${surf}${start}</svg>`;
 }
 
 // Profil d'altitude (aire + ligne), revêtements particuliers en bandes sous la courbe.
@@ -626,6 +643,105 @@ function profileSvg(info, cls = 'spark') {
   return `<svg class="${cls}" viewBox="0 0 200 60" preserveAspectRatio="none" aria-hidden="true"><defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${light}" stop-opacity=".55"/><stop offset="1" stop-color="${light}" stop-opacity="0"/></linearGradient></defs><path d="${line} L200 60 L0 60Z" fill="url(#${gid})"/><path d="${line}" fill="none" stroke="${light}" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>${band}</svg>`;
 }
 
+// Arrivée d'un parcours ouvert sur la mini-carte : rond doré.
+const finishDot = ([x, z], P) => `<circle cx="${P(x, z).split(' ')[0]}" cy="${P(x, z).split(' ')[1]}" r="4" fill="#f2c14e" stroke="#11151f" stroke-width="1.2"/>`;
+
+// Carte de la Terre du Milieu sur parchemin : tout l'itinéraire, l'étape en doré, les villes étapes.
+const J_BOUNDS = (() => {
+  const xs = JOURNEY.map((p) => p[0]);
+  const ys = JOURNEY.map((p) => p[1]);
+  return { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) };
+})();
+function journeyPoint([x, y]) {
+  const b = J_BOUNDS;
+  const k = 84 / Math.max(b.x1 - b.x0, b.y1 - b.y0);
+  const ox = (100 - (b.x1 - b.x0) * k) / 2;
+  const oy = (100 - (b.y1 - b.y0) * k) / 2;
+  return [ox + (x - b.x0) * k, oy + (b.y1 - y) * k];
+}
+let journeyCount = 0;
+const nearestJourney = (km) => JOURNEY.reduce((best, p, i) => (Math.hypot(p[0] - km[0], p[1] - km[1]) < Math.hypot(JOURNEY[best][0] - km[0], JOURNEY[best][1] - km[1]) ? i : best), 0);
+function journeySvg(stage, big = false) {
+  const pts = JOURNEY.map(journeyPoint);
+  const d = (list) => list.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`).join(' ');
+  const i0 = nearestJourney(PLACES[stage.from].km);
+  const i1 = nearestJourney(PLACES[stage.to].km);
+  const part = pts.slice(Math.min(i0, i1), Math.max(i0, i1) + 1);
+  const gid = `pj-${stage.id}-${++journeyCount}`; // unique : la même carte peut être affichée deux fois (menu, fin)
+  // Reliefs dessinés à la plume : Monts Brumeux, Montagnes Blanches, Ephel Dúath ; Montagne du Destin.
+  const hills = [[860, 1040], [866, 1000], [872, 960], [860, 925], [880, 900], [820, 730], [860, 712], [900, 705], [1185, 690], [1200, 660], [1190, 625], [1230, 700]]
+    .map((km) => journeyPoint(km)).map(([x, y]) => `<path d="M${(x - 3).toFixed(1)} ${(y + 2).toFixed(1)} l3 -4.5 l3 4.5" fill="none" stroke="#7a5a36" stroke-width=".8" opacity=".75"/>`).join('');
+  const [dx, dy] = journeyPoint(PLACES['mount-doom'].km);
+  const doom = `<path d="M${(dx - 4).toFixed(1)} ${(dy + 2.5).toFixed(1)} l4 -6 l4 6z" fill="#b8452a" opacity=".85"/>`;
+  const towns = STAGES.map((s) => journeyPoint(PLACES[s.from].km)).concat([journeyPoint(PLACES[STAGES[STAGES.length - 1].to].km)]);
+  const dots = towns.map(([x, y]) => `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${big ? 1.6 : 2.2}" fill="#5a4026"/>`).join('');
+  const [sx, sy] = journeyPoint(PLACES[stage.from].km);
+  const [ex, ey] = journeyPoint(PLACES[stage.to].km);
+  const labels = big
+    ? STAGES.map((s) => [s.from, journeyPoint(PLACES[s.from].km)]).concat([[STAGES[STAGES.length - 1].to, journeyPoint(PLACES[STAGES[STAGES.length - 1].to].km)]])
+      .map(([id, [x, y]], k) => `<text x="${x.toFixed(1)}" y="${(y + (k % 2 ? 5.2 : -3)).toFixed(1)}" font-size="3.1" text-anchor="middle" fill="#4a3018" font-family="Georgia, serif" font-style="italic">${PLACES[id].name}</text>`).join('')
+    : '';
+  return `<svg viewBox="0 0 100 100" aria-hidden="true"><defs><radialGradient id="${gid}" cx="45%" cy="40%" r="80%"><stop offset="0" stop-color="#f4e7c5"/><stop offset="1" stop-color="#cdb27a"/></radialGradient></defs><rect width="100" height="100" fill="url(#${gid})"/>${hills}${doom}<path d="${d(pts)}" fill="none" stroke="#7a5a36" stroke-width="${big ? 0.9 : 1.4}" stroke-dasharray="${big ? '1.6 1.4' : '2.4 2'}" stroke-linejoin="round"/><path d="${d(part)}" fill="none" stroke="#3a2412" stroke-width="${big ? 3.2 : 5}" stroke-linejoin="round" stroke-linecap="round" opacity=".55"/><path d="${d(part)}" fill="none" stroke="#f2b93b" stroke-width="${big ? 1.8 : 3}" stroke-linejoin="round" stroke-linecap="round"/>${dots}<circle cx="${sx.toFixed(1)}" cy="${sy.toFixed(1)}" r="${big ? 2.2 : 3.4}" fill="#fff" stroke="#3a2412" stroke-width="1"/><circle cx="${ex.toFixed(1)}" cy="${ey.toFixed(1)}" r="${big ? 2.2 : 3.4}" fill="#f2b93b" stroke="#3a2412" stroke-width="1"/>${labels}</svg>`;
+}
+
+// Aperçu d'une étape de la balade : carte du voyage, tracé de l'étape, lieux traversés.
+function stagePreview(id, x) {
+  const c = courseById(id);
+  const best = readProgress(safeStorage)[id];
+  const machine = playMachine === 'cross' ? 'Elliptique' : 'Vélo';
+  return `<div class="pv stage-pv" data-theme="${x.theme}">
+    <div class="pv-map">${journeySvg(c, true)}<span class="pv-inset">${x.big}</span></div>
+    <div class="pv-info">
+      <span class="pv-kicker">${machine} · balade en Terre du Milieu · étape ${c.index + 1} / ${STAGES.length}</span>
+      <h3>${x.name}</h3>
+      <p>${x.tagline}. Sans adversaires ni objets : la route, le paysage et ton rythme.</p>
+      <div class="pv-diff"><span>Difficulté</span>${stars(x.difficulty)}</div>
+      <div class="pv-profile">${profileSvg(x, 'profile')}<span class="pv-alt">${x.alt} m</span></div>
+      <dl class="pv-stats"><div><dt>${icon('i-route')}Longueur</dt><dd>${x.km} km</dd></div><div><dt>${icon('i-mountain')}Dénivelé</dt><dd>${x.gain} m</dd></div><div><dt>${icon('i-flag')}Étape</dt><dd>${c.index + 1} / ${STAGES.length}</dd></div><div><dt>${icon('i-clock')}Meilleur temps</dt><dd>${best ? formatTime(best) : '—'}</dd></div></dl>
+      <div class="pv-surf">${c.places.map(([, n]) => `<span>${n}</span>`).join('')}</div>
+      <div class="pv-weather" data-mode="${weatherPref}"><b>Météo ${WEATHER_LABELS[weatherPref].toLowerCase()}</b><span>${forecast(x.theme, weatherPref)}</span></div>
+      <div class="pv-go"><span class="glyph"><span class="k-kbd">Entrée</span><span class="k-pad pad-a">A</span></span>Partir en balade</div>
+    </div>
+  </div>`;
+}
+
+// Balade : lieu traversé (bannière à l'entrée de chaque lieu) et écran de fin d'étape.
+const rideState = { place: null };
+function ridePlaces() {
+  const p = race.player;
+  const name = placeAt(track.course, Math.max(0, Math.min(1, p.s / track.length)));
+  if (name === rideState.place) return;
+  rideState.place = name;
+  if (name && p.finishTime === null) hud.flash(name, 2600, 'place');
+}
+
+function showRideEnd() {
+  const c = track.course;
+  const p = race.player;
+  const time = p.finishTime ?? race.time;
+  const { progress, best } = recordStage(safeStorage, c.id, time);
+  const gain = elevationGain(track.grade, track.step) * (track.length / track.total);
+  const next = nextStage(c.id);
+  $('endTitle').textContent = `${placeAt(c, 1)} !`;
+  $('end').dataset.rank = 'ride';
+  const stat = (label, value) => `<div class="ride-stat"><span>${label}</span><b>${value}</b></div>`;
+  $('podium').innerHTML = `<div class="ride-end">${journeySvg(c, true)}<div class="ride-stats">${stat('Temps', formatTime(time))}${stat('Vitesse moyenne', `${((track.length / Math.max(1, time)) * 3.6).toFixed(1).replace('.', ',')} km/h`)}${stat('Distance', `${(track.length / 1000).toFixed(1).replace('.', ',')} km`)}${stat('Dénivelé', `${Math.round(gain)} m`)}</div></div>`;
+  $('results').innerHTML = '';
+  const count = Object.keys(progress).length;
+  $('endNote').textContent = `${best ? 'Meilleur temps sur cette étape ! ' : `Meilleur temps : ${formatTime(progress[c.id])}. `}${count === STAGES.length ? 'Les huit étapes sont faites : de la Comté à la Montagne du Destin !' : `${count} étape${count > 1 ? 's' : ''} sur ${STAGES.length}.`}${next ? ` Prochaine étape : ${next.name}.` : ''}`;
+  $('nextStage').hidden = !next;
+  if (next) $('nextStage').querySelector('span').textContent = `Étape suivante : ${next.name}`;
+  renderCourses();
+  show('end');
+}
+
+$('nextStage').addEventListener('click', async () => {
+  const next = nextStage(track.course.id);
+  if (!next) return;
+  await loadCourse(next.id);
+  startRace();
+});
+
 const plural = (n, word) => `${n} ${word}${n > 1 ? 's' : ''}`;
 const courseInfo = new Map();
 function describeCourse(id) {
@@ -635,7 +751,7 @@ function describeCourse(id) {
     const gain = elevationGain(t.grade, t.step);
     const maxGrade = Math.max(...t.grade);
     const hasSand = t.surf.includes('sand');
-    const stats = [`${(t.length / 1000).toFixed(1)} km`, `D+ ${Math.round(gain)} m`, plural(lapsFor(c), 'tour')];
+    const stats = [`${(t.length / 1000).toFixed(1)} km`, `D+ ${Math.round(gain)} m`, c.ride ? `Étape ${c.index + 1} / ${STAGES.length}` : plural(lapsFor(c), 'tour')];
     const hot = [];
     if (maxGrade >= 8) hot.push(`pente max ${Math.round(maxGrade)} %`);
     if (hasSand) hot.push('sable');
@@ -664,6 +780,7 @@ function describeCourse(id) {
 // Aperçu du niveau sélectionné (grande carte, profil, chiffres clés).
 function coursePreview(id) {
   const x = describeCourse(id);
+  if (courseById(id).ride) return stagePreview(id, x);
   const machine = playMachine === 'cross' ? 'Elliptique' : 'Vélo';
   return `<div class="pv" data-theme="${x.theme}">
     <div class="pv-map">${x.big}</div>
@@ -682,10 +799,18 @@ function coursePreview(id) {
 }
 
 function renderCourses() {
+  const progress = readProgress(safeStorage);
   $('courseList').innerHTML = COURSE_ORDER.map((id) => {
     const info = describeCourse(id);
     return `<button type="button" class="course-card" data-course="${id}" data-theme="${info.theme}" aria-current="${id === courseId}"><span class="cc-map">${info.svg}</span><span class="cc-body"><span class="c-name">${info.name}</span><span class="c-tag">${info.tagline}</span>${profileSvg(info)}<span class="c-stats">${info.stats.map((x) => `<span>${x}</span>`).join('')}${info.hot.map((x) => `<span class="hot">${x}</span>`).join('')}</span></span>${stars(info.difficulty)}</button>`;
-  }).join('');
+  }).join('')
+    // Balade en Terre du Milieu : huit étapes sans adversaires (middle-earth.js).
+    + `<h3 class="course-section"><span>Balade en Terre du Milieu</span><small>${Object.keys(progress).length} / ${STAGES.length} étapes</small></h3>`
+    + STAGE_ORDER.map((id) => {
+      const info = describeCourse(id);
+      const done = progress[id];
+      return `<button type="button" class="course-card stage-card" data-course="${id}" data-theme="${info.theme}" data-done="${done ? 'true' : 'false'}" aria-current="${id === courseId}"><span class="cc-map">${journeySvg(courseById(id))}</span><span class="cc-body"><span class="c-name">${info.name}</span><span class="c-tag">${info.tagline}</span>${profileSvg(info)}<span class="c-stats">${info.stats.map((x) => `<span>${x}</span>`).join('')}${done ? `<span class="hot">✓ ${formatTime(done)}</span>` : ''}</span></span>${stars(info.difficulty)}</button>`;
+    }).join('');
   previewOf.coursePreview = null;
   showPreview('coursePreview', courseId, coursePreview);
 }
@@ -1898,6 +2023,7 @@ function frame(nowMs) {
     weather.step(dt, race.time, true); // vent et pluie de l'instant, avant la physique
     race.update(dt, playerInput());
     if (race.time < 0) hud.countdown(String(Math.ceil(-race.time)));
+    else if (race.ride && state === 'race') ridePlaces(); // balade : nom des lieux traversés
   }
   syncScene(state === 'paused' ? 0 : dt);
   helmetFx.sync(race, track, state === 'paused' ? 0 : dt, camera);
@@ -1929,6 +2055,7 @@ function frame(nowMs) {
         weather: weather.hud,
         position: race.positionOf(p),
         total: race.racers.length,
+        ride: race.ride ? Math.max(0, race.distance - p.s) : null, // balade : distance restante (m)
         lap: race.lapOf(p),
         laps: race.laps,
         time: p.finishTime ?? race.time,
@@ -1974,6 +2101,8 @@ window.__mcw = {
   get rowing() { return rowing; },
   get kayak() { return kayak; },
   startKayak,
+  startRace,
+  snapCamera: () => cameraTarget(camPos, camLook), // caméra replacée d'un coup derrière le joueur (captures)
   devices,
   gears,
   get track() { return track; },

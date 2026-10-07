@@ -93,9 +93,16 @@ export class Race extends EventTarget {
     this.limit = track.lateralLimit ?? LATERAL_LIMIT;
     const grid = Math.min(1.6, this.half - 0.5);
 
+    // Balade (course.ride, Terre du Milieu) : le joueur seul, sans boîtes à objets.
+    this.ride = !!track.course.ride;
     // Grille de départ : deux par rangée, le joueur en deuxième ligne.
-    const order = [AI_PROFILES[4], AI_PROFILES[3], null, AI_PROFILES[2], AI_PROFILES[1], AI_PROFILES[0]];
+    const order = this.ride ? [null] : [AI_PROFILES[4], AI_PROFILES[3], null, AI_PROFILES[2], AI_PROFILES[1], AI_PROFILES[0]];
     order.forEach((p, i) => {
+      if (this.ride) {
+        this.player = new Racer({ id: 0, name: playerName, color: '#ff5a1f', helmet: '#ffffff', bike: '#16181d', isPlayer: true, s: -3, lateral: 0 });
+        this.racers.push(this.player);
+        return;
+      }
       const row = Math.floor(i / 2);
       const s = -4 - row * 4;
       const lateral = i % 2 ? grid : -grid;
@@ -110,7 +117,7 @@ export class Race extends EventTarget {
     // Boîtes à objets : 8 rangées par tour, en quinconce (3 de front, puis 2 décalées), resserrées sur un sentier.
     this.boxes = [];
     const spread = Math.min(1, (this.half - 0.6) / (ROAD_HALF - 0.6));
-    BOX_ROWS.forEach((frac, row) => {
+    if (!this.ride) BOX_ROWS.forEach((frac, row) => {
       for (const lateral of row % 2 === 0 ? [-2.6, 0, 2.6] : [-1.3, 1.3]) {
         this.boxes.push({ s: frac * track.length, lateral: lateral * spread, respawnAt: 0 });
       }

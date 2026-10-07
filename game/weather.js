@@ -39,9 +39,7 @@ const MAX_RIDERS = 8;
 
 // Point de la route (comme Track.frame, sans allouer) : out = { x, y, z, tx, tz }.
 function roadPoint(tr, s, lateral, out) {
-  const f = mod(s, tr.length) / tr.step;
-  const i = Math.min(tr.count - 1, Math.floor(f));
-  const a = f - i;
+  const [i, a] = tr.locate(s);
   let tx = tr.tx[i] + (tr.tx[i + 1] - tr.tx[i]) * a;
   let tz = tr.tz[i] + (tr.tz[i + 1] - tr.tz[i]) * a;
   const l = Math.hypot(tx, tz) || 1;
@@ -425,7 +423,7 @@ export class WeatherSystem {
   tailwindAt(s) {
     const tr = this.track;
     if (!this.active || !tr) return 0;
-    const i = Math.min(tr.count - 1, Math.floor(mod(s, tr.length) / tr.step));
+    const i = tr.locate(s)[0];
     return tailwind(this.now.speed, this.now.dirX, this.now.dirZ, tr.tx[i], tr.tz[i]);
   }
 
@@ -440,7 +438,7 @@ export class WeatherSystem {
     const tr = this.track;
     if (tx === undefined) {
       if (!tr) return;
-      const i = Math.min(tr.count - 1, Math.floor(mod(player.s, tr.length) / tr.step));
+      const i = tr.locate(player.s)[0];
       tx = tr.tx[i];
       tz = tr.tz[i];
     }
