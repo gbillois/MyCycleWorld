@@ -93,16 +93,14 @@ export class Race extends EventTarget {
     this.limit = track.lateralLimit ?? LATERAL_LIMIT;
     const grid = Math.min(1.6, this.half - 0.5);
 
-    // Balade (course.ride, zones de la Grande Balade) : le joueur seul, sans boîtes à objets.
+    // Balade (course.ride, zones de la Grande Balade) : mêmes adversaires et boîtes à objets que sur les circuits,
+    // sur un parcours ouvert. Les écarts entre coureurs, boîtes et casques s'y calculent sans boucler : une
+    // « longueur de tour » démesurée (this.L) rend les calculs modulo identiques à de simples différences.
     this.ride = !!track.course.ride;
+    this.L = track.open ? 1e6 : track.length;
     // Grille de départ : deux par rangée, le joueur en deuxième ligne.
-    const order = this.ride ? [null] : [AI_PROFILES[4], AI_PROFILES[3], null, AI_PROFILES[2], AI_PROFILES[1], AI_PROFILES[0]];
+    const order = [AI_PROFILES[4], AI_PROFILES[3], null, AI_PROFILES[2], AI_PROFILES[1], AI_PROFILES[0]];
     order.forEach((p, i) => {
-      if (this.ride) {
-        this.player = new Racer({ id: 0, name: playerName, color: '#ff5a1f', helmet: '#ffffff', bike: '#16181d', isPlayer: true, s: -3, lateral: 0 });
-        this.racers.push(this.player);
-        return;
-      }
       const row = Math.floor(i / 2);
       const s = -4 - row * 4;
       const lateral = i % 2 ? grid : -grid;
@@ -117,7 +115,7 @@ export class Race extends EventTarget {
     // Boîtes à objets : 8 rangées par tour, en quinconce (3 de front, puis 2 décalées), resserrées sur un sentier.
     this.boxes = [];
     const spread = Math.min(1, (this.half - 0.6) / (ROAD_HALF - 0.6));
-    if (!this.ride) BOX_ROWS.forEach((frac, row) => {
+    BOX_ROWS.forEach((frac, row) => {
       for (const lateral of row % 2 === 0 ? [-2.6, 0, 2.6] : [-1.3, 1.3]) {
         this.boxes.push({ s: frac * track.length, lateral: lateral * spread, respawnAt: 0 });
       }
@@ -214,7 +212,7 @@ export class Race extends EventTarget {
 
   // Ligne choisie par le pilote automatique : boîte à objets à portée, sinon le milieu, en évitant les bananes.
   autoLine(r) {
-    const L = this.track.length;
+    const L = this.L;
     const t = this.time;
     const v = Math.max(r.v, 1);
     let target = 0;
@@ -245,7 +243,7 @@ export class Race extends EventTarget {
     const held = this.time - (r.itemSince ?? this.time);
     if (r.item === 'turbo' && (this.track.gradeAt(r.s) > 3 || held > 6)) this.useItem(r);
     else if (r.item === 'banana') {
-      const L = this.track.length;
+      const L = this.L;
       const chaser = this.racers.some((o) => o !== r && mod(r.s - o.s, L) < 14 && mod(r.s - o.s, L) > 2);
       if (chaser || held > 10) this.useItem(r);
     } else if (HELMET_ITEMS.has(r.item) && this.time >= (r.planAt ?? 0)) {
@@ -261,7 +259,7 @@ export class Race extends EventTarget {
       kind: r.item,
       owner: r,
       racers: this.racers,
-      length: this.track.length,
+      length: this.L,
       target: r.item === 'red' ? nextAhead(this.ranking(), r) : null,
       held,
       maxHold,
@@ -301,7 +299,7 @@ export class Race extends EventTarget {
 
   move(r, dt) {
     const t = this.time;
-    const L = this.track.length;
+    const L = this.L;
     const leaders = [];
     for (const o of this.racers) {
       if (o === r) continue;
@@ -348,7 +346,7 @@ export class Race extends EventTarget {
   crossed(r, at) {
     const travelled = r.s - r.prevS;
     if (!(travelled > 0)) return false;
-    return mod(at - r.prevS, this.track.length) <= travelled;
+    return mod(at - r.prevS, this.L) <= travelled;
   }
 
   handleBoxes() {
@@ -391,7 +389,7 @@ export class Race extends EventTarget {
     const list = this.helmets;
     if (!list.length) return;
     const t = this.time;
-    const L = this.track.length;
+    const L = this.L;
     const ctx = (this.helmetCtx ||= { wall: this.half - HELMET.wallMargin, curvatureAt: (s) => this.track.curvatureAt(s) });
     for (const h of list) {
       if (h.done) continue;
@@ -471,7 +469,7 @@ export class Race extends EventTarget {
     } else if (item === 'banana') {
       const b = {
         id: ++this.bananaId,
-        s: mod(r.s - 2.5, this.track.length),
+        s: mod(r.s - 2.5, this.L),
         lateral: r.lateral,
         owner: r,
         ownerImmuneUntil: this.time + 1.5,

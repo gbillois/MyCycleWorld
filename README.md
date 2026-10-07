@@ -83,7 +83,7 @@ Les montres Garmin récentes (Forerunner 245, 255, 265, 955…) peuvent diffuser
 
 ## La Grande Balade
 
-Jouer > Vélo (ou Elliptique) : sous les circuits, huit zones à rouler **sans adversaires ni objets**, sur un chemin de terre. Elles s'enchaînent comme les circuits d'un monde ouvert : chaque zone part de l'arrivée de la précédente sur la carte du monde (dessinée à partir des routes elles-mêmes). Chaque zone est un parcours ouvert de 2 à 2,5 km (départ et arrivée distincts, `Track.open`).
+Jouer > Vélo (ou Elliptique) : sous les circuits, huit zones à rouler sur un chemin de terre, **avec les cinq adversaires et les boîtes à objets des circuits** (turbo, banane, casques vert et rouge ; le pilote automatique les ramasse et les utilise). Elles s'enchaînent comme les circuits d'un monde ouvert : chaque zone part de l'arrivée de la précédente sur la carte du monde (dessinée à partir des routes elles-mêmes). Chaque zone est un parcours ouvert de 2 à 2,5 km (départ et arrivée distincts, `Track.open`).
 
 1. **Les Collines Fleuries** : maisons nichées dans les collines au toit d'herbe, grand arbre de fête, moulin et mare, pont de pierre, bac sur la rivière, village à colombages et son auberge.
 2. **La Forêt d'Or** : bouleaux dorés, arche de bois, village de cabanes perchées et lanternes, puis la vieille forêt aux arbres noueux.
@@ -94,7 +94,7 @@ Jouer > Vélo (ou Elliptique) : sous les circuits, huit zones à rouler **sans a
 7. **Le Col des Neiges** : houx et sapins, lacets sous le Pic Blanc, entrée de la vieille mine et le serpent du lac.
 8. **Les Terres de Feu** : aiguilles de basalte, lacets, champ de fumerolles et volcan en éruption.
 
-**Le Grand Tour** enchaîne les huit zones d'affilée : à chaque arrivée, la zone suivante se charge et l'on repart lancé (chrono, distance et dénivelé cumulés). Le nom des lieux s'affiche en chemin ; l'affichage tête haute montre la distance restante (et la zone du Grand Tour) à la place du tour et de la position. En fin de zone : temps, vitesse moyenne, dénivelé, carte du monde et bouton « Zone suivante ». Les meilleurs temps de chaque zone et du Grand Tour sont gardés sur l'appareil (`localStorage`, `mycycleworld.balade`). `?course=tour-collines` (`tour-foret`, `tour-lac`, `tour-plaines`, `tour-landes`, `tour-marais`, `tour-neiges`, `tour-feu`) ouvre une zone directement.
+**Le Grand Tour** enchaîne les huit zones d'affilée : à chaque arrivée, la zone suivante se charge et tout le peloton repart lancé (chrono, distance et dénivelé cumulés). Chaque zone rapporte des points selon la place (15, 12, 10, 8, 6, 4) ; le classement final se joue aux points. Le nom des lieux s'affiche en chemin ; l'affichage tête haute montre la position et la distance restante (et la zone du Grand Tour) à la place du tour. En fin de zone : place, temps, vitesse moyenne, dénivelé, carte du monde et bouton « Zone suivante » ; en fin de Grand Tour, le classement aux points. Les meilleurs temps de chaque zone et du Grand Tour sont gardés sur l'appareil (`localStorage`, `mycycleworld.balade`). `?course=tour-collines` (`tour-foret`, `tour-lac`, `tour-plaines`, `tour-landes`, `tour-marais`, `tour-neiges`, `tour-feu`) ouvre une zone directement.
 
 Code : zones et carte du monde dans `game/balade.js` (testées dans `tests/balade.test.js`), reliefs et décors dans `game/balade-scene.js` (graphismes détaillés et simples), une lumière par région dans `game/atmosphere.js`, couleurs, arbres et chemin de terre par région dans `game/scenery.js`. Tout est généré par le code (aucune image ni modèle).
 

@@ -292,14 +292,13 @@ export class Hud {
     const wind = Math.abs(d.windGrade || 0) >= 0.15 ? ` · vent ${fmtGrade(d.windGrade)} %` : '';
     this.set('hTerrain', `terrain ${fmtGrade(d.terrainGrade)} %${wind}`);
     this.setWeather(d.weather);
-    // Balade (Grande Balade) : pas de classement ni d'objets, la distance qui reste à la place du tour.
-    this.set('ride', d.ride !== null && d.ride !== undefined, (on) => this.root.classList.toggle('ride', on));
+    // Balade (Grande Balade) : parcours ouvert, la distance qui reste à la place du tour.
+    this.setPosition(d.position);
+    this.set('hPosTotal', `/ ${d.total}`);
     if (d.ride !== null && d.ride !== undefined) {
       const km = `${(d.ride / 1000).toFixed(1).replace('.', ',')} km`;
       this.set('hLap', d.rideZone ? `${d.rideZone} · ${km}` : `${km} restants`); // Grand Tour : numéro de la zone
     } else {
-      this.setPosition(d.position);
-      this.set('hPosTotal', `/ ${d.total}`);
       this.set('hLap', `Tour ${d.lap} / ${d.laps}`);
     }
     this.set('lastLap', d.lap === d.laps && d.laps > 1, (on) => e.hLap.parentElement.classList.toggle('final', on));
