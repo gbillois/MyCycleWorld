@@ -40,6 +40,7 @@ import { MtbMode } from './mtb-mode.js';
 import { HelmetFx } from './helmet-fx.js';
 import { GymPicker } from './gym-picker.js';
 import { gateStatus } from '../src/core/gym.js';
+import { STAGES, STAGE_ORDER, TOUR_ID, worldMap, nextStage, placeAt, readProgress, recordStage } from './balade.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -162,9 +163,15 @@ function buildWorld() {
     scenery = buildDetailedScenery(scene, track, { quality: QUALITY, renderer });
   } else {
     const simple = buildScenery(scene, track);
+    if (!scene.fog) scene.fog = new THREE.Fog('#cfe6fb', 160, 1100); // retirée par un autre décor (forêt)
+    scene.fog.color.set(simple.fogColor); // brume et fond à la couleur de l'horizon (Terres de Feu, Forêt d'Or...)
+    scene.background = scene.fog.color;
     scenery = {
       ...simple,
-      update: (dt, cam) => simple.sky.position.copy(cam.position),
+      update: (dt, cam) => {
+        simple.sky.position.copy(cam.position);
+        simple.animate?.(dt); // zones de la Grande Balade : roue du moulin, lave, fumées
+      },
       dispose: () => {
         for (const root of [simple.group, simple.sky]) {
           scene.remove(root);
@@ -416,9 +423,30 @@ function setupRace() {
   race.addEventListener('lap', ({ detail }) => {
     hud.flash(detail.lap === race.laps ? 'Dernier tour !' : `Tour ${detail.lap} / ${race.laps}`, 1500);
   });
+  rideState.place = race.ride ? placeAt(track.course, 0) : null;
   race.addEventListener('finish', ({ detail: r }) => {
     models.get(r)?.celebrate?.(race.positionOf(r)); // bras levés pour le vainqueur, poing levé sur le podium
     if (!r.isPlayer) return;
+    if (race.ride) {
+      // Grand Tour : la zone suivante se charge et l'on repart lancé, sans écran de fin.
+      const next = nextStage(track.course.id);
+      if (tour.active) {
+        tour.time = tour.zoneStart + r.finishTime;
+        tour.dist += track.length;
+        tour.gain += zoneGain();
+        recordStage(safeStorage, track.course.id, r.finishTime);
+        if (next) {
+          hud.flash(`Zone suivante : ${next.name}`, 2200, 'place');
+          const speed = r.v;
+          endTimer = setTimeout(() => continueTour(next, speed), 1600);
+          return;
+        }
+      }
+      // Balade : fin de la zone, arrivée au lieu de destination.
+      hud.flash(`${placeAt(track.course, 1)} !`, 2500, 'place');
+      endTimer = setTimeout(showEnd, 2200);
+      return;
+    }
     hud.flash(`Arrivée : ${ordinal(race.positionOf(r))} !`, 2500, 'good');
     endTimer = setTimeout(showEnd, 2200);
   });
@@ -444,6 +472,7 @@ function show(id) {
 
 async function goHome() {
   clearTimeout(endTimer);
+  tour.active = false; // Grand Tour abandonné
   // Départ abandonné pendant l'attente : la machine qui dort encore n'est plus attendue.
   if (gate.active && devices.trainer.waiting) devices.releaseMachine?.();
   gate.active = false;
@@ -455,7 +484,8 @@ async function goHome() {
   refreshDevices();
 }
 
-function startRace() {
+// rolling : vitesse (m/s) d'un départ lancé, sans compte à rebours (zone suivante du Grand Tour).
+function startRace({ rolling = null } = {}) {
   keepScreenOn();
   devices.prepareRace?.(); // appli iOS : prise de contrôle du trainer au départ
   clearTimeout(endTimer);
@@ -468,6 +498,15 @@ function startRace() {
   lastSentGrade = null;
   show(null);
   hud.flash('', 1);
+  if (tour.active) tour.zoneStart = tour.time;
+  if (rolling !== null) {
+    race.time = 0;
+    race.state = 'racing';
+    race.player.s = 0;
+    race.player.v = rolling;
+    snapCamera();
+    hud.flash(`Zone ${track.course.index + 1} / ${STAGES.length} · ${track.course.name}`, 2600, 'place');
+  }
 }
 
 // Bannières de la météo (début et fin d'averse, vent fort au départ).
@@ -562,6 +601,9 @@ function showEnd() {
   if (state !== 'race') return;
   state = 'end';
   touch?.releaseAll();
+  $('end').querySelector('.end-kicker').textContent = race.ride ? (tour.active ? 'Grand Tour' : 'Zone terminée') : 'Course terminée';
+  $('nextStage').hidden = true;
+  if (race.ride) return showRideEnd();
   const rows = race.ranking().map((r) => ({ r, ...race.estimatedTime(r) }));
   rows.sort((a, b) => (a.estimated === b.estimated ? a.time - b.time : a.estimated ? 1 : -1));
   fillEnd(rows, { kind: 'bike', note: 'le coureur' });
@@ -613,7 +655,7 @@ function courseSvg(t, big = false) {
   }[theme];
   const [sx, sz] = pts[0];
   const start = `<g transform="translate(${(8 + sx * 84 - 4).toFixed(1)} ${(8 + sz * 84 - 4).toFixed(1)})"><rect width="8" height="8" rx="1.5" fill="#fff" stroke="#11151f" stroke-width="1"/><rect width="4" height="4" fill="#11151f"/><rect x="4" y="4" width="4" height="4" fill="#11151f"/></g>`;
-  return `<svg viewBox="0 0 100 100" aria-hidden="true"><defs><radialGradient id="${gid}" cx="35%" cy="30%" r="85%"><stop offset="0" stop-color="${c1}"/><stop offset="1" stop-color="${c2}"/></radialGradient></defs><rect width="100" height="100" fill="url(#${gid})"/>${deco}<path d="${d}Z" fill="none" stroke="#0b0e16" stroke-opacity=".6" stroke-width="${big ? 6 : 7.5}" stroke-linejoin="round"/><path d="${d}Z" fill="none" stroke="#fff" stroke-width="${big ? 2.6 : 3.2}" stroke-linejoin="round"/>${surf}${start}</svg>`;
+  return `<svg viewBox="0 0 100 100" aria-hidden="true"><defs><radialGradient id="${gid}" cx="35%" cy="30%" r="85%"><stop offset="0" stop-color="${c1}"/><stop offset="1" stop-color="${c2}"/></radialGradient></defs><rect width="100" height="100" fill="url(#${gid})"/>${deco}<path d="${d}${t.open ? '' : 'Z'}" fill="none" stroke="#0b0e16" stroke-opacity=".6" stroke-width="${big ? 6 : 7.5}" stroke-linejoin="round"/><path d="${d}${t.open ? '' : 'Z'}" fill="none" stroke="#fff" stroke-width="${big ? 2.6 : 3.2}" stroke-linejoin="round"/>${t.open ? finishDot(pts[pts.length - 1], P) : ''}${surf}${start}</svg>`;
 }
 
 // Profil d'altitude (aire + ligne), revêtements particuliers en bandes sous la courbe.
@@ -626,6 +668,160 @@ function profileSvg(info, cls = 'spark') {
   return `<svg class="${cls}" viewBox="0 0 200 60" preserveAspectRatio="none" aria-hidden="true"><defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${light}" stop-opacity=".55"/><stop offset="1" stop-color="${light}" stop-opacity="0"/></linearGradient></defs><path d="${line} L200 60 L0 60Z" fill="url(#${gid})"/><path d="${line}" fill="none" stroke="${light}" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>${band}</svg>`;
 }
 
+// Arrivée d'un parcours ouvert sur la mini-carte : rond doré.
+const finishDot = ([x, z], P) => `<circle cx="${P(x, z).split(' ')[0]}" cy="${P(x, z).split(' ')[1]}" r="4" fill="#f2c14e" stroke="#11151f" stroke-width="1.2"/>`;
+
+// Carte du monde de la Grande Balade : les huit routes bout à bout (balade.js), une couleur par zone.
+// highlight : zone mise en avant (les autres s'estompent) ; null = tout le Grand Tour.
+const WORLD = worldMap();
+const ZONE_COLORS = { collines: '#5fa83a', foretdor: '#e0a92a', lac: '#2f8fd0', plaines: '#cfae4f', landes: '#8e8a5a', vertbois: '#3f8a4a', neiges: '#dfe8f4', feu: '#e0482a' };
+const WORLD_BOUNDS = (() => {
+  const all = WORLD.flatMap((z) => z.points);
+  const xs = all.map((p) => p[0]);
+  const zs = all.map((p) => p[1]);
+  return { x0: Math.min(...xs), x1: Math.max(...xs), z0: Math.min(...zs), z1: Math.max(...zs) };
+})();
+function worldPoint([x, z]) {
+  const b = WORLD_BOUNDS;
+  const k = 82 / Math.max(b.x1 - b.x0, b.z1 - b.z0);
+  return [(100 - (b.x1 - b.x0) * k) / 2 + (x - b.x0) * k, (100 - (b.z1 - b.z0) * k) / 2 + (z - b.z0) * k];
+}
+let worldCount = 0;
+function worldSvg(highlight = null, big = false) {
+  const gid = `wm-${++worldCount}`; // unique : la même carte peut être affichée deux fois (menu, fin)
+  const path = (pts) => pts.map((p, i) => { const [x, y] = worldPoint(p); return `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`; }).join(' ');
+  let roads = '';
+  let badges = '';
+  WORLD.forEach((zone, i) => {
+    const st = STAGES[i];
+    const on = !highlight || highlight === zone.id;
+    const col = ZONE_COLORS[st.region] || '#fff';
+    const w = big ? 2.2 : 3.2;
+    roads += `<path d="${path(zone.points)}" fill="none" stroke="#2a2014" stroke-opacity="${on ? 0.7 : 0.25}" stroke-width="${(highlight === zone.id ? w * 2.2 : w) + 1.6}" stroke-linejoin="round" stroke-linecap="round"/>`;
+    roads += `<path d="${path(zone.points)}" fill="none" stroke="${col}" stroke-opacity="${on ? 1 : 0.35}" stroke-width="${highlight === zone.id ? w * 2.2 : w}" stroke-linejoin="round" stroke-linecap="round"/>`;
+    if (big || !highlight || highlight === zone.id) {
+      const [x, y] = worldPoint(zone.points[0]);
+      const r = big ? 3.4 : highlight ? 4.4 : 3.6;
+      badges += `<g opacity="${on ? 1 : 0.55}"><circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r}" fill="#fff" stroke="#2a2014" stroke-width="1"/><text x="${x.toFixed(1)}" y="${(y + r * 0.42).toFixed(1)}" font-size="${(r * 1.25).toFixed(1)}" font-weight="900" text-anchor="middle" fill="#2a2014" font-family="system-ui, sans-serif">${i + 1}</text></g>`;
+    }
+  });
+  const last = WORLD[WORLD.length - 1].points;
+  const [fx, fy] = worldPoint(last[last.length - 1]);
+  const flag = `<g transform="translate(${(fx - 1).toFixed(1)} ${(fy - 9).toFixed(1)})"><rect width="1.2" height="10" fill="#2a2014"/><rect x="1.2" width="7" height="4.4" fill="#fff" stroke="#2a2014" stroke-width=".6"/><rect x="1.2" width="3.5" height="2.2" fill="#2a2014"/><rect x="4.7" y="2.2" width="3.5" height="2.2" fill="#2a2014"/></g>`;
+  return `<svg viewBox="0 0 100 100" aria-hidden="true"><defs><radialGradient id="${gid}" cx="45%" cy="40%" r="80%"><stop offset="0" stop-color="#9fd0ef"/><stop offset="1" stop-color="#3f86c0"/></radialGradient></defs><rect width="100" height="100" fill="url(#${gid})"/><path d="${path(WORLD.flatMap((z) => z.points))}" fill="none" stroke="#bfe39a" stroke-width="${big ? 16 : 18}" stroke-linejoin="round" stroke-linecap="round" opacity=".95"/><path d="${path(WORLD.flatMap((z) => z.points))}" fill="none" stroke="#e8dcb0" stroke-width="${big ? 7 : 8}" stroke-linejoin="round" stroke-linecap="round" opacity=".6"/>${roads}${badges}${flag}</svg>`;
+}
+const tourKm = () => STAGES.reduce((sum, st) => sum + describeCourse(st.id).km * 1000, 0);
+
+// Aperçu d'une zone de la Grande Balade : carte du monde, tracé de la zone, lieux traversés.
+function stagePreview(id, x) {
+  const c = courseById(id);
+  const best = readProgress(safeStorage)[id];
+  const machine = playMachine === 'cross' ? 'Elliptique' : 'Vélo';
+  return `<div class="pv stage-pv" data-theme="${x.theme}">
+    <div class="pv-map">${worldSvg(id, true)}<span class="pv-inset">${x.big}</span></div>
+    <div class="pv-info">
+      <span class="pv-kicker">${machine} · Grande Balade · zone ${c.index + 1} / ${STAGES.length}</span>
+      <h3>${x.name}</h3>
+      <p>${x.tagline}. Sans adversaires ni objets : la route, le paysage et ton rythme.</p>
+      <div class="pv-diff"><span>Difficulté</span>${stars(x.difficulty)}</div>
+      <div class="pv-profile">${profileSvg(x, 'profile')}<span class="pv-alt">${x.alt} m</span></div>
+      <dl class="pv-stats"><div><dt>${icon('i-route')}Longueur</dt><dd>${x.km} km</dd></div><div><dt>${icon('i-mountain')}Dénivelé</dt><dd>${x.gain} m</dd></div><div><dt>${icon('i-flag')}Zone</dt><dd>${c.index + 1} / ${STAGES.length}</dd></div><div><dt>${icon('i-clock')}Meilleur temps</dt><dd>${best ? formatTime(best) : '—'}</dd></div></dl>
+      <div class="pv-surf">${c.places.map(([, n]) => `<span>${n}</span>`).join('')}</div>
+      <div class="pv-weather" data-mode="${weatherPref}"><b>Météo ${WEATHER_LABELS[weatherPref].toLowerCase()}</b><span>${forecast(x.theme, weatherPref)}</span></div>
+      <div class="pv-go"><span class="glyph"><span class="k-kbd">Entrée</span><span class="k-pad pad-a">A</span></span>Partir en balade</div>
+    </div>
+  </div>`;
+}
+
+// Aperçu du Grand Tour : tout le monde, la liste des zones, la distance totale.
+function tourPreview() {
+  const progress = readProgress(safeStorage);
+  const gain = STAGES.reduce((sum, st) => sum + describeCourse(st.id).gain, 0);
+  const machine = playMachine === 'cross' ? 'Elliptique' : 'Vélo';
+  return `<div class="pv stage-pv" data-theme="meadow">
+    <div class="pv-map">${worldSvg(null, true)}</div>
+    <div class="pv-info">
+      <span class="pv-kicker">${machine} · Grande Balade · 8 zones d’affilée</span>
+      <h3>Le Grand Tour</h3>
+      <p>Des Collines Fleuries au volcan des Terres de Feu. À chaque arrivée, la zone suivante s’ouvre et l’on repart lancé ; le chrono court sur tout le tour.</p>
+      <dl class="pv-stats"><div><dt>${icon('i-route')}Longueur</dt><dd>${(tourKm() / 1000).toFixed(1)} km</dd></div><div><dt>${icon('i-mountain')}Dénivelé</dt><dd>${gain} m</dd></div><div><dt>${icon('i-flag')}Zones</dt><dd>${STAGES.length}</dd></div><div><dt>${icon('i-clock')}Meilleur temps</dt><dd>${progress[TOUR_ID] ? formatTime(progress[TOUR_ID]) : '—'}</dd></div></dl>
+      <div class="pv-surf">${STAGES.map((st) => `<span>${st.index + 1}. ${st.name}</span>`).join('')}</div>
+      <div class="pv-go"><span class="glyph"><span class="k-kbd">Entrée</span><span class="k-pad pad-a">A</span></span>Partir pour le Grand Tour</div>
+    </div>
+  </div>`;
+}
+
+// Grand Tour : les huit zones d'affilée (temps, distance et dénivelé cumulés).
+const tour = { active: false, done: false, time: 0, zoneStart: 0, dist: 0, gain: 0 };
+const zoneGain = () => elevationGain(track.grade, track.step); // les prolongements sont plats : rien à retrancher
+async function startTour() {
+  Object.assign(tour, { active: true, done: false, time: 0, zoneStart: 0, dist: 0, gain: 0 });
+  await loadCourse(STAGES[0].id);
+  startRace();
+}
+async function continueTour(next, speed) {
+  if (!tour.active) return;
+  if (state === 'paused') {
+    endTimer = setTimeout(() => continueTour(next, speed), 500);
+    return;
+  }
+  if (state !== 'race') return;
+  await loadCourse(next.id, `Route vers la zone ${next.index + 1} : ${next.name}…`);
+  startRace({ rolling: Math.max(4, speed) });
+}
+
+// Balade : lieu traversé (bannière à l'entrée de chaque lieu) et écran de fin de zone ou du Grand Tour.
+const rideState = { place: null };
+function ridePlaces() {
+  const p = race.player;
+  const name = placeAt(track.course, Math.max(0, Math.min(1, p.s / track.length)));
+  if (name === rideState.place) return;
+  rideState.place = name;
+  if (name && p.finishTime === null) hud.flash(name, 2600, 'place');
+}
+
+function showRideEnd() {
+  const c = track.course;
+  const p = race.player;
+  const zoneTime = p.finishTime ?? race.time;
+  const stat = (label, value) => `<div class="ride-stat"><span>${label}</span><b>${value}</b></div>`;
+  const kmh = (dist, t) => `${((dist / Math.max(1, t)) * 3.6).toFixed(1).replace('.', ',')} km/h`;
+  const km = (m) => `${(m / 1000).toFixed(1).replace('.', ',')} km`;
+  $('end').dataset.rank = 'ride';
+  $('results').innerHTML = '';
+  if (tour.active) {
+    // Fin du Grand Tour : totaux des huit zones.
+    const { best } = recordStage(safeStorage, TOUR_ID, tour.time);
+    const progress = readProgress(safeStorage);
+    $('endTitle').textContent = 'Grand Tour terminé !';
+    $('podium').innerHTML = `<div class="ride-end">${worldSvg(null, true)}<div class="ride-stats">${stat('Temps total', formatTime(tour.time))}${stat('Vitesse moyenne', kmh(tour.dist, tour.time))}${stat('Distance', km(tour.dist))}${stat('Dénivelé', `${Math.round(tour.gain)} m`)}</div></div>`;
+    $('endNote').textContent = best ? 'Meilleur temps sur le Grand Tour !' : `Meilleur temps sur le Grand Tour : ${formatTime(progress[TOUR_ID])}.`;
+    $('nextStage').hidden = true;
+    tour.active = false;
+    tour.done = true;
+  } else {
+    tour.done = false;
+    const { progress, best } = recordStage(safeStorage, c.id, zoneTime);
+    const next = nextStage(c.id);
+    $('endTitle').textContent = `${placeAt(c, 1)} !`;
+    $('podium').innerHTML = `<div class="ride-end">${worldSvg(c.id, true)}<div class="ride-stats">${stat('Temps', formatTime(zoneTime))}${stat('Vitesse moyenne', kmh(track.length, zoneTime))}${stat('Distance', km(track.length))}${stat('Dénivelé', `${Math.round(zoneGain())} m`)}</div></div>`;
+    const count = STAGE_ORDER.filter((id) => progress[id]).length;
+    $('endNote').textContent = `${best ? 'Meilleur temps sur cette zone ! ' : `Meilleur temps : ${formatTime(progress[c.id])}. `}${count === STAGES.length ? 'Les huit zones sont faites : essaie le Grand Tour d’une traite !' : `${count} zone${count > 1 ? 's' : ''} sur ${STAGES.length}.`}${next ? ` Prochaine zone : ${next.name}.` : ''}`;
+    $('nextStage').hidden = !next;
+    if (next) $('nextStage').querySelector('span').textContent = `Zone suivante : ${next.name}`;
+  }
+  renderCourses();
+  show('end');
+}
+
+$('nextStage').addEventListener('click', async () => {
+  const next = nextStage(track.course.id);
+  if (!next) return;
+  tour.active = false;
+  await loadCourse(next.id);
+  startRace();
+});
+
 const plural = (n, word) => `${n} ${word}${n > 1 ? 's' : ''}`;
 const courseInfo = new Map();
 function describeCourse(id) {
@@ -635,7 +831,7 @@ function describeCourse(id) {
     const gain = elevationGain(t.grade, t.step);
     const maxGrade = Math.max(...t.grade);
     const hasSand = t.surf.includes('sand');
-    const stats = [`${(t.length / 1000).toFixed(1)} km`, `D+ ${Math.round(gain)} m`, plural(lapsFor(c), 'tour')];
+    const stats = [`${(t.length / 1000).toFixed(1)} km`, `D+ ${Math.round(gain)} m`, c.ride ? `Zone ${c.index + 1} / ${STAGES.length}` : plural(lapsFor(c), 'tour')];
     const hot = [];
     if (maxGrade >= 8) hot.push(`pente max ${Math.round(maxGrade)} %`);
     if (hasSand) hot.push('sable');
@@ -664,6 +860,7 @@ function describeCourse(id) {
 // Aperçu du niveau sélectionné (grande carte, profil, chiffres clés).
 function coursePreview(id) {
   const x = describeCourse(id);
+  if (courseById(id).ride) return stagePreview(id, x);
   const machine = playMachine === 'cross' ? 'Elliptique' : 'Vélo';
   return `<div class="pv" data-theme="${x.theme}">
     <div class="pv-map">${x.big}</div>
@@ -682,10 +879,19 @@ function coursePreview(id) {
 }
 
 function renderCourses() {
+  const progress = readProgress(safeStorage);
   $('courseList').innerHTML = COURSE_ORDER.map((id) => {
     const info = describeCourse(id);
     return `<button type="button" class="course-card" data-course="${id}" data-theme="${info.theme}" aria-current="${id === courseId}"><span class="cc-map">${info.svg}</span><span class="cc-body"><span class="c-name">${info.name}</span><span class="c-tag">${info.tagline}</span>${profileSvg(info)}<span class="c-stats">${info.stats.map((x) => `<span>${x}</span>`).join('')}${info.hot.map((x) => `<span class="hot">${x}</span>`).join('')}</span></span>${stars(info.difficulty)}</button>`;
-  }).join('');
+  }).join('')
+    // Grande Balade : le Grand Tour (huit zones d'affilée), puis chaque zone seule (balade.js).
+    + `<h3 class="course-section"><span>La Grande Balade</span><small>${STAGE_ORDER.filter((id) => progress[id]).length} / ${STAGES.length} zones</small></h3>`
+    + `<button type="button" class="course-card stage-card tour-card" data-tour="1" data-done="${progress[TOUR_ID] ? 'true' : 'false'}"><span class="cc-map">${worldSvg(null)}</span><span class="cc-body"><span class="c-name">Le Grand Tour</span><span class="c-tag">Les huit zones d’affilée : à chaque arrivée, la zone suivante s’ouvre et l’on repart lancé</span><span class="c-stats"><span>${(tourKm() / 1000).toFixed(1)} km</span><span>8 zones</span>${progress[TOUR_ID] ? `<span class="hot">✓ ${formatTime(progress[TOUR_ID])}</span>` : ''}</span></span>${stars(3)}</button>`
+    + STAGE_ORDER.map((id) => {
+      const info = describeCourse(id);
+      const done = progress[id];
+      return `<button type="button" class="course-card stage-card" data-course="${id}" data-theme="${info.theme}" data-done="${done ? 'true' : 'false'}" aria-current="${id === courseId}"><span class="cc-map">${worldSvg(id)}</span><span class="cc-body"><span class="c-name">${info.name}</span><span class="c-tag">${info.tagline}</span>${profileSvg(info)}<span class="c-stats">${info.stats.map((x) => `<span>${x}</span>`).join('')}${done ? `<span class="hot">✓ ${formatTime(done)}</span>` : ''}</span></span>${stars(info.difficulty)}</button>`;
+    }).join('');
   previewOf.coursePreview = null;
   showPreview('coursePreview', courseId, coursePreview);
 }
@@ -707,9 +913,10 @@ function bindPreview(list, box, attr, render) {
   $(list).addEventListener('pointerover', pick);
 }
 bindPreview('courseList', 'coursePreview', 'data-course', coursePreview);
+bindPreview('courseList', 'coursePreview', 'data-tour', () => tourPreview());
 
 // Change de circuit sur place : écran de chargement, décor reconstruit, nouvelle course.
-async function loadCourse(id) {
+async function loadCourse(id, label = null) {
   id = courseById(id).id;
   if (id === courseId && track.course.id === id) return;
   courseId = id;
@@ -718,7 +925,7 @@ async function loadCourse(id) {
   } catch {
     /* stockage indisponible */
   }
-  $('loadingText').textContent = `Chargement : ${courseById(id).name}…`;
+  $('loadingText').textContent = label || `Chargement : ${courseById(id).name}…`;
   show('loading');
   // Deux images pour que l'écran de chargement s'affiche avant le calcul du décor.
   await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
@@ -792,8 +999,14 @@ for (const card of document.querySelectorAll('[data-machine]')) {
 }
 
 $('courseList').addEventListener('click', (e) => {
+  const tourCard = e.target.closest('[data-tour]');
+  if (tourCard) {
+    chooseMachineThen(startTour, { play: playMachine === 'cross' ? 'cross' : 'bike', title: 'Le Grand Tour', parent: 'coursePanel', opener: tourCard });
+    return;
+  }
   const card = e.target.closest('[data-course]');
   if (!card) return;
+  tour.active = false;
   const id = card.dataset.course;
   chooseMachineThen(
     async () => {
@@ -1542,6 +1755,7 @@ for (const btn of document.querySelectorAll('.seg-btn[data-gfx]')) {
 function replay() {
   // Même machine de la carte : on attend à nouveau ses données (on rejoue quand on reprend l'effort).
   if (gate.machine) armGate(gate.machine);
+  if (tour.done) return startTour(); // Grand Tour terminé : on le recommence depuis la première zone
   if (mode === 'row') startRowing(rowing.distance);
   else if (mode === 'kayak') startKayak(kayak.riverId);
   else startRace();
@@ -1898,6 +2112,7 @@ function frame(nowMs) {
     weather.step(dt, race.time, true); // vent et pluie de l'instant, avant la physique
     race.update(dt, playerInput());
     if (race.time < 0) hud.countdown(String(Math.ceil(-race.time)));
+    else if (race.ride && state === 'race') ridePlaces(); // balade : nom des lieux traversés
   }
   syncScene(state === 'paused' ? 0 : dt);
   helmetFx.sync(race, track, state === 'paused' ? 0 : dt, camera);
@@ -1929,9 +2144,11 @@ function frame(nowMs) {
         weather: weather.hud,
         position: race.positionOf(p),
         total: race.racers.length,
+        ride: race.ride ? Math.max(0, race.distance - p.s) : null, // balade : distance restante (m)
+        rideZone: race.ride && tour.active ? `Zone ${track.course.index + 1} / ${STAGES.length}` : null,
         lap: race.lapOf(p),
         laps: race.laps,
-        time: p.finishTime ?? race.time,
+        time: (race.ride && tour.active ? tour.zoneStart : 0) + (p.finishTime ?? race.time), // Grand Tour : temps cumulé
         item: p.item,
         turboLeft: p.turboUntil - race.time,
         slipLeft: p.slipUntil - race.time,
@@ -1974,6 +2191,8 @@ window.__mcw = {
   get rowing() { return rowing; },
   get kayak() { return kayak; },
   startKayak,
+  startRace,
+  snapCamera: () => cameraTarget(camPos, camLook), // caméra replacée d'un coup derrière le joueur (captures)
   devices,
   gears,
   get track() { return track; },

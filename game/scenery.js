@@ -18,6 +18,8 @@ import { makeWater } from './water.js';
 import { buildCourseCrowd } from './people.js';
 import { BuildingSet, SIGN, tint } from './buildings.js';
 import { cottage, gantry, featherFlag } from './architecture.js';
+import { baladeTerrain, buildBalade } from './balade-scene.js';
+import { regionAt } from './balade.js';
 
 const smoothstep = (a, b, x) => {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
@@ -65,7 +67,7 @@ function nearestFine(track, x, z) {
     if (d < best) { best = d; bi = i; }
   }
   for (let j = -6; j <= 6; j++) {
-    const i = mod(bi + j, track.count);
+    const i = track.wrap(bi + j);
     const d = (track.x[i] - x) ** 2 + (track.z[i] - z) ** 2;
     if (d < best) { best = d; bi = i; }
   }
@@ -104,6 +106,57 @@ const THEMES = {
     mountains: { h: [110, 170], snow: 0.95 }, rock: '#9c958a', dirt: '#8a7653', sand: '#e6d4a2',
     walls: false, fans: 0.8,
   },
+};
+
+// Grande Balade (balade.js) : un décor par région. bare : sol nu (pas d'herbe), treeTints : teintes des
+// feuillages, ring : couleurs des montagnes lointaines [pied, roche, neige], path : couleur du chemin de terre.
+const RIDE_BASE = { pineNear: false, palms: false, fences: false, flowers: 0, bales: 0, walls: false, fans: 0, bare: 0, sand: '#cfc19a' };
+Object.assign(THEMES, {
+  collines: {
+    ...RIDE_BASE, mood: 'collines', hills: 13, farSlope: 0.22, grass: ['#4c8a2e', '#5f9c38', '#7aad44', '#93b552'],
+    trees: 3200, pineRatio: 0.12, fences: true, rocks: 40, bales: 18, mountains: { h: [80, 140], snow: 2 },
+    rock: '#857a64', dirt: '#7d6747', path: '#9a8462',
+  },
+  landes: {
+    ...RIDE_BASE, mood: 'landes', hills: 26, farSlope: 0.42, grass: ['#5a7438', '#6c8442', '#87904c', '#7a7448'],
+    trees: 3000, pineRatio: 0.55, rocks: 320, mountains: { h: [240, 360], snow: 0.6 },
+    rock: '#7a7266', dirt: '#6f6047', path: '#8d7a5c',
+  },
+  neiges: {
+    ...RIDE_BASE, mood: 'alpine', hills: 34, farSlope: 0.7, grass: ['#3f6a2c', '#4f7a34', '#68863e', '#7c8c58'],
+    trees: 5200, pineRatio: 0.85, pineNear: true, rocks: 520, mountains: { h: [380, 520], snow: 0.34 },
+    rock: '#76706a', dirt: '#6a5d48', path: '#86786a',
+  },
+  foretdor: {
+    ...RIDE_BASE, mood: 'foretdor', hills: 9, farSlope: 0.18, grass: ['#7f9a36', '#9aa83e', '#b7ae48', '#a3963a'],
+    trees: 1600, pineRatio: 0.05, rocks: 30, mountains: { h: [150, 240], snow: 0.7 },
+    rock: '#8a8270', dirt: '#8a7448', path: '#b3a07a', treeTints: ['#fff4c0', '#ffe39a', '#ffeeb0', '#f6ffc8'],
+  },
+  plaines: {
+    ...RIDE_BASE, mood: 'plaines', hills: 14, farSlope: 0.25, grass: ['#a49445', '#bba756', '#c9b466', '#9a9046'],
+    trees: 260, pineRatio: 0.3, rocks: 80, mountains: { h: [280, 400], snow: 0.42 },
+    rock: '#8a8170', dirt: '#8a734b', path: '#a68f66',
+  },
+  lac: {
+    ...RIDE_BASE, mood: 'lake', hills: 20, farSlope: 0.32, grass: ['#557f34', '#67913e', '#7fa04a', '#7a8c50'],
+    trees: 2600, pineRatio: 0.5, rocks: 180, mountains: { h: [180, 270], snow: 0.8 },
+    rock: '#7d776c', dirt: '#6f6048', path: '#8f7d60',
+  },
+  vertbois: {
+    ...RIDE_BASE, mood: 'vertbois', hills: 16, farSlope: 0.3, grass: ['#477f2a', '#5a9036', '#73a442', '#88ae4c'],
+    trees: 5200, pineRatio: 0.22, rocks: 110, mountains: { h: [260, 360], snow: 2 },
+    rock: '#7b7366', dirt: '#6d5c42', path: '#8a785a', ring: ['#3a3a30', '#4a423c', '#eef2f7'],
+  },
+  feu: {
+    ...RIDE_BASE, mood: 'feu', hills: 22, farSlope: 0.5, grass: ['#4a413b', '#55493f', '#3e3632', '#5d5046'],
+    trees: 0, pineRatio: 0, rocks: 700, bare: 1, mountains: { h: [300, 440], snow: 2 },
+    rock: '#3f3733', dirt: '#3a322d', sand: '#5a4e45', path: '#57493f', ring: ['#2a2220', '#3a302c', '#3a302c'],
+  },
+});
+// Tronçons d'une autre couleur au sol (tints d'une zone) : marais et lande caillouteuse.
+const GROUND_TINTS = {
+  marsh: { grass: ['#5b5a36', '#4e5232', '#67623e', '#585a3a'], bare: 0.55 },
+  ash: { grass: ['#4f4640', '#5a4e44', '#433b36', '#625548'], bare: 1 },
 };
 
 // --- Ciel (version d'origine, gardée pour le bassin d'aviron en graphismes simples) ---
@@ -188,7 +241,7 @@ function alongTrack(track, test, ramp) {
     let m = raw[i];
     if (m < 1) {
       for (let j = 1; j <= ramp; j++) {
-        if (raw[mod(i + j, n)] || raw[mod(i - j, n)]) {
+        if (raw[Math.min(n - 1, track.wrap(i + j))] || raw[Math.min(n - 1, track.wrap(i - j))]) {
           m = 1 - j / (ramp + 1);
           break;
         }
@@ -196,7 +249,7 @@ function alongTrack(track, test, ramp) {
     }
     out[i] = smoothstep(0, 1, m);
   }
-  out[n] = out[0];
+  out[n] = track.open ? out[n - 1] : out[0];
   return out;
 }
 
@@ -255,7 +308,7 @@ function smoothRoadField(track, margin = 560) {
   };
 }
 
-function makeGround(track, lake, theme, { coast = null, seaY = 0, flat = [] } = {}) {
+function makeGround(track, lake, theme, { coast = null, seaY = 0, flat = [], mods = null } = {}) {
   const n = track.count;
   const field = smoothRoadField(track);
   // Sous la passerelle, le sol est plus bas (on voit les pilotis) ; sur les zones aménagées, le relief est adouci.
@@ -297,6 +350,7 @@ function makeGround(track, lake, theme, { coast = null, seaY = 0, flat = [] } = 
   const height = (x, z) => {
     const near = nearestFine(track, x, z);
     let h = base(x, z, near);
+    if (mods) h = mods(x, z, near, h); // reliefs d'une zone de la Grande Balade
     if (lake) {
       const dl = Math.hypot(x - lake.x, z - lake.z);
       h += (lakeY - 2.6 - h) * smoothstep(lake.r * 1.3, lake.r * 0.8, dl);
@@ -460,6 +514,7 @@ export function terrainMaterial(theme, shared, quality) {
 }
 
 const GRAVEL = C('#bcae8f');
+const TINT_COLORS = new Map(Object.values(GROUND_TINTS).map((t) => [t, t.grass.map(C)]));
 const SAND = C('#e3d3a1');
 const WOOD = C('#6e4b2e');
 
@@ -495,6 +550,7 @@ function buildTerrain(track, height, lake, quality, theme, coast, seaY, shared) 
   const ground = new Uint8Array(p.count * 4);
   const c = new THREE.Color();
   const dune = C('#a9a768');
+  const tints = track.course.tints?.length ? track.course.tints : null;
   for (let i = 0; i < p.count; i++) {
     const x = p.getX(i);
     const z = p.getZ(i);
@@ -502,11 +558,14 @@ function buildTerrain(track, height, lake, quality, theme, coast, seaY, shared) 
     const ny = n.getY(i);
     // Prairie : mélange de verts et de jaunes selon un bruit lent.
     const k = (fbm(x * 0.012, z * 0.012, 3) + 1) / 2;
-    const idx = Math.min(GRASS.length - 1.001, Math.max(0, k * (GRASS.length - 1) * 1.15));
-    c.copy(GRASS[Math.floor(idx)]).lerp(GRASS[Math.ceil(idx)], idx % 1);
+    const tint = tints && GROUND_TINTS[regionAt(track.course, track.fractionOf(near[i]))];
+    const pal = tint ? TINT_COLORS.get(tint) : GRASS;
+    const idx = Math.min(pal.length - 1.001, Math.max(0, k * (pal.length - 1) * 1.15));
+    c.copy(pal[Math.floor(idx)]).lerp(pal[Math.ceil(idx)], idx % 1);
     c.multiplyScalar(0.92 + fbm(x * 0.08, z * 0.08, 2) * 0.12);
     // Couches : terre et gravier au bord de la route, sable, roche sur les pentes raides, neige.
-    const onSand = track.surf[near[i]] !== 'asphalt';
+    const sf = track.surf[near[i]];
+    const onSand = track.course.ride ? sf === 'sand' : sf !== 'asphalt';
     let dirt = onSand ? 0 : Math.max(smoothstep(ROAD_HALF + 3.8, ROAD_HALF + 2.2, dist[i]) * 0.55, smoothstep(ROAD_HALF + 2.6, ROAD_HALF + 1.2, dist[i]));
     let sand = onSand ? smoothstep(ROAD_HALF + 9, ROAD_HALF + 2.2, dist[i]) : 0;
     let rock = smoothstep(0.86, 0.68, ny) * 0.95;
@@ -538,6 +597,7 @@ function buildTerrain(track, height, lake, quality, theme, coast, seaY, shared) 
     mix.set([rock, sand, dirt, snow], i * 4);
     wet[i] = wt;
     dens *= (1 - rock) * (1 - snow) * (1 - dirt * 0.85) * (1 - sand) + duneK * 0.35;
+    dens *= 1 - (tint ? tint.bare : theme.bare || 0);
     const gc = duneK > 0 ? c.clone().lerp(dune, Math.min(1, duneK * 1.5)) : c;
     ground[i * 4] = Math.min(255, Math.round(gc.r * 255));
     ground[i * 4 + 1] = Math.min(255, Math.round(gc.g * 255));
@@ -714,6 +774,54 @@ function sandTexture(anisotropy) {
   return tex;
 }
 
+// Chemin de terre (Grande Balade) : terre tassée, deux ornières, cailloux, herbe au milieu et sur les bords.
+function pathTexture(anisotropy, color) {
+  const base = C(color);
+  const tex = canvasTexture(256, 512, (ctx, w, h) => {
+    const r = rng(17);
+    ctx.fillStyle = `#${base.getHexString()}`;
+    ctx.fillRect(0, 0, w, h);
+    for (let i = 0; i < 9000; i++) {
+      const v = r();
+      ctx.fillStyle = v < 0.5 ? `rgba(255,240,210,${0.06 + r() * 0.12})` : `rgba(40,28,18,${0.06 + r() * 0.14})`;
+      ctx.fillRect(r() * w, r() * h, 1 + r() * 2.5, 1 + r() * 2.5);
+    }
+    for (const u of [0.3, 0.7]) {
+      const g = ctx.createLinearGradient(u * w - 22, 0, u * w + 22, 0);
+      g.addColorStop(0, 'rgba(50,34,20,0)');
+      g.addColorStop(0.5, 'rgba(50,34,20,0.28)');
+      g.addColorStop(1, 'rgba(50,34,20,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(u * w - 22, 0, 44, h);
+    }
+    for (let i = 0; i < 260; i++) {
+      const x = r() * w;
+      const y = r() * h;
+      const s = 2 + r() * 4;
+      const v = 120 + r() * 90;
+      ctx.fillStyle = `rgb(${v},${v * 0.96},${v * 0.88})`;
+      ctx.beginPath();
+      ctx.ellipse(x, y, s, s * 0.7, r() * 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // Herbe au milieu du chemin et sur les bords.
+    for (let i = 0; i < 2600; i++) {
+      const edge = r() < 0.7;
+      const x = edge ? (r() < 0.5 ? r() * 18 : w - r() * 18) : w / 2 + (r() - 0.5) * 30;
+      ctx.strokeStyle = `rgba(${70 + r() * 50},${100 + r() * 50},${40 + r() * 20},${0.5 + r() * 0.4})`;
+      ctx.beginPath();
+      const y = r() * h;
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + (r() - 0.5) * 4, y - 3 - r() * 5);
+      ctx.stroke();
+    }
+  });
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.anisotropy = anisotropy;
+  return tex;
+}
+
 // Matière de route : variations de teinte à grande échelle, flaques (sombres, lisses, reflet du ciel)
 // sur l'enrobé, ombres des nuages.
 function roadMaterial(params, shared, key, puddles) {
@@ -743,7 +851,7 @@ function roadMaterial(params, shared, key, puddles) {
 
 const SURFACE_INDEX = { asphalt: 0, boardwalk: 1, sand: 2 };
 
-function buildRoad(track, anisotropy, shared, terrainMat) {
+function buildRoad(track, anisotropy, shared, terrainMat, theme) {
   const n = track.count;
   const TILE = 8; // longueur (m) d'une répétition de la texture
   const roadPos = [];
@@ -753,7 +861,7 @@ function buildRoad(track, anisotropy, shared, terrainMat) {
   const shMix = [];
   const outer = C('#6faa4c');
   for (let i = 0; i <= n; i++) {
-    const k = i % n;
+    const k = track.open ? i : i % n;
     const x = track.x[k];
     const z = track.z[k];
     const y = track.y[k];
@@ -801,7 +909,7 @@ function buildRoad(track, anisotropy, shared, terrainMat) {
   const used = new Set(track.surf);
   const am = asphaltMaps(anisotropy);
   const materials = [
-    roadMaterial({ map: am.map, normalMap: am.normalMap, normalScale: new THREE.Vector2(0.6, 0.6), roughnessMap: am.roughnessMap, roughness: 1, metalness: 0 }, shared, 'asphalt', true),
+    theme.path ? roadMaterial({ map: pathTexture(anisotropy, theme.path), roughness: 1, metalness: 0 }, shared, 'path', true) : roadMaterial({ map: am.map, normalMap: am.normalMap, normalScale: new THREE.Vector2(0.6, 0.6), roughnessMap: am.roughnessMap, roughness: 1, metalness: 0 }, shared, 'asphalt', true),
     used.has('boardwalk') ? roadMaterial({ map: boardwalkTexture(anisotropy), roughness: 0.82, metalness: 0 }, shared, 'wood', false) : null,
     used.has('sand') ? roadMaterial({ map: sandTexture(anisotropy), roughness: 1, metalness: 0 }, shared, 'sand', false) : null,
   ].map((m, i, all) => m || all[0]);
@@ -1106,10 +1214,10 @@ function mountainRing(track, theme, coast, cx, cz) {
   const b = track.bounds;
   const span = Math.max(b.maxX - b.minX, b.maxZ - b.minZ) / 2;
   const mask = coast ? (x, z) => smoothstep(coastZ(coast, x) - 150, coastZ(coast, x) - 650, z) : null;
-  return mountainRingAround({ cx, cz, r0: span + 380, r1: span + 1900, baseY: track.minY - 40, h: theme.mountains.h, snow: theme.mountains.snow, mask });
+  return mountainRingAround({ cx, cz, r0: span + 380, r1: span + 1900, baseY: track.minY - 40, h: theme.mountains.h, snow: theme.mountains.snow, mask, ring: theme.ring });
 }
 
-export function mountainRingAround({ cx, cz, r0, r1, baseY, h, snow, mask = null, seg = 240 }) {
+export function mountainRingAround({ cx, cz, r0, r1, baseY, h, snow, mask = null, seg = 240, ring = null }) {
   const SA = seg;
   const SR = 20;
   const pos = new Float32Array((SA + 1) * (SR + 1) * 3);
@@ -1156,9 +1264,7 @@ export function mountainRingAround({ cx, cz, r0, r1, baseY, h, snow, mask = null
   g.setIndex(idx);
   g.computeVertexNormals();
   const nrm = g.attributes.normal;
-  const forest = C('#33502f');
-  const rockC = C('#6c675f');
-  const snowC = C('#e8eef6');
+  const [forest, rockC, snowC] = (ring || ['#33502f', '#6c675f', '#e8eef6']).map(C);
   const c = new THREE.Color();
   const top = baseY + h0 * 0.4 + h1 * 0.9;
   for (let k = 0; k < pos.length / 3; k++) {
@@ -1211,7 +1317,7 @@ export function disposeTree(root, keep = new Set()) {
 export function buildScenery(scene, track, { quality = 'high', renderer = null } = {}) {
   installFog();
   const course = track.course;
-  const theme = THEMES[course.theme] || THEMES.meadow;
+  const theme = THEMES[course.region] || THEMES[course.theme] || THEMES.meadow;
   const mood = MOODS[theme.mood];
   const feats = course.features || {};
   const group = new THREE.Group();
@@ -1244,16 +1350,18 @@ export function buildScenery(scene, track, { quality = 'high', renderer = null }
   }
 
   // Terrain, lac, route
-  const lake = feats.lake ? findLake(track) : null;
+  // Zone de la Grande Balade : reliefs propres (collines, parois, rivières) et lac au bord de la route.
+  const me = course.ride ? baladeTerrain(track) : null;
+  const lake = me ? me.lake : feats.lake ? findLake(track) : null;
   const coast = feats.coast || null;
   const seaY = track.minY - 0.7;
   const flat = [feats.village, feats.farm].filter(Boolean).map((z) => [z.from, z.to]);
-  const height = makeGround(track, lake, theme, { coast, seaY, flat });
+  const height = makeGround(track, lake, theme, { coast, seaY, flat, mods: me?.apply });
   const heightAt = (x, z) => height(x, z).h;
   const terrain = buildTerrain(track, height, lake, quality, theme, coast, seaY, shared);
   group.add(terrain.mesh);
   const maps = terrain.maps;
-  group.add(...buildRoad(track, anisotropy, shared, terrain.material));
+  group.add(...buildRoad(track, anisotropy, shared, terrain.material, theme));
   if (lake) {
     const water = makeWater(new THREE.CircleGeometry(lake.r * 1.34, 96).rotateX(-Math.PI / 2), {
       mood, maps, waterY: lake.y, shared, chop: 0.28, shallow: '#4fb4b8', deep: '#14527a', sand: '#b8a77a', depthScale: 0.45, foam: 0.7,
@@ -1309,7 +1417,8 @@ export function buildScenery(scene, track, { quality = 'high', renderer = null }
   if (feats.village) updaters.push(addAlpineVillage(group, ctx, feats.village));
   if (feats.cows) updaters.push(addAlpineCows(group, ctx));
   if (coast) updaters.push(addCoast(group, scene, ctx, coast));
-  addRoadside(group, ctx, theme, quality, shared, anisotropy);
+  if (me) updaters.push(buildBalade(group, { ...ctx, mods: me }, { detailed: true, quality }));
+  else addRoadside(group, ctx, theme, quality, shared, anisotropy);
   const randomPoint = (spread) => [b.minX - spread + r() * (b.maxX - b.minX + spread * 2), b.minZ - spread + r() * (b.maxZ - b.minZ + spread * 2)];
 
   // Arbres : bosquets (bruit) + arbres isolés ; feuillus et sapins. Niveaux de détail selon la distance.
@@ -1330,7 +1439,7 @@ export function buildScenery(scene, track, { quality = 'high', renderer = null }
     else round.push([x, y, z, sc, r()]);
     shadows.push([x, y, z, sc * 2.6]);
   }
-  for (let tries = 0; tries < 8000 && bushes.length < Math.round(500 * density); tries++) {
+  for (let tries = 0; tries < 8000 && bushes.length < Math.round((theme.trees > 0 ? 500 : 0) * density); tries++) {
     const [x, z] = randomPoint(120);
     const near = free(x, z, ROAD_HALF + 3.5);
     if (!near || near.dist > 90) continue;
@@ -1341,7 +1450,7 @@ export function buildScenery(scene, track, { quality = 'high', renderer = null }
   const leafMat = crispAlpha(windMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.78, map: leafAtlas(), alphaTest: 0.5, side: THREE.DoubleSide }), shared, { key: 'leaf', flutter: 0.035, noFlip: true }));
   if (quality === 'high') leafMat.alphaToCoverage = true;
   const cards = quality === 'high';
-  const tints = ['#ffffff', '#f2ffe0', '#e4f7d6', '#fff2c4', '#ffe0b0', '#e8fff0', '#f8ffd8'].map(C);
+  const tints = (theme.treeTints || ['#ffffff', '#f2ffe0', '#e4f7d6', '#fff2c4', '#ffe0b0', '#e8fff0', '#f8ffd8']).map(C);
   const dist = quality === 'high' ? { close: 52, mid: 125 } : quality === 'medium' ? { close: 38, mid: 90 } : { close: 0.1, mid: 55 };
   const forest = new Forest(group, [
     { near: deciduousGeometry(0, cards), impostor: 'deciduous', items: round, cast: castTrees, tints, nearMaterial: cards ? [solidMat, leafMat] : solidMat, material: solidMat },
@@ -1498,31 +1607,33 @@ export function buildScenery(scene, track, { quality = 'high', renderer = null }
   const motes = quality === 'high' ? makeMotes(shared) : null;
   if (motes) group.add(motes);
 
-  // Ligne de départ en damier + arche gonflable
-  const checker = canvasTexture(256, 32, (cctx, cw, ch) => {
-    const sq = ch / 2;
-    for (let x = 0; x < cw / sq; x++) for (let y = 0; y < 2; y++) {
-      cctx.fillStyle = (x + y) % 2 ? '#141414' : '#f5f5f5';
-      cctx.fillRect(x * sq, y * sq, sq, sq);
-    }
-  });
-  const line = new THREE.Mesh(new THREE.PlaneGeometry(ROAD_HALF * 2, 1.2), new THREE.MeshStandardMaterial({ map: checker, roughness: 0.6 }));
-  line.rotation.set(-Math.PI / 2, Math.atan2(start.tx, start.tz), 0, 'YXZ');
-  line.position.set(start.x, start.y + 0.06, start.z);
-  line.receiveShadow = true;
-  group.add(line);
-  // Portique de départ en treillis : banderoles des partenaires, chrono, fanions ; drapeaux « plume »
-  const yawS = Math.atan2(start.tx, start.tz);
-  gantry(bset, start.x, start.y, start.z, yawS, {
-    span: ROAD_HALF + 1.2, h: 5.6, bh: 1.5, front: SIGN.brand, back: SIGN.brand, clock: true, flags: true, pillarSign: [SIGN.flag0, SIGN.flag0],
-    sponsors: [SIGN.sponsor0, SIGN.sponsor1, SIGN.sponsor2, SIGN.sponsor3],
-    foot: (sd) => heightAt(start.x - start.rx * sd * (ROAD_HALF + 1.65), start.z - start.rz * sd * (ROAD_HALF + 1.65)) - start.y,
-  });
-  bset.site('arch', start.x, start.y, start.z);
-  [[-26, -1, SIGN.flag1, '#ffffff'], [-26, 1, SIGN.flag2, '#ffffff'], [13, -1, SIGN.flag3, '#ffffff'], [13, 1, SIGN.flag1, '#ffffff']].forEach(([s, side, rect, col]) => {
-    const fp = track.frame(s, side * (ROAD_HALF + 4.2));
-    featherFlag(bset, fp.x, heightAt(fp.x, fp.z), fp.z, Math.atan2(-side * fp.rx, -side * fp.rz) + Math.PI / 2, rect, tint(col));
-  });
+  // Ligne de départ en damier + portique (pas sur les zones de la Grande Balade : bornes de pierre)
+  if (!course.ride) {
+    const checker = canvasTexture(256, 32, (cctx, cw, ch) => {
+      const sq = ch / 2;
+      for (let x = 0; x < cw / sq; x++) for (let y = 0; y < 2; y++) {
+        cctx.fillStyle = (x + y) % 2 ? '#141414' : '#f5f5f5';
+        cctx.fillRect(x * sq, y * sq, sq, sq);
+      }
+    });
+    const line = new THREE.Mesh(new THREE.PlaneGeometry(ROAD_HALF * 2, 1.2), new THREE.MeshStandardMaterial({ map: checker, roughness: 0.6 }));
+    line.rotation.set(-Math.PI / 2, Math.atan2(start.tx, start.tz), 0, 'YXZ');
+    line.position.set(start.x, start.y + 0.06, start.z);
+    line.receiveShadow = true;
+    group.add(line);
+    // Portique de départ en treillis : banderoles des partenaires, chrono, fanions ; drapeaux « plume »
+    const yawS = Math.atan2(start.tx, start.tz);
+    gantry(bset, start.x, start.y, start.z, yawS, {
+      span: ROAD_HALF + 1.2, h: 5.6, bh: 1.5, front: SIGN.brand, back: SIGN.brand, clock: true, flags: true, pillarSign: [SIGN.flag0, SIGN.flag0],
+      sponsors: [SIGN.sponsor0, SIGN.sponsor1, SIGN.sponsor2, SIGN.sponsor3],
+      foot: (sd) => heightAt(start.x - start.rx * sd * (ROAD_HALF + 1.65), start.z - start.rz * sd * (ROAD_HALF + 1.65)) - start.y,
+    });
+    bset.site('arch', start.x, start.y, start.z);
+    [[-26, -1, SIGN.flag1, '#ffffff'], [-26, 1, SIGN.flag2, '#ffffff'], [13, -1, SIGN.flag3, '#ffffff'], [13, 1, SIGN.flag1, '#ffffff']].forEach(([s, side, rect, col]) => {
+      const fp = track.frame(s, side * (ROAD_HALF + 4.2));
+      featherFlag(bset, fp.x, heightAt(fp.x, fp.z), fp.z, Math.atan2(-side * fp.rx, -side * fp.rz) + Math.PI / 2, rect, tint(col));
+    });
+  }
   bset.build(group);
 
   const anim = updaters.filter(Boolean);
