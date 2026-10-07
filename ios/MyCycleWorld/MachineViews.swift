@@ -45,6 +45,12 @@ struct ConnectionTestSection: View {
                 Label(store.pilotStatus, systemImage: "slider.horizontal.3")
             }
             .disabled(!store.canTestPilot || store.pilotRunning)
+            Toggle(isOn: Binding(get: { store.ftmsDebug }, set: { store.setFTMSDebug($0) })) {
+                Label("Mode debug FTMS", systemImage: "ladybug")
+            }
+            if store.ftmsDebug {
+                ShareLink(item: store.report) { Label("Partager le journal debug (\(store.logs.count) lignes)", systemImage: "square.and.arrow.up") }
+            }
             NavigationLink {
                 StoreConsoleView().nativeCloseButton()
             } label: {
@@ -58,7 +64,7 @@ struct ConnectionTestSection: View {
         } header: {
             Text("Test de connexion")
         } footer: {
-            Text(verbatim: "« Tester le pilotage » durcit la machine pendant 5 s puis revient : pente 6 % puis 0 pour un vélo, résistance 70 % puis 30 % pour un elliptique ou un rameur. La console et l’inspecteur se copient ou se partagent pour ajouter une machine non standard.")
+            Text(verbatim: "« Tester le pilotage » durcit la machine pendant 5 s puis revient : pente 6 % puis 0 pour un vélo, résistance 70 % puis 30 % pour un elliptique ou un rameur. Mode debug FTMS : chaque paquet de la machine est noté avec tous ses champs (même ceux que l’appli n’utilise pas), toutes ses caractéristiques sont listées et lues, et les mesures retenues sont notées chaque seconde. Active-le, connecte la machine, attends 10 s sans bouger, puis pédale 1 minute en changeant d’allure, et partage le journal.")
         }
     }
 

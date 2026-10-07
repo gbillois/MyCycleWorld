@@ -188,8 +188,56 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         }
     }
     func log(_ message: String) {
-        logs.append("\(Date().formatted(date: .omitted, time: .standard))  \(message)")
-        if logs.count > 2000 { logs.removeFirst(logs.count - 2000) }
+        // Mode debug : heure au millième (ordre des paquets) et journal plus long.
+        let time = ftmsDebug ? Date().formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits).second(.twoDigits).secondFraction(.fractional(3)))
+                             : Date().formatted(date: .omitted, time: .standard)
+        logs.append("\(time)  \(message)")
+        let cap = ftmsDebug ? 8000 : 2000
+        if logs.count > cap { logs.removeFirst(logs.count - cap) }
+    }
+
+    // MARK: Mode debug FTMS
+
+    /// Mode debug (test de connexion) : chaque paquet de la machine est écrit avec tous ses champs FTMS
+    /// (Core/FTMSDebug.swift), les caractéristiques et leurs propriétés sont listées, tout ce qui se lit est lu,
+    /// et les mesures retenues par l'appli sont notées chaque seconde. Le journal se partage ensuite.
+    @Published private(set) var ftmsDebug = false
+
+    func setFTMSDebug(_ on: Bool) {
+        guard on != ftmsDebug else { return }
+        ftmsDebug = on
+        log(on ? "=== Mode debug FTMS activé (\(report.split(separator: "\n").first ?? "")) ===" : "=== Mode debug FTMS désactivé ===")
+        if on { dumpTrainer() }
+    }
+
+    private static func properties(_ char: CBCharacteristic) -> String {
+        let p = char.properties
+        var list: [String] = []
+        if p.contains(.read) { list.append("lecture") }
+        if p.contains(.write) { list.append("écriture") }
+        if p.contains(.writeWithoutResponse) { list.append("écriture sans réponse") }
+        if p.contains(.notify) { list.append("notification\(char.isNotifying ? " (abonné)" : "")") }
+        if p.contains(.indicate) { list.append("indication\(char.isNotifying ? " (abonné)" : "")") }
+        return list.joined(separator: ", ")
+    }
+
+    /// Services et caractéristiques de la machine, puis lecture de tout ce qui se lit (fonctions FTMS, plages,
+    /// état, informations de l'appareil).
+    private func dumpTrainer() {
+        guard let id = trainerID, let c = connections[id] else {
+            log("[debug] Aucune machine connectée : connecte-la, le détail s'affichera à la connexion.")
+            return
+        }
+        log("[debug] Machine : \(c.name) · \(c.peripheral.identifier.uuidString) · état \(c.peripheral.state == .connected ? "connectée" : "pas connectée") · type \(machineKind?.label ?? "inconnu")")
+        log("[debug] Annonce : services \(c.advertised.joined(separator: ", ")) · fabricant \(FTMSDebug.hex(c.manufacturer))")
+        for service in c.peripheral.services ?? [] {
+            log("[debug] Service \(GATTText.name(service.uuid.uuidString))")
+            for char in service.characteristics ?? [] {
+                log("[debug]   \(GATTText.name(char.uuid.uuidString)) : \(BluetoothStore.properties(char))")
+                if char.properties.contains(.read) { c.peripheral.readValue(for: char) }
+            }
+        }
+        log("[debug] Pilotage : contrôle FTMS \(controlReady ? "prêt" : "indisponible")\(readOnly ? ", refusé (lecture seule)" : "")\(controlled ? ", pris" : "") · consignes pente \(simulationSupported ? "oui" : "non"), ERG \(ergSupported ? "oui" : "non"), résistance \(resistanceSupported ? "oui" : "non")")
     }
     func clearLog() { logs.removeAll() }
     func setProfile(_ value: HardwareProfile) {
@@ -367,6 +415,9 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
         guard let c = connections[peripheral.identifier] else { return }
         if let error { log("\(c.name) : \(error.localizedDescription)"); return }
+        if ftmsDebug, peripheral.identifier == trainerID {
+            log("[debug] Service \(GATTText.name(service.uuid.uuidString)) : " + (service.characteristics ?? []).map { "\(GATTText.plainName($0.uuid.uuidString)) (\(BluetoothStore.properties($0)))" }.joined(separator: " · "))
+        }
         for char in service.characteristics ?? [] {
             c.chars[char.uuid] = char
             let id = char.uuid.uuidString.uppercased()
@@ -472,6 +523,7 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         guard !demo, let c = connections[peripheral.identifier] else { return }
         if let error { log("Lecture \(GATTText.name(characteristic.uuid.uuidString)) : \(error.localizedDescription)"); return }
         let b = Array(characteristic.value ?? Data()), id = characteristic.uuid.uuidString.uppercased(), now = Date()
+        if ftmsDebug, peripheral.identifier == trainerID { log("[debug] ← " + FTMSDebug.describe(id, b)) }
         do {
             if characteristic.uuid == UUIDs.async || characteristic.uuid == UUIDs.tx { try receiveZwift(b, c); return }
             if id == "2A19", let battery = b.first { c.battery = Int(battery); refresh(); return }
@@ -999,6 +1051,9 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
             }
             if let lastHeart, now.timeIntervalSince(lastHeart) > 5, heart != nil { heart = nil; heartContact = nil; changed = true }
             if changed { updateMetrics() }
+        }
+        if ftmsDebug, trainerID != nil || demo {
+            log("[debug] Mesures retenues : \(MachineText.measures(metrics)) · \(trainerPackets) paquets de données")
         }
         if let power = metrics.power { history.append(PowerSample(date: Date(), watts: power)) }
         if history.count > 120 { history.removeFirst(history.count - 120) }
