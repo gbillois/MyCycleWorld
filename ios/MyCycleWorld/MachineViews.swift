@@ -90,7 +90,13 @@ struct ConnectionTestSection: View {
             let age = max(0, now.timeIntervalSince(last))
             rows.append(TestRow(label: "Données", value: "\(store.trainerPackets) paquets, dernier il y a \(MachineText.age(age))", tone: age < 3 ? .ok : .bad))
         } else {
-            rows.append(TestRow(label: "Données", value: "aucune pour l’instant : démarre une séance sur la console (Start), puis pédale, marche ou tire la poignée", tone: .bad))
+            var value = "aucune pour l’instant : démarre une séance sur la console (Start), puis pédale, marche ou tire la poignée"
+            if store.trainerBadPackets > 0 {
+                value = "\(store.trainerBadPackets) paquets reçus dans un format inattendu : partage la console Bluetooth"
+            } else if store.trainerOtherPackets > 0 {
+                value = "rien en FTMS, mais \(store.trainerOtherPackets) paquets sur un service propriétaire : partage la console Bluetooth"
+            }
+            rows.append(TestRow(label: "Données", value: value, tone: .bad))
         }
         rows.append(TestRow(label: "Mesures", value: MachineText.measures(store.metrics)))
         rows.append(pilotRow)
