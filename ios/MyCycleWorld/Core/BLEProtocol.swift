@@ -48,6 +48,9 @@ struct BikeReading: Equatable {
     var avgPace: Int?
     var avgPower: Int?
     var avgStepRate: Int?
+    /// Vélo : moyennes de séance (secours des machines qui n'envoient pas les valeurs instantanées).
+    var avgSpeed: Double?
+    var avgCadence: Double?
     var strideCount: Double?
     var inclination: Double?
     var elapsed: Int?
@@ -61,13 +64,13 @@ enum BLEProtocol {
         let flags = try r.u16()
         var result = BikeReading()
         if flags & 1 == 0 { result.speed = Double(try r.u16()) / 100 }
-        if flags & 2 != 0 { _ = try r.take(2) }
+        if flags & 2 != 0 { result.avgSpeed = Double(try r.u16()) / 100 }
         if flags & 4 != 0 { result.cadence = Double(try r.u16()) / 2 }
-        if flags & 8 != 0 { _ = try r.take(2) }
+        if flags & 8 != 0 { result.avgCadence = Double(try r.u16()) / 2 }
         if flags & 16 != 0 { result.distance = try r.u24() }
         if flags & 32 != 0 { result.resistance = Double(try r.i16()) }
         if flags & 64 != 0 { result.power = try r.i16() }
-        if flags & 128 != 0 { _ = try r.take(2) }
+        if flags & 128 != 0 { result.avgPower = try r.i16() }
         if flags & 256 != 0 { _ = try r.take(5) }
         if flags & 512 != 0 { result.heartRate = try r.u8() }
         if flags & 1024 != 0 { _ = try r.take(1) }
@@ -174,14 +177,27 @@ enum BLEProtocol {
         guard lo <= hi else { throw PacketError.invalid }
         return LevelRange(min: Double(lo) / 10, max: Double(hi) / 10, step: Double(step) / 10)
     }
+    /// Cycling Power Measurement : la puissance est toujours en tête ; si un champ optionnel manque (paquet
+    /// tronqué), on garde la puissance sans les tours de pédalier plutôt que de jeter le paquet.
     static func cyclingPower(_ bytes: [UInt8]) throws -> (power: Int, revs: Int?, time: Int?) {
         var r = ByteReader(bytes)
         let flags = try r.u16(), power = try r.i16()
-        if flags & 1 != 0 { _ = try r.take(1) }
-        if flags & 4 != 0 { _ = try r.take(2) }
-        if flags & 16 != 0 { _ = try r.take(6) }
-        if flags & 32 != 0 { return (power, try r.u16(), try r.u16()) }
+        do {
+            if flags & 1 != 0 { _ = try r.take(1) }
+            if flags & 4 != 0 { _ = try r.take(2) }
+            if flags & 16 != 0 { _ = try r.take(6) }
+            if flags & 32 != 0 { return (power, try r.u16(), try r.u16()) }
+        } catch { return (power, nil, nil) }
         return (power, nil, nil)
+    }
+    /// Cycling Speed and Cadence Measurement (0x2A5B) : tours de pédalier cumulés et instant du dernier tour
+    /// (1/1024 s), s'ils sont présents (vélos Technogym : la cadence n'arrive parfois que par là).
+    static func cscCrank(_ bytes: [UInt8]) throws -> (revs: Int, time: Int)? {
+        var r = ByteReader(bytes)
+        let flags = try r.u8()
+        if flags & 1 != 0 { _ = try r.take(6) }
+        guard flags & 2 != 0 else { return nil }
+        return (try r.u16(), try r.u16())
     }
     static func heartRate(_ bytes: [UInt8]) throws -> (bpm: Int, contact: Bool?) {
         var r = ByteReader(bytes)

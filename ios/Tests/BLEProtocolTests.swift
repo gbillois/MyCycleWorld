@@ -29,7 +29,14 @@ final class BLEProtocolTests: XCTestCase {
         _ = crank.update(revs: 65535, time: 65000, now: 0)
         XCTAssertEqual(crank.update(revs: 0, time: (65000 + 683) % 65536, now: 1), 90, accuracy: 0.1)
         XCTAssertEqual(crank.update(revs: 0, time: (65000 + 683) % 65536, now: 4), 0)
-        XCTAssertThrowsError(try BLEProtocol.cyclingPower([0x20, 0, 200, 0]))
+        // Tours de pédalier annoncés mais absents : la puissance est gardée.
+        let short = try BLEProtocol.cyclingPower([0x20, 0, 200, 0])
+        XCTAssertEqual(short.power, 200); XCTAssertNil(short.revs)
+        XCTAssertThrowsError(try BLEProtocol.cyclingPower([0x20, 0, 200]))
+        // Cycling Speed and Cadence : roue (6 octets) puis pédalier.
+        let csc = try XCTUnwrap(try BLEProtocol.cscCrank([0x03, 1, 0, 0, 0, 0, 4, 12, 0, 0, 8]))
+        XCTAssertEqual(csc.revs, 12); XCTAssertEqual(csc.time, 2048)
+        XCTAssertNil(try BLEProtocol.cscCrank([0x01, 1, 0, 0, 0, 0, 4]))
     }
     func testHeartRateContactAnd16Bit() throws {
         let h = try BLEProtocol.heartRate([6, 72])

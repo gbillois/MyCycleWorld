@@ -559,7 +559,7 @@ function updateGate() {
   if (status === 'connecting') {
     $('gateTitle').innerHTML = `Réveille ${name}`;
     $('gateStep1').textContent = 'Connexion en attente';
-    $('gateText').textContent = `Le jeu se connecte dès que la machine se réveille : un coup de pédale ou de rame, ou Start sur la console. Installe ton téléphone, puis ${verb}.`;
+    $('gateText').textContent = `Le jeu se connecte dès que la machine se réveille : un coup de pédale ou de rame, ou Start sur la console. Si l’écran de la machine demande d’accepter la connexion, touche OUI. Installe ton téléphone, puis ${verb}.`;
   } else if (status === 'other') {
     $('gateTitle').textContent = 'Une autre machine est connectée';
     $('gateStep1').textContent = `Connexion à ${m?.title || 'ta machine'}…`;
@@ -567,7 +567,7 @@ function updateGate() {
   } else {
     $('gateTitle').innerHTML = `${name} est connectée`;
     $('gateStep1').textContent = 'Machine connectée';
-    $('gateText').textContent = `Installe ton téléphone, puis ${verb} : la course part dès les premières données.`;
+    $('gateText').textContent = `Installe ton téléphone, puis ${verb} : la course part dès les premières données. Rien ne vient ? Regarde l’écran de la machine (accepter la connexion, se connecter) ou démarre une séance sur la console.`;
   }
   $('gateStep2').textContent = 'Premières données : la course part';
 }

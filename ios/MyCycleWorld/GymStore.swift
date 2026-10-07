@@ -543,7 +543,7 @@ final class GymStore: NSObject, ObservableObject, CBCentralManagerDelegate, CBPe
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        if links[peripheral.identifier] != nil { peripheral.discoverServices([GymStore.ftms, CBUUID(string: "1818")]); return }
+        if links[peripheral.identifier] != nil { peripheral.discoverServices([GymStore.ftms, CBUUID(string: "1818"), CBUUID(string: "1814")]); return }
         guard let p = probe, p.id == peripheral.identifier else { return }
         peripheral.discoverServices(GymStore.probeServices)
     }

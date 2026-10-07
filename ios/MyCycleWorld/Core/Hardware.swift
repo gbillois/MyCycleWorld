@@ -17,8 +17,12 @@ enum HardwareProfile: String, CaseIterable, Identifiable, Codable {
     var id: String { rawValue }
 
     /// Débuts de noms Bluetooth des machines Technogym. Vérifiés dans qdomyos-zwift : « MYRUN » (tapis),
-    /// « MYCYCLING » et « BIKE 1, BIKE 2… » (vélos), « TREADMILL ». Supposés : « Technogym », « SKILL », « EXCITE ».
-    static let technogymNamePrefixes = ["Technogym", "TECHNOGYM", "MYCYCLING", "MYRUN", "BIKE ", "Treadmill", "TREADMILL", "Skill", "SKILL", "Excite", "EXCITE"]
+    /// « MYCYCLING » et « BIKE 1, BIKE 2… » (vélos), « TREADMILL » (Technogym Run), « MYELLIPTICAL », « MYCYCLE »,
+    /// « RUN EXCITE », « Group Cycle ». Supposés : « Technogym », « SKILL », « EXCITE ».
+    static let technogymNamePrefixes = ["Technogym", "TECHNOGYM", "MYCYCLING", "MYRUN", "BIKE ", "Treadmill", "TREADMILL", "Skill", "SKILL", "Excite", "EXCITE",
+                                        "MYELLIPTICAL", "MYCYCLE", "RUN EXCITE", "Group Cycle", "GROUP CYCLE"]
+    /// Service propriétaire des consoles Technogym Unity / Group Cycle sans FTMS (qdomyos-zwift #2166, #4500).
+    static let technogymProprietaryService = "AE4A2645-916E-4D6B-8884-500B6A2E244C"
     /// Identifiant Bluetooth SIG de Technogym SpA, annoncé dans les données fabricant (petit-boutiste).
     static let technogymCompanyID: UInt16 = 0x026D
     static let zwiftCompanyID: UInt16 = 0x094A

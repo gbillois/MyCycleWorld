@@ -134,8 +134,13 @@ struct TrainerFeed {
     /// Une source « vivante » a montré un effort il y a moins de ce délai.
     static let liveWindow: TimeInterval = 3
     private var crank = CrankCadence()
+    private var cscCrank = CrankCadence()
     private var strokeMark: (count: Int, time: TimeInterval)?
     private var derivedStrokeRate: Double?
+    /// Le rameur a déjà donné une cadence instantanée non nulle : sa moyenne ne sert plus de secours.
+    private var instantStrokeSeen = false
+    /// Vélo : la machine a déjà envoyé sa vitesse, sa cadence ou sa puissance instantanée.
+    private var instantSeen: Set<String> = []
 
     /// Cadence de coups de secours : certains rameurs (Skillrow notamment, vu par TrackMyIndoorWorkout)
     /// n'envoient pas la cadence instantanée, ou l'envoient à 0. On prend la moyenne, sinon on la déduit
@@ -156,9 +161,11 @@ struct TrainerFeed {
                 strokeMark = (count, now)
             }
         }
-        if let s = d.strokeRate, s > 0 { return s }
-        if let a = d.avgStrokeRate, a > 0 { return a }
+        if let s = d.strokeRate, s > 0 { instantStrokeSeen = true; return s }
+        // Compteur de coups d'abord : il retombe à 0 quand on s'arrête, la moyenne de séance jamais.
         if let derived = derivedStrokeRate { return derived }
+        // Moyenne : seulement si le rameur ne donne jamais sa cadence instantanée, et pas à l'arrêt (puissance 0).
+        if !instantStrokeSeen, let a = d.avgStrokeRate, a > 0, (d.power ?? 1) > 0 { return a }
         return d.strokeRate
     }
 
@@ -179,8 +186,16 @@ struct TrainerFeed {
             if power == nil { power = Int(BLEProtocol.runningPower(speedKmh: v, grade: d.inclination ?? 0).rounded()) }
             if d.cadence == nil, d.stepRate == nil { set(\.cadence, "cadence", v > 0.5 ? (150 + v * 2) / 2 : 0, "FTMS", now, &changes) }
         }
+        // Vélo qui n'envoie que des moyennes (Technogym Ride, vu par qdomyos-zwift) : la moyenne sert de secours
+        // tant que la valeur instantanée n'est jamais arrivée.
+        var cadence = d.cadence, speed = d.speed
+        if kind == .bike {
+            if power != nil { instantSeen.insert("power") } else if !instantSeen.contains("power") { power = d.avgPower }
+            if cadence != nil { instantSeen.insert("cadence") } else if !instantSeen.contains("cadence") { cadence = d.avgCadence }
+            if speed != nil { instantSeen.insert("speed") } else if !instantSeen.contains("speed") { speed = d.avgSpeed }
+        }
         set(\.power, "power", power, "FTMS", now, &changes)
-        set(\.cadence, "cadence", d.cadence, "FTMS", now, &changes)
+        set(\.cadence, "cadence", cadence, "FTMS", now, &changes)
         // Elliptique : une révolution = deux pas ; rameur : la « cadence » est la cadence de coups.
         if let steps = d.stepRate {
             set(\.stepRate, "stepRate", steps, "FTMS", now, &changes)
@@ -196,7 +211,7 @@ struct TrainerFeed {
         set(\.strokeCount, "strokeCount", d.strokeCount, "FTMS", now, &changes)
         set(\.distance, "distance", d.distance, "FTMS", now, &changes)
         set(\.pace, "pace", d.pace, "FTMS", now, &changes)
-        set(\.speed, "speed", d.speed, "FTMS", now, &changes)
+        set(\.speed, "speed", speed, "FTMS", now, &changes)
         if let hr = d.heartRate, hr > 0 { set(\.heartRate, "heartRate", hr, "FTMS", now, &changes) }
         set(\.resistance, "resistance", d.resistance, "FTMS", now, &changes)
         return changes
@@ -227,6 +242,15 @@ struct TrainerFeed {
             let cadence = crank.update(revs: revs, time: time, now: now).rounded()
             set(\.cadence, "cadence", cadence, "Cycling Power", now, &changes)
         }
+        return changes
+    }
+
+    /// Capteur de vitesse et cadence (CSC) : cadence du pédalier, quand ni FTMS ni Cycling Power ne la donnent
+    /// (ou seulement à 0). Ne compte pas comme paquet de données de la machine.
+    @discardableResult
+    mutating func cadenceSensor(revs: Int, time: Int, now: TimeInterval) -> [String] {
+        var changes: [String] = []
+        set(\.cadence, "cadence", cscCrank.update(revs: revs, time: time, now: now).rounded(), "CSC", now, &changes)
         return changes
     }
 

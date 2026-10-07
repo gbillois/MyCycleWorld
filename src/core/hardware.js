@@ -10,7 +10,8 @@ const CPS = 0x1818;
 // Débuts de noms Bluetooth des machines Technogym. Vérifiés dans qdomyos-zwift (bluetooth.cpp) :
 // « MYRUN » (tapis), « MYCYCLING » et « BIKE 1, BIKE 2… » (vélos), « TREADMILL » (Technogym Run).
 // Supposés : « Technogym », « SKILL » (Skillrow, Skillbike), « EXCITE ».
-export const TECHNOGYM_NAME_PREFIXES = ['Technogym', 'TECHNOGYM', 'MYCYCLING', 'MYRUN', 'BIKE ', 'Treadmill', 'TREADMILL', 'Skill', 'SKILL', 'Excite', 'EXCITE'];
+// Ajoutés d'après qdomyos-zwift : « MYELLIPTICAL », « MYCYCLE », « RUN EXCITE », « Group Cycle ».
+export const TECHNOGYM_NAME_PREFIXES = ['Technogym', 'TECHNOGYM', 'MYCYCLING', 'MYRUN', 'BIKE ', 'Treadmill', 'TREADMILL', 'Skill', 'SKILL', 'Excite', 'EXCITE', 'MYELLIPTICAL', 'MYCYCLE', 'RUN EXCITE', 'Group Cycle', 'GROUP CYCLE'];
 // Identifiant Bluetooth SIG de Technogym SpA (0x026D), annoncé dans les données fabricant.
 export const TECHNOGYM_COMPANY_ID = 0x026d;
 

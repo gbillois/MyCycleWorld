@@ -149,6 +149,11 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
     /// Machine de salle perdue : la reconnexion automatique n'attend que ce délai (au-delà, quelqu'un d'autre
     /// l'utilise peut-être, on ne doit pas la lui prendre).
     static let gymReconnectWindow: TimeInterval = 10 * 60
+    /// Jeton de chaque attente : un ancien minuteur ne peut pas abandonner une attente plus récente.
+    private var waitTokens: [UUID: UUID] = [:]
+    /// Contrôle perdu côté machine (contrôle perdu, remise à zéro, refus) : on le reprend une fois, à la
+    /// prochaine consigne du jeu ou à la reprise sur la console.
+    private var retakeControl = false
     private var demoTick = 0
     private var demoDistance = 0.0
     private var requestScan = false
@@ -287,6 +292,9 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
             for c in connections.values { c.connectionTimer?.invalidate(); c.cancelWrites(); c.state = "Déconnecté"; c.chars = [:]; c.buttons = [] }
             resetTrainer(); heartID = nil; heart = nil; heartContact = nil; metrics = BikeReading(); refresh()
             waiting = []; requestReconnect = true // reconnexion quand le Bluetooth revient
+            // Sous « éteint » (réinitialisation, autorisation retirée…), iOS invalide ses objets CBPeripheral :
+            // on les oublie, ils seront retrouvés par leur identifiant.
+            if central.state != .poweredOff { connections.removeAll(); refresh() }
         }
         log(bluetoothState)
     }
@@ -325,6 +333,17 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         c.connectionTimer?.invalidate()
         if auto {
             waiting.insert(id)
+            // Machine de salle : connexion en attente limitée à 10 min (on a pu partir, un autre sportif va la
+            // réveiller et ne doit pas la trouver prise par ce téléphone).
+            if role == .trainer, isGymMachine?(id) == true {
+                let token = UUID()
+                waitTokens[id] = token
+                Timer.scheduledTimer(withTimeInterval: BluetoothStore.gymReconnectWindow, repeats: false) { [weak self] _ in
+                    guard let self, self.waitTokens[id] == token, self.waiting.contains(id), c.peripheral.state != .connected else { return }
+                    self.log("\(c.name) : pas réveillée en 10 min, connexion en attente abandonnée (machine de salle).")
+                    self.disconnect(id)
+                }
+            }
             c.state = "En attente : réveille l’appareil"
             log("Reconnexion automatique de \(c.name) : elle aboutira dès que l’appareil se réveille (un coup de rame, de pédale…).")
             refresh(); return
@@ -344,7 +363,9 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
             central?.cancelPeripheralConnection(c.peripheral)
             if trainerID == id { resetTrainer() }
             if heartID == id { heartID = nil }
-            c.state = "Déconnecté"; intentional.remove(id); refresh(); return
+            // On garde l'id dans `intentional` : le didDisconnect qui suit l'annulation ne doit pas la réarmer
+            // (connect() l'en retire).
+            c.state = "Déconnecté"; refresh(); return
         }
         c.connectionTimer?.invalidate(); c.cancelWrites(); c.buttons = []; c.state = "Déconnexion…"
         if trainerID == id { resetTrainer() }
@@ -380,15 +401,6 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
                 if role == .trainer, let other = self.trainerID, other != id { return }
                 if role == .heart, let other = self.heartID, other != id { return }
                 self.connect(id, role: role, auto: true)
-                // Machine de salle : reconnexion en attente limitée à 10 min (on a pu partir, un autre sportif
-                // va la réveiller et ne doit pas la trouver prise par ce téléphone).
-                if role == .trainer, self.isGymMachine?(id) == true {
-                    Timer.scheduledTimer(withTimeInterval: BluetoothStore.gymReconnectWindow, repeats: false) { [weak self] _ in
-                        guard let self, self.waiting.contains(id), c.peripheral.state != .connected else { return }
-                        self.log("\(c.name) : pas revenue en 10 min, reconnexion automatique abandonnée (machine de salle).")
-                        self.disconnect(id)
-                    }
-                }
             }
             return
         }
@@ -415,7 +427,11 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
                 }
                 refresh()
             } else if c.role == .trainer {
-                fail(c, "ni FTMS ni Cycling Power : machine non standard (protocole propriétaire ?). Lance l’inspecteur BLE (Appareils > Inspecteur BLE) et partage son journal.")
+                if services.contains(where: { $0.uuid.uuidString.uppercased() == HardwareProfile.technogymProprietaryService }) {
+                    fail(c, "console Technogym à protocole propriétaire (Unity, Group Cycle…), sans FTMS : elle ne peut pas être lue par une appli tierce. Choisis une autre machine.")
+                } else {
+                    fail(c, "ni FTMS ni Cycling Power : machine non standard (protocole propriétaire ?). Lance l’inspecteur BLE (Appareils > Inspecteur BLE) et partage son journal.")
+                }
             } else { fail(c, "Service attendu absent pour ce type d’appareil.") }
             return
         }
@@ -565,6 +581,13 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
                 }
                 for change in feed.ftms(d, kind: kind, now: now.timeIntervalSinceReferenceDate) { log(change) }
                 packetReceived(now)
+            case "2A5B":
+                // Capteur de vitesse et cadence (vélos Technogym : la cadence n'arrive parfois que par là).
+                if dataSampler.sample() { log("Cycling Speed and Cadence : \(GATTText.hex(b))") }
+                if let crank = try BLEProtocol.cscCrank(b) {
+                    for change in feed.cadenceSensor(revs: crank.revs, time: crank.time, now: now.timeIntervalSinceReferenceDate) { log(change) }
+                    updateMetrics()
+                }
             case "2A53":
                 if dataSampler.sample() { log("Running Speed and Cadence : \(GATTText.hex(b))") }
                 let d = try BLEProtocol.runningSpeed(b)
@@ -604,20 +627,19 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
                 }
                 if b.first == 4 {
                     log("Reprise sur la console.")
-                    if controlled { gradeResistance.reset(); applyGameGrade(terrain) }
+                    if controlled || retakeControl { gradeResistance.reset(); applyGameGrade(terrain) }
                     break
                 }
                 // Contrôle perdu (0xFF) ou machine remise à zéro (0x01, le contrôle est rendu).
+                // On garde la connexion : les réponses tardives sont associées à leur opcode. Le contrôle sera repris
+                // une fois, à la prochaine consigne du jeu ou à la reprise sur la console.
                 if b.first == 0xff || b.first == 1 {
+                    let wasControlled = controlled
                     controlled = false
-                    if let pending = queue.pending, pending.first != 8 {
-                        // End this GATT session so a delayed response cannot acknowledge a new request.
-                        disconnect(peripheral.identifier)
-                        controlStatus = "Contrôle perdu pendant une commande. Reconnecte le trainer."
-                    } else if queue.pending == nil {
-                        queue.clear(); commandTimer?.invalidate()
-                        controlStatus = "Trainer arrêté ou contrôle perdu. Reprends le contrôle manuellement."
-                    }
+                    queue.clear(); commandTimer?.invalidate()
+                    retakeControl = wasControlled && !readOnly
+                    controlStatus = b.first == 0xff ? "Contrôle perdu (la console ou une autre appli a pris la main)." : "Machine remise à zéro : contrôle rendu."
+                    log(controlStatus + (retakeControl ? " Il sera repris à la prochaine consigne." : ""))
                 }
             default:
                 // Caractéristique hors standard (service propriétaire, capteur de vitesse et cadence…) :
@@ -717,6 +739,12 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
     /// un elliptique ou un rameur (même calcul que setResistanceForGrade côté web).
     func applyGameGrade(_ grade: Double) {
         terrain = grade
+        if retakeControl, !controlled, controlReady, !readOnly, queue.pending == nil {
+            retakeControl = false
+            log("Reprise du contrôle de la machine.")
+            takeControl() // la consigne est appliquée dès que le contrôle est accordé (finishCommand)
+            return
+        }
         switch gradeControl {
         case .simulation: applySimulation()
         case .resistance: applyGradeResistance()
@@ -773,7 +801,11 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         log("FTMS → \(GATTText.hex(bytes))")
         c.peripheral.writeValue(Data(bytes), for: cp, type: .withResponse)
         commandTimer?.invalidate()
-        commandTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: false) { [weak self] _ in
+        // Demande de contrôle : jusqu'à 30 s, le temps d'accepter sur l'écran de la machine (Technogym Skillbike :
+        // « … essaie de se connecter, accepter ? OUI / NON »). Les mesures continuent pendant l'attente.
+        let wait: TimeInterval = bytes.first == 0 ? 30 : 5
+        if bytes.first == 0 { controlStatus = "Demande de contrôle : si la console affiche « accepter ? », touche OUI." }
+        commandTimer = Timer.scheduledTimer(withTimeInterval: wait, repeats: false) { [weak self] _ in
             guard let self else { return }
             if let op = self.queue.pending?.first, op == 0 || op == 7 {
                 // Certaines machines (Technogym notamment) ignorent la demande de contrôle : on reste en lecture seule.
@@ -790,21 +822,32 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
                 self.pump()
                 return
             }
-            self.log("Délai FTMS dépassé. Déconnexion pour éviter une réponse tardive attribuée à une autre commande.")
-            self.disconnect(id)
-            self.controlStatus = "Trainer sans réponse. Reconnecte-le."
+            // Les réponses sont associées à leur opcode : une réponse tardive ne peut pas valider une autre commande.
+            // On garde la connexion (les mesures continuent) et on cesse de piloter.
+            self.controlFault("Délai FTMS dépassé : la machine ne répond plus aux consignes. Lecture seule, les mesures continuent.")
         }
     }
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
         if let error {
             log("Écriture \(GATTText.name(characteristic.uuid.uuidString)) : \(error.localizedDescription)")
-            if (characteristic.uuid == UUIDs.controlPoint && peripheral.identifier == trainerID) || characteristic.uuid == UUIDs.rx { disconnect(peripheral.identifier) }
+            if characteristic.uuid == UUIDs.controlPoint && peripheral.identifier == trainerID {
+                // Écriture refusée (prise de contrôle, démarrage ou consigne) : lecture seule, sans déconnexion.
+                controlFault("Commande refusée par la machine (\(error.localizedDescription)) : lecture seule, les mesures continuent.")
+            } else if characteristic.uuid == UUIDs.rx { disconnect(peripheral.identifier) }
             return
         }
         if characteristic.uuid == UUIDs.rx, let c = connections[peripheral.identifier] {
             c.writeTimer?.invalidate(); c.writes.didWrite(); pumpZwift(c)
         }
         if characteristic.uuid == UUIDs.controlPoint, peripheral.identifier == trainerID { queue.didWrite(); finishCommand() }
+    }
+    /// Problème de pilotage (délai, écriture refusée) : on arrête de piloter cette machine jusqu'à la reconnexion,
+    /// sans la déconnecter (une déconnexion volontaire empêchait aussi la reconnexion automatique).
+    private func controlFault(_ message: String) {
+        queue.clear(); commandTimer?.invalidate()
+        controlled = false; readOnly = true; retakeControl = false
+        controlStatus = message
+        log(message)
     }
     private func finishCommand() {
         guard let response = queue.completed() else { return }
@@ -817,7 +860,7 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         if pilotRunning && [0x04, 0x11].contains(response.opcode) { pilotResults.append(response.result) }
         let names: [UInt8: String] = [2: "opération non prise en charge", 3: "paramètre invalide", 4: "échec de la machine", 5: "contrôle refusé"]
         if response.result == 1 {
-            if response.opcode == 0 { controlled = true; gradeResistance.reset() }
+            if response.opcode == 0 { controlled = true; gradeResistance.reset(); retakeControl = false }
             if response.opcode == 0x11 { mode = "Simulation" }
             if response.opcode == 5 { mode = "ERG" }
             if response.opcode == 4 { mode = "Résistance" }
@@ -833,10 +876,14 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         } else {
             let titles: [UInt8: String] = [2: "Opération non prise en charge", 3: "Paramètre invalide", 4: "Échec du trainer", 5: "Contrôle refusé"]
             controlStatus = titles[response.result] ?? "Erreur FTMS \(response.result)"
-            if response.result == 5 { controlled = false }
+            if response.result == 5 { controlled = false; retakeControl = true }
             queue.clear()
         }
-        log(controlStatus); pump()
+        log(controlStatus)
+        // Contrôle accordé : la consigne en cours du jeu part tout de suite (celles d'avant ont été ignorées et le
+        // jeu ne renvoie la pente que quand elle change). Elle passe après « démarrage », déjà en file.
+        if response.result == 1, response.opcode == 0, !pilotRunning { applyGameGrade(terrain) }
+        pump()
     }
 
     // MARK: Test du pilotage
@@ -1025,7 +1072,7 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
         simulationSupported = false; ergSupported = false; resistanceSupported = false
         feed = TrainerFeed(); dataSampler = PacketSampler(first: 5, every: 200); partialSampler = PacketSampler(first: 3, every: 200)
         machineKind = nil; detectedKind = nil; kindOverride = nil; trainerServices = []; trainerPackets = 0; trainerLastPacket = nil
-        otherSamplers = [:]; subscribedAt = nil; noDataWarned = false; autoStartSent = false; effortSeen = false; trainerBadPackets = 0; trainerOtherPackets = 0
+        otherSamplers = [:]; subscribedAt = nil; noDataWarned = false; autoStartSent = false; effortSeen = false; retakeControl = false; trainerBadPackets = 0; trainerOtherPackets = 0
         gradeResistance.reset(); encoder = ResistanceEncoder(); lastSent = nil; lastResistanceLevel = nil
         if pilotRunning { pilotTimer?.invalidate(); pilotRunning = false; pilotStatus = BluetoothStore.pilotIdle }
         if heartID == nil { heart = nil; heartContact = nil }
@@ -1083,8 +1130,8 @@ final class BluetoothStore: NSObject, ObservableObject, CBCentralManagerDelegate
                 var why = ""
                 if trainerBadPackets > 0 { why += " \(trainerBadPackets) paquets FTMS reçus dans un format inattendu (voir « ignoré » plus haut)." }
                 if trainerOtherPackets > 0 { why += " \(trainerOtherPackets) paquets reçus sur un service propriétaire, rien en FTMS." }
-                log("Connecté mais aucune donnée d'effort depuis 8 s.\(why) Sur une machine Technogym, démarre une séance sur la console (Start, Quick Start ou Entraînement libre) puis pédale ou marche : certaines consoles n'envoient leurs mesures que pendant un exercice. Si rien n'arrive, partage ce journal.")
-                controlStatus = "Aucune donnée : démarre une séance sur la console de la machine."
+                log("Connecté mais aucune donnée d'effort depuis 8 s.\(why) Sur une machine Technogym : regarde l'écran, il demande peut-être d'accepter la connexion (OUI / Agree) ou de te connecter (mywellness) ; sinon démarre une séance sur la console (Start, Quick Start ou Entraînement libre) puis pédale ou marche. Ferme les autres applis (mywellness, Technogym, montre GymKit) : la machine n'accepte souvent qu'une connexion. Si rien n'arrive, partage ce journal.")
+                controlStatus = "Aucune donnée : regarde l'écran de la machine (accepter la connexion ?) ou démarre une séance."
             }
             if let lastHeart, now.timeIntervalSince(lastHeart) > 5, heart != nil { heart = nil; heartContact = nil; changed = true }
             if changed { updateMetrics() }

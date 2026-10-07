@@ -30,17 +30,20 @@ enum GymIdentify {
     /// Données d'effort dans un paquet d'une caractéristique de données (Indoor Bike, Rower, Cross Trainer,
     /// Treadmill Data, Cycling Power). nil : caractéristique sans intérêt ou paquet illisible.
     static func moving(characteristic id: String, bytes: [UInt8]) -> Bool? {
-        switch id.uppercased() {
-        case "2AD2": return (try? BLEProtocol.indoorBike(bytes)).map(moving)
-        case "2AD1": return (try? BLEProtocol.rower(bytes)).map(moving)
-        case "2ACE": return (try? BLEProtocol.crossTrainer(bytes)).map(moving)
-        case "2ACD": return (try? BLEProtocol.treadmill(bytes)).map(moving)
+        let uuid = id.uppercased()
+        switch uuid {
+        case "2AD2": return (try? BLEProtocol.indoorBike(bytes)).map(moving) ?? FTMSDebug.partial(uuid, bytes).map { moving($0.reading) }
+        case "2AD1": return (try? BLEProtocol.rower(bytes)).map(moving) ?? FTMSDebug.partial(uuid, bytes).map { moving($0.reading) }
+        case "2ACE": return (try? BLEProtocol.crossTrainer(bytes)).map(moving) ?? FTMSDebug.partial(uuid, bytes).map { moving($0.reading) }
+        case "2ACD": return (try? BLEProtocol.treadmill(bytes)).map(moving) ?? FTMSDebug.partial(uuid, bytes).map { moving($0.reading) }
         case "2A63": return (try? BLEProtocol.cyclingPower(bytes)).map { $0.power > 0 }
+        // Tapis Technogym Run : données seulement en capteur de course (RSC).
+        case "2A53": return (try? BLEProtocol.runningSpeed(bytes)).map { $0.speed > 0.5 }
         default: return nil
         }
     }
 
-    static let dataCharacteristics: Set<String> = ["2AD2", "2AD1", "2ACE", "2ACD", "2A63"]
+    static let dataCharacteristics: Set<String> = ["2AD2", "2AD1", "2ACE", "2ACD", "2A63", "2A53"]
 }
 
 /// Identification par le mouvement : une période calme (le joueur ne bouge pas), puis le signal « vas-y ».

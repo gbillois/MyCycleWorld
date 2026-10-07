@@ -156,6 +156,29 @@ final class MachineTests: XCTestCase {
         XCTAssertEqual(feed.sources["power"], "FTMS")
     }
 
+    func testCadenceSensorFillsCadenceWhenTheMachineGivesNone() {
+        var feed = TrainerFeed()
+        feed.cyclingPower(power: 180, revs: nil, time: nil, now: 0)
+        feed.cadenceSensor(revs: 10, time: 0, now: 0)
+        feed.cadenceSensor(revs: 11, time: 683, now: 1)
+        XCTAssertEqual(feed.data.cadence, 90)
+        XCTAssertEqual(feed.sources["cadence"], "CSC")
+        XCTAssertEqual(feed.packets, 1, "le capteur de cadence n'est pas un paquet de données de la machine")
+    }
+
+    func testBikeWithOnlyAveragesUsesThemUntilInstantValuesArrive() throws {
+        // Drapeaux : More Data (pas de vitesse inst.), vitesse moy. (bit 1), cadence moy. (bit 3), puissance moy. (bit 7).
+        let d = try BLEProtocol.indoorBike([0x8B, 0x00, 0x10, 0x0e, 0xa0, 0x00, 0x96, 0x00])
+        XCTAssertNil(d.speed); XCTAssertNil(d.power)
+        XCTAssertEqual(d.avgSpeed, 36); XCTAssertEqual(d.avgCadence, 80); XCTAssertEqual(d.avgPower, 150)
+        var feed = TrainerFeed()
+        feed.ftms(d, kind: .bike, now: 0)
+        XCTAssertEqual(feed.data.power, 150); XCTAssertEqual(feed.data.cadence, 80); XCTAssertEqual(feed.data.speed, 36)
+        feed.ftms(BikeReading(power: 0), kind: .bike, now: 1)
+        feed.ftms(d, kind: .bike, now: 2)
+        XCTAssertEqual(feed.data.power, 0, "la puissance instantanée est arrivée : la moyenne ne sert plus")
+    }
+
     func testFeedCrankCadenceIsRounded() {
         var feed = TrainerFeed()
         feed.cyclingPower(power: 200, revs: 10, time: 0, now: 0)
@@ -309,6 +332,26 @@ final class GATTTextTests: XCTestCase {
             counted.ftms(d, kind: .rower, now: t)
         }
         XCTAssertEqual(counted.data.strokeRate ?? 0, 26, accuracy: 1.5)
+    }
+
+    /// Rameur arrêté qui publie sa cadence moyenne de séance : la cadence retombe à 0, la course ne croit pas qu'on rame.
+    func testStoppedRowerDoesNotKeepItsAverageStrokeRate() {
+        var feed = TrainerFeed()
+        var d = BikeReading()
+        d.avgStrokeRate = 24
+        for (i, t) in [0.0, 2.3, 4.6].enumerated() {
+            d.strokeRate = 26; d.strokeCount = i; d.power = 160
+            feed.ftms(d, kind: .rower, now: t)
+        }
+        d.strokeRate = 0; d.power = 0
+        feed.ftms(d, kind: .rower, now: 14)
+        XCTAssertEqual(feed.data.strokeRate, 0)
+        XCTAssertFalse(GymIdentify.moving(feed.data))
+        var fresh = TrainerFeed()
+        var idle = BikeReading()
+        idle.strokeRate = 0; idle.avgStrokeRate = 24; idle.power = 0
+        fresh.ftms(idle, kind: .rower, now: 0)
+        XCTAssertEqual(fresh.data.strokeRate, 0, "à l'arrêt (puissance 0), la moyenne ne sert pas")
     }
 }
 

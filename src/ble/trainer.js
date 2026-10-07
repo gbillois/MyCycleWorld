@@ -452,9 +452,14 @@ export class Trainer extends EventTarget {
         }
       } else this.strokeMark = { count: d.strokeCount, time: now };
     }
-    if (d.strokeRate > 0) return d.strokeRate;
-    if (d.avgStrokeRate > 0) return d.avgStrokeRate;
+    if (d.strokeRate > 0) {
+      this.instantStrokeSeen = true;
+      return d.strokeRate;
+    }
+    // Compteur de coups d'abord : il retombe à 0 quand on s'arrête, la moyenne de séance jamais.
     if (this.derivedStrokeRate !== undefined) return this.derivedStrokeRate;
+    // Moyenne : seulement si le rameur ne donne jamais sa cadence instantanée, et pas à l'arrêt (puissance 0).
+    if (!this.instantStrokeSeen && d.avgStrokeRate > 0 && (d.power ?? 1) > 0) return d.avgStrokeRate;
     return d.strokeRate;
   }
 

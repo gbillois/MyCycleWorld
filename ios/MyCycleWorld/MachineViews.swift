@@ -96,7 +96,7 @@ struct ConnectionTestSection: View {
             let age = max(0, now.timeIntervalSince(last))
             rows.append(TestRow(label: "Données", value: "\(store.trainerPackets) paquets, dernier il y a \(MachineText.age(age))", tone: age < 3 ? .ok : .bad))
         } else {
-            var value = "aucune pour l’instant : démarre une séance sur la console (Start), puis pédale, marche ou tire la poignée"
+            var value = "aucune pour l’instant : regarde l’écran de la machine (accepter la connexion ? se connecter ?), sinon démarre une séance (Start), puis pédale, marche ou tire la poignée"
             if store.trainerBadPackets > 0 {
                 value = "\(store.trainerBadPackets) paquets reçus dans un format inattendu : partage la console Bluetooth"
             } else if store.trainerOtherPackets > 0 {
